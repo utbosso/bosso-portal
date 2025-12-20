@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const cheerio = require('cheerio')
+const { chromium } = require('playwright')
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -40,15 +41,11 @@ const SPORTS_KEYWORDS = (process.env.SPORTS_KEYWORDS || [
 
 const KEYWORD_REGEX = new RegExp(SPORTS_KEYWORDS, 'i')
 
-const DEFAULT_HEADERS = {
-  'user-agent':
-    'Mozilla/5.0 (compatible; BOSSO-OpportunitiesBot/1.0; +https://example.com)',
-}
-
 const SOURCES = [
   {
     name: 'TeamWork Online',
     url: 'https://www.teamworkonline.com/jobs',
+    mode: 'browser',
     selectors: {
       card: '.job-listing, .jobListing, .job-listing-item, .job-listing-card',
       title: '.job-title, .jobTitle, h3, h4',
@@ -60,6 +57,7 @@ const SOURCES = [
   {
     name: 'WorkInSports',
     url: 'https://www.workinsports.com/jobs',
+    mode: 'browser',
     selectors: {
       card: '.job-listing, .jobListing, .job-item, .job',
       title: '.job-title, h3, h4',
@@ -71,6 +69,7 @@ const SOURCES = [
   {
     name: 'JobsInSports',
     url: 'https://www.jobsinsports.com/job/search',
+    mode: 'skip',
     selectors: {
       card: '.job-listing, .jobListing, .job-item',
       title: '.job-title, h3, h4',
@@ -82,6 +81,7 @@ const SOURCES = [
   {
     name: 'GlobalSportsJobs',
     url: 'https://www.globalsportsjobs.com/jobs',
+    mode: 'browser',
     selectors: {
       card: '.job-listing, .jobListing, .job-card',
       title: '.job-title, h3, h4',
@@ -93,6 +93,7 @@ const SOURCES = [
   {
     name: 'CollegeSports.jobs',
     url: 'https://collegesports.jobs',
+    mode: 'browser',
     selectors: {
       card: '.job, .job-listing, .jobListing',
       title: '.job-title, h3, h4',
@@ -104,6 +105,7 @@ const SOURCES = [
   {
     name: 'USAJobs (Sports keyword)',
     url: 'https://www.usajobs.gov/search?wt=15317&k=sports',
+    mode: 'browser',
     selectors: {
       card: '.usajobs-search-result--core, .usajobs-search-result',
       title: '.usajobs-search-result__header a, h3 a',
@@ -115,6 +117,7 @@ const SOURCES = [
   {
     name: 'SportsJobs.Online',
     url: 'https://www.sportsjobs.online/jobs',
+    mode: 'skip',
     selectors: {
       card: '.job-listing, .jobListing, .job-item',
       title: '.job-title, h3, h4',
@@ -126,6 +129,7 @@ const SOURCES = [
   {
     name: 'SFMA Career Center',
     url: 'https://careercenter.sportsfacilities.com/jobs',
+    mode: 'browser',
     selectors: {
       card: '.job-listing, .jobListing, .job-card',
       title: '.job-title, h3, h4',
@@ -137,6 +141,7 @@ const SOURCES = [
   {
     name: 'Global Football Careers',
     url: 'https://www.globalfootballcareers.com/jobs',
+    mode: 'browser',
     selectors: {
       card: '.job-listing, .jobListing, .job-card',
       title: '.job-title, h3, h4',
@@ -185,10 +190,21 @@ const parseCards = (html, source) => {
   return cards
 }
 
-const fetchHtml = async (url) => {
-  const res = await fetch(url, { headers: DEFAULT_HEADERS })
+const fetchHtml = async (source, browser) => {
+  if (source.mode === 'skip') {
+    throw new Error('Source disabled (update URL or selectors)')
+  }
+  if (source.mode === 'browser') {
+    const page = await browser.newPage()
+    await page.goto(source.url, { waitUntil: 'networkidle', timeout: 60000 })
+    const content = await page.content()
+    await page.close()
+    return content
+  }
+
+  const res = await fetch(source.url)
   if (!res.ok) {
-    throw new Error(`Failed to fetch ${url}: ${res.status}`)
+    throw new Error(`Failed to fetch ${source.url}: ${res.status}`)
   }
   return res.text()
 }
@@ -220,29 +236,34 @@ const saveOpportunities = async (opportunities) => {
 
 const main = async () => {
   let totalInserted = 0
-  for (const source of SOURCES) {
-    try {
-      const html = await fetchHtml(source.url)
-      const rawCards = parseCards(html, source)
-      const items = rawCards
-        .map((card) => ({
-          title: card.title,
-          company: card.company || null,
-          location: card.location || null,
-          opportunity_type: inferType(card.title, ''),
-          link: card.link,
-          description: null,
-          source: source.name,
-          posted_by: null,
-        }))
-        .filter((item) => isSportsRelated(item.title, item.company, item.description))
+  const browser = await chromium.launch({ headless: true })
+  try {
+    for (const source of SOURCES) {
+      try {
+        const html = await fetchHtml(source, browser)
+        const rawCards = parseCards(html, source)
+        const items = rawCards
+          .map((card) => ({
+            title: card.title,
+            company: card.company || null,
+            location: card.location || null,
+            opportunity_type: inferType(card.title, ''),
+            link: card.link,
+            description: null,
+            source: source.name,
+            posted_by: null,
+          }))
+          .filter((item) => isSportsRelated(item.title, item.company, item.description))
 
-      const inserted = await saveOpportunities(items)
-      totalInserted += inserted
-      console.log(`${source.name}: ${inserted} new opportunities`)
-    } catch (error) {
-      console.error(`${source.name} failed:`, error.message)
+        const inserted = await saveOpportunities(items)
+        totalInserted += inserted
+        console.log(`${source.name}: ${inserted} new opportunities`)
+      } catch (error) {
+        console.error(`${source.name} failed:`, error.message)
+      }
     }
+  } finally {
+    await browser.close()
   }
 
   console.log(`Total inserted: ${totalInserted}`)
