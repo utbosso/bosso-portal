@@ -1,6 +1,5 @@
 require('dotenv').config()
 const { createClient } = require('@supabase/supabase-js')
-const cheerio = require('cheerio')
 const { chromium } = require('playwright')
 
 const SUPABASE_URL = process.env.SUPABASE_URL
@@ -15,224 +14,209 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 })
 
-const SPORTS_KEYWORDS = (process.env.SPORTS_KEYWORDS || [
-  'sports',
-  'athletic',
-  'athletics',
-  'basketball',
-  'football',
-  'soccer',
-  'baseball',
-  'hockey',
-  'golf',
-  'tennis',
-  'esports',
-  'stadium',
-  'arena',
-  'league',
-  'team',
-  'ncaa',
-  'mlb',
-  'nba',
-  'nfl',
-  'nhl',
-  'mls',
-  'wnba',
-]).join('|')
-
-const KEYWORD_REGEX = new RegExp(SPORTS_KEYWORDS, 'i')
-
+// Focused on entry-level and internships only
 const SOURCES = [
   {
-    name: 'LinkedIn Jobs (Sports)',
-    url: 'https://www.linkedin.com/jobs/search?keywords=sports&location=United%20States',
-    mode: 'browser',
-    waitForSelector: '.job-search-card, .jobs-search__results-list li',
-    timeout: 90000,
-    selectors: {
-      card: '.job-search-card, .base-card, .jobs-search__results-list li',
-      title: 'h3.base-search-card__title, .base-search-card__title',
-      company: 'h4.base-search-card__subtitle, .base-search-card__subtitle',
-      location: '.job-search-card__location, .job-search-card__location-text',
-      link: 'a.base-card__full-link',
-    },
+    name: 'TeamWork Online - Internships',
+    url: 'https://www.teamworkonline.com/sports-jobs/internships',
+    type: 'playwright',
   },
   {
-    name: 'ZipRecruiter Sports Jobs',
-    url: 'https://www.ziprecruiter.com/jobs-search?search=sports&location=',
-    mode: 'browser',
-    waitForSelector: 'article.job_result, .job-listing',
-    timeout: 60000,
-    selectors: {
-      card: 'article.job_result, article',
-      title: 'h2 a, .job_title a',
-      company: '.hiring_company_text, .company',
-      location: '.location, .job_location',
-      link: 'h2 a',
-    },
+    name: 'WorkInSports - Entry Level',
+    url: 'https://www.workinsports.com/sports-jobs/level/entry-level',
+    type: 'playwright',
   },
   {
-    name: 'Glassdoor Sports Jobs',
-    url: 'https://www.glassdoor.com/Job/sports-jobs-SRCH_KO0,6.htm',
-    mode: 'browser',
-    waitForSelector: 'li[data-test="jobListing"], .react-job-listing',
-    timeout: 60000,
-    selectors: {
-      card: 'li[data-test="jobListing"], .react-job-listing',
-      title: '[data-test="job-title"], .job-title',
-      company: '[data-test="employer-name"], .employer-name',
-      location: '[data-test="emp-location"], .location',
-      link: 'a[data-test="job-link"]',
-    },
+    name: 'WorkInSports - Internships',
+    url: 'https://www.workinsports.com/sports-jobs/level/internships',
+    type: 'playwright',
+  },
+  {
+    name: 'NCAA Market - Internships',
+    url: 'https://ncaamarket.ncaa.org/jobs?keywords=intern',
+    type: 'playwright',
   },
 ]
 
-const sanitize = (value) => (value || '').replace(/\s+/g, ' ').trim()
+const sanitize = (text) => (text || '').replace(/\s+/g, ' ').trim()
 
-const absoluteUrl = (base, href) => {
+const scrapeWithPlaywright = async (url, browser) => {
+  const page = await browser.newPage()
+  const opportunities = []
+
   try {
-    return new URL(href, base).toString()
-  } catch {
-    return null
-  }
-}
+    console.log(`  Navigating to ${url}...`)
 
-const inferType = (title, description) => {
-  const text = `${title} ${description}`.toLowerCase()
-  if (text.includes('intern')) return 'internship'
-  if (text.includes('entry')) return 'entry_level'
-  return 'entry_level'
-}
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000
+    })
 
-const isSportsRelated = (title, company, description) => {
-  const text = `${title} ${company} ${description}`.toLowerCase()
-  return KEYWORD_REGEX.test(text)
-}
+    // Wait for page to be somewhat loaded
+    await page.waitForTimeout(3000)
 
-const parseCards = (html, source) => {
-  const $ = cheerio.load(html)
-  const cards = []
-  const cardElements = $(source.selectors.card)
-
-  if (process.env.DEBUG) {
-    console.log(`  Found ${cardElements.length} card elements using selector: ${source.selectors.card}`)
-  }
-
-  cardElements.each((_, el) => {
-    const title = sanitize($(el).find(source.selectors.title).first().text())
-    const company = sanitize($(el).find(source.selectors.company).first().text())
-    const location = sanitize($(el).find(source.selectors.location).first().text())
-    const linkEl = $(el).find(source.selectors.link).first()
-    const href = linkEl.attr('href')
-    const link = href ? absoluteUrl(source.url, href) : null
-    if (!title || !link) return
-    cards.push({ title, company, location, link })
-  })
-
-  if (process.env.DEBUG && cards.length > 0) {
-    console.log(`  Sample card:`, cards[0])
-  }
-
-  return cards
-}
-
-const fetchHtml = async (source, browser) => {
-  if (source.mode === 'skip') {
-    throw new Error('Source disabled (update URL or selectors)')
-  }
-  if (source.mode === 'browser') {
-    const page = await browser.newPage()
-    const timeout = source.timeout || 60000
-
-    try {
-      await page.goto(source.url, { waitUntil: 'networkidle', timeout })
-
-      // Wait for specific selector if provided
-      if (source.waitForSelector) {
-        try {
-          await page.waitForSelector(source.waitForSelector, { timeout: 10000 })
-        } catch (e) {
-          console.log(`  Warning: waitForSelector "${source.waitForSelector}" not found, continuing anyway`)
-        }
-      }
-
-      // Give JS time to render
-      await page.waitForTimeout(2000)
-
-      const content = await page.content()
-      await page.close()
-      return content
-    } catch (error) {
-      await page.close()
-      throw error
+    // Take a screenshot for debugging (optional)
+    if (process.env.DEBUG) {
+      await page.screenshot({ path: `debug-${Date.now()}.png` })
     }
+
+    // Extract all links that look like job postings
+    const jobLinks = await page.evaluate(() => {
+      const links = []
+      const anchors = document.querySelectorAll('a[href]')
+
+      anchors.forEach(a => {
+        const href = a.href
+        const text = a.textContent.trim()
+
+        // Look for job-related URLs
+        if (href.includes('/jobs/') ||
+            href.includes('/job/') ||
+            href.includes('/careers/') ||
+            href.includes('job-detail') ||
+            href.includes('posting')) {
+
+          // Get context (title might be in parent elements)
+          let title = text
+          let company = ''
+          let location = ''
+
+          // Try to find title/company/location in nearby elements
+          const parent = a.closest('article, li, div[class*="job"], div[class*="posting"]')
+          if (parent) {
+            const titleEl = parent.querySelector('h2, h3, h4, [class*="title"], [class*="job-title"]')
+            const companyEl = parent.querySelector('[class*="company"], [class*="organization"]')
+            const locationEl = parent.querySelector('[class*="location"]')
+
+            if (titleEl) title = titleEl.textContent.trim()
+            if (companyEl) company = companyEl.textContent.trim()
+            if (locationEl) location = locationEl.textContent.trim()
+          }
+
+          if (title && title.length > 5 && title.length < 200) {
+            links.push({
+              title,
+              company,
+              location,
+              link: href
+            })
+          }
+        }
+      })
+
+      return links
+    })
+
+    console.log(`  Found ${jobLinks.length} potential job links`)
+
+    if (process.env.DEBUG && jobLinks.length > 0) {
+      console.log(`  Sample jobs:`, jobLinks.slice(0, 3))
+    }
+
+    // Deduplicate by URL
+    const uniqueJobs = []
+    const seenUrls = new Set()
+
+    for (const job of jobLinks) {
+      if (!seenUrls.has(job.link)) {
+        seenUrls.add(job.link)
+        uniqueJobs.push(job)
+      }
+    }
+
+    console.log(`  ${uniqueJobs.length} unique opportunities after deduplication`)
+
+    if (uniqueJobs.length > 0 && process.env.DEBUG) {
+      console.log(`  First unique job:`, uniqueJobs[0])
+    }
+
+    opportunities.push(...uniqueJobs)
+
+  } catch (error) {
+    console.error(`  Error: ${error.message}`)
+  } finally {
+    await page.close()
   }
 
-  const res = await fetch(source.url)
-  if (!res.ok) {
-    throw new Error(`Failed to fetch ${source.url}: ${res.status}`)
-  }
-  return res.text()
+  return opportunities
 }
 
-const loadExistingLinks = async (links) => {
-  if (!links.length) return new Set()
-  const { data, error } = await supabase
+const inferType = (title) => {
+  const lower = title.toLowerCase()
+  // Match the enum values from your database
+  if (lower.includes('intern')) return 'internship'
+  return 'internship' // Default to internship for this scraper
+}
+
+const saveOpportunities = async (opportunities, sourceName) => {
+  if (!opportunities.length) return 0
+
+  const links = opportunities.map(o => o.link).filter(Boolean)
+
+  // Check which ones already exist
+  const { data: existing } = await supabase
     .from('opportunities')
     .select('link')
     .in('link', links)
-  if (error) throw error
-  return new Set((data ?? []).map((row) => row.link))
-}
 
-const saveOpportunities = async (opportunities) => {
-  if (!opportunities.length) return 0
-  const links = opportunities.map((item) => item.link).filter(Boolean)
-  const existing = await loadExistingLinks(links)
-  const newRows = opportunities.filter((item) => item.link && !existing.has(item.link))
+  const existingLinks = new Set((existing || []).map(row => row.link))
 
-  if (!newRows.length) return 0
+  // Filter out existing ones
+  const newOpportunities = opportunities
+    .filter(o => o.link && !existingLinks.has(o.link))
+    .map(o => ({
+      title: sanitize(o.title),
+      company: sanitize(o.company) || 'Unknown',
+      location: sanitize(o.location) || 'Not specified',
+      opportunity_type: inferType(o.title),
+      link: o.link,
+      description: null,
+      source: sourceName,
+      posted_by: null, // Will be null for scraper-added opportunities
+    }))
+
+  if (!newOpportunities.length) return 0
 
   const { error } = await supabase
     .from('opportunities')
-    .insert(newRows)
-  if (error) throw error
-  return newRows.length
+    .insert(newOpportunities)
+
+  if (error) {
+    console.error(`  Error inserting: ${error.message}`)
+    return 0
+  }
+
+  return newOpportunities.length
 }
 
 const main = async () => {
   let totalInserted = 0
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--disable-blink-features=AutomationControlled']
+  })
+
   try {
     for (const source of SOURCES) {
-      try {
-        const html = await fetchHtml(source, browser)
-        const rawCards = parseCards(html, source)
-        const items = rawCards
-          .map((card) => ({
-            title: card.title,
-            company: card.company || null,
-            location: card.location || null,
-            opportunity_type: inferType(card.title, ''),
-            link: card.link,
-            description: null,
-            source: source.name,
-            posted_by: null,
-          }))
-          .filter((item) => isSportsRelated(item.title, item.company, item.description))
+      console.log(`\n=== ${source.name} ===`)
 
-        const inserted = await saveOpportunities(items)
+      try {
+        const opportunities = await scrapeWithPlaywright(source.url, browser)
+        const inserted = await saveOpportunities(opportunities, source.name)
+
         totalInserted += inserted
-        console.log(`${source.name}: ${inserted} new opportunities`)
+        console.log(`  ✓ Inserted ${inserted} new opportunities`)
       } catch (error) {
-        console.error(`${source.name} failed:`, error.message)
+        console.error(`  ✗ Failed: ${error.message}`)
       }
     }
   } finally {
     await browser.close()
   }
 
-  console.log(`Total inserted: ${totalInserted}`)
+  console.log(`\n========================================`)
+  console.log(`Total new opportunities inserted: ${totalInserted}`)
+  console.log(`========================================\n`)
 }
 
 main().catch((error) => {
