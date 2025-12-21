@@ -1,3 +1,4 @@
+require('dotenv').config()
 const { createClient } = require('@supabase/supabase-js')
 const cheerio = require('cheerio')
 const { chromium } = require('playwright')
@@ -43,111 +44,45 @@ const KEYWORD_REGEX = new RegExp(SPORTS_KEYWORDS, 'i')
 
 const SOURCES = [
   {
-    name: 'TeamWork Online',
-    url: 'https://www.teamworkonline.com/jobs',
+    name: 'LinkedIn Jobs (Sports)',
+    url: 'https://www.linkedin.com/jobs/search?keywords=sports&location=United%20States',
     mode: 'browser',
+    waitForSelector: '.job-search-card, .jobs-search__results-list li',
+    timeout: 90000,
     selectors: {
-      card: '.job-listing, .jobListing, .job-listing-item, .job-listing-card',
-      title: '.job-title, .jobTitle, h3, h4',
-      company: '.company, .job-company, .company-name',
-      location: '.location, .job-location',
-      link: 'a',
+      card: '.job-search-card, .base-card, .jobs-search__results-list li',
+      title: 'h3.base-search-card__title, .base-search-card__title',
+      company: 'h4.base-search-card__subtitle, .base-search-card__subtitle',
+      location: '.job-search-card__location, .job-search-card__location-text',
+      link: 'a.base-card__full-link',
     },
   },
   {
-    name: 'WorkInSports',
-    url: 'https://www.workinsports.com/jobs',
+    name: 'ZipRecruiter Sports Jobs',
+    url: 'https://www.ziprecruiter.com/jobs-search?search=sports&location=',
     mode: 'browser',
+    waitForSelector: 'article.job_result, .job-listing',
+    timeout: 60000,
     selectors: {
-      card: '.job-listing, .jobListing, .job-item, .job',
-      title: '.job-title, h3, h4',
-      company: '.job-company, .company',
-      location: '.job-location, .location',
-      link: 'a',
+      card: 'article.job_result, article',
+      title: 'h2 a, .job_title a',
+      company: '.hiring_company_text, .company',
+      location: '.location, .job_location',
+      link: 'h2 a',
     },
   },
   {
-    name: 'JobsInSports',
-    url: 'https://www.jobsinsports.com/job/search',
-    mode: 'skip',
-    selectors: {
-      card: '.job-listing, .jobListing, .job-item',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'GlobalSportsJobs',
-    url: 'https://www.globalsportsjobs.com/jobs',
+    name: 'Glassdoor Sports Jobs',
+    url: 'https://www.glassdoor.com/Job/sports-jobs-SRCH_KO0,6.htm',
     mode: 'browser',
+    waitForSelector: 'li[data-test="jobListing"], .react-job-listing',
+    timeout: 60000,
     selectors: {
-      card: '.job-listing, .jobListing, .job-card',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'CollegeSports.jobs',
-    url: 'https://collegesports.jobs',
-    mode: 'browser',
-    selectors: {
-      card: '.job, .job-listing, .jobListing',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'USAJobs (Sports keyword)',
-    url: 'https://www.usajobs.gov/search?wt=15317&k=sports',
-    mode: 'browser',
-    selectors: {
-      card: '.usajobs-search-result--core, .usajobs-search-result',
-      title: '.usajobs-search-result__header a, h3 a',
-      company: '.usajobs-search-result__agency',
-      location: '.usajobs-search-result__location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'SportsJobs.Online',
-    url: 'https://www.sportsjobs.online/jobs',
-    mode: 'skip',
-    selectors: {
-      card: '.job-listing, .jobListing, .job-item',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'SFMA Career Center',
-    url: 'https://careercenter.sportsfacilities.com/jobs',
-    mode: 'browser',
-    selectors: {
-      card: '.job-listing, .jobListing, .job-card',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
-    },
-  },
-  {
-    name: 'Global Football Careers',
-    url: 'https://www.globalfootballcareers.com/jobs',
-    mode: 'browser',
-    selectors: {
-      card: '.job-listing, .jobListing, .job-card',
-      title: '.job-title, h3, h4',
-      company: '.company, .job-company',
-      location: '.location, .job-location',
-      link: 'a',
+      card: 'li[data-test="jobListing"], .react-job-listing',
+      title: '[data-test="job-title"], .job-title',
+      company: '[data-test="employer-name"], .employer-name',
+      location: '[data-test="emp-location"], .location',
+      link: 'a[data-test="job-link"]',
     },
   },
 ]
@@ -177,7 +112,13 @@ const isSportsRelated = (title, company, description) => {
 const parseCards = (html, source) => {
   const $ = cheerio.load(html)
   const cards = []
-  $(source.selectors.card).each((_, el) => {
+  const cardElements = $(source.selectors.card)
+
+  if (process.env.DEBUG) {
+    console.log(`  Found ${cardElements.length} card elements using selector: ${source.selectors.card}`)
+  }
+
+  cardElements.each((_, el) => {
     const title = sanitize($(el).find(source.selectors.title).first().text())
     const company = sanitize($(el).find(source.selectors.company).first().text())
     const location = sanitize($(el).find(source.selectors.location).first().text())
@@ -187,6 +128,11 @@ const parseCards = (html, source) => {
     if (!title || !link) return
     cards.push({ title, company, location, link })
   })
+
+  if (process.env.DEBUG && cards.length > 0) {
+    console.log(`  Sample card:`, cards[0])
+  }
+
   return cards
 }
 
@@ -196,10 +142,30 @@ const fetchHtml = async (source, browser) => {
   }
   if (source.mode === 'browser') {
     const page = await browser.newPage()
-    await page.goto(source.url, { waitUntil: 'networkidle', timeout: 60000 })
-    const content = await page.content()
-    await page.close()
-    return content
+    const timeout = source.timeout || 60000
+
+    try {
+      await page.goto(source.url, { waitUntil: 'networkidle', timeout })
+
+      // Wait for specific selector if provided
+      if (source.waitForSelector) {
+        try {
+          await page.waitForSelector(source.waitForSelector, { timeout: 10000 })
+        } catch (e) {
+          console.log(`  Warning: waitForSelector "${source.waitForSelector}" not found, continuing anyway`)
+        }
+      }
+
+      // Give JS time to render
+      await page.waitForTimeout(2000)
+
+      const content = await page.content()
+      await page.close()
+      return content
+    } catch (error) {
+      await page.close()
+      throw error
+    }
   }
 
   const res = await fetch(source.url)
