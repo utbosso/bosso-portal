@@ -238,6 +238,45 @@ export type Database = {
           },
         ]
       }
+      learning_resources: {
+        Row: LearningResource
+        Insert: Omit<LearningResource, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<LearningResource>
+        Relationships: [
+          {
+            foreignKeyName: 'learning_resources_created_by_fkey'
+            columns: ['created_by']
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      networking_contacts: {
+        Row: NetworkingContact
+        Insert: Omit<NetworkingContact, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<NetworkingContact>
+        Relationships: [
+          {
+            foreignKeyName: 'networking_contacts_added_by_fkey'
+            columns: ['added_by']
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      feedback_submissions: {
+        Row: FeedbackSubmission
+        Insert: Omit<FeedbackSubmission, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<FeedbackSubmission>
+        Relationships: [
+          {
+            foreignKeyName: 'feedback_submissions_submitted_by_fkey'
+            columns: ['submitted_by']
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: Record<string, never>
     Functions: Record<string, never>
@@ -385,4 +424,61 @@ export interface ApplicationDocument {
   file_name: string
   uploaded_by: string
   uploaded_at?: string
+}
+
+export type ResourceType = 'article' | 'video' | 'course' | 'tool' | 'guide' | 'template' | 'other'
+export type ResourceCategory = 'sports_business' | 'analytics' | 'consulting' | 'marketing' | 'finance' | 'career_development' | 'technical_skills' | 'other'
+
+export interface LearningResource {
+  id: string
+  title: string
+  description: string | null
+  category: ResourceCategory
+  type: ResourceType
+  url: string | null
+  tags: string[]
+  role_scope: UserRole | null
+  created_by: string
+  created_at?: string
+  contributor?: Pick<Profile, 'id' | 'full_name' | 'email'> | null
+}
+
+export type ContactRelationship = 'alumni' | 'industry_professional' | 'recruiter' | 'mentor' | 'other'
+export type IndustryType = 'sports_team' | 'league' | 'agency' | 'consulting' | 'analytics' | 'media' | 'tech' | 'finance' | 'marketing' | 'other'
+
+export interface NetworkingContact {
+  id: string
+  name: string
+  title: string | null
+  company: string | null
+  industry: IndustryType | null
+  relationship: ContactRelationship
+  email: string | null
+  linkedin_url: string | null
+  phone: string | null
+  location: string | null
+  notes: string | null
+  best_for: string[]
+  has_consent: boolean
+  added_by: string
+  created_at?: string
+  contributor?: Pick<Profile, 'id' | 'full_name' | 'email'> | null
+}
+
+export type FeedbackCategory = 'event' | 'portal' | 'general' | 'suggestion' | 'other'
+export type FeedbackStatus = 'new' | 'reviewed' | 'in_progress' | 'resolved' | 'archived'
+
+export interface FeedbackSubmission {
+  id: string
+  category: FeedbackCategory
+  event_name: string | null
+  subject: string
+  feedback: string
+  rating: number | null
+  is_anonymous: boolean
+  submitted_by: string | null
+  status: FeedbackStatus
+  admin_notes: string | null
+  created_at?: string
+  submitter?: Pick<Profile, 'id' | 'full_name' | 'email'> | null
 }

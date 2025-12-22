@@ -155,10 +155,19 @@
     @apply bg-primary/20 text-primary border border-primary/30;
   }
   
-  /* Input focus effect */
+  /* Input styling */
+  .input-neon {
+    @apply bg-dark-300 border border-dark-100 rounded-lg px-3 py-2 text-foreground;
+    @apply transition-all duration-200;
+  }
+
   .input-neon:focus {
     @apply outline-none border-primary;
     box-shadow: 0 0 15px rgba(245, 125, 31, 0.3);
+  }
+
+  .input-neon::placeholder {
+    @apply text-muted-foreground;
   }
 }
 

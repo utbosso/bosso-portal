@@ -84,7 +84,7 @@ export default function OpportunitiesPage() {
             Opportunities
           </h1>
           <p className="text-muted-foreground text-sm">
-            Curated sports business internships and entry-level roles scraped from trusted sources.
+            Curated sports business internships and entry-level roles shared by the community.
           </p>
         </div>
       </div>
@@ -182,4 +182,3 @@ export default function OpportunitiesPage() {
     </div>
   )
 }
-
