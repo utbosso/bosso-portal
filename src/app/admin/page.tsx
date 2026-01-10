@@ -649,7 +649,7 @@ BOSSO@UTAustin`)
 
   const filteredUsers = users.filter(user => {
     if (filter === 'all') return true
-    if (filter === 'pending') return user.account_status === 'pending_approval' || user.account_status === 'pending'
+    if (filter === 'pending') return user.account_status === 'pending_approval'
     if (filter === 'active') return user.account_status === 'approved' || user.account_status === 'active' || user.account_status === null
     if (filter === 'rejected') return user.account_status === 'rejected'
     return true
@@ -688,9 +688,9 @@ BOSSO@UTAustin`)
             }`}
           >
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            {tab === 'pending' && users.filter(u => u.account_status === 'pending_approval' || u.account_status === 'pending').length > 0 && (
+            {tab === 'pending' && users.filter(u => u.account_status === 'pending_approval').length > 0 && (
               <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
-                {users.filter(u => u.account_status === 'pending_approval' || u.account_status === 'pending').length}
+                {users.filter(u => u.account_status === 'pending_approval').length}
               </span>
             )}
           </button>

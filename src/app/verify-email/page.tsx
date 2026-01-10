@@ -30,7 +30,7 @@ export default function VerifyEmailPage() {
     // Don't redirect if profile is null (still loading) or if email_verified is false (needs verification)
     if (profile) {
       // If email is verified (true or null) AND account is active (active or null), redirect to dashboard
-      if (profile.email_verified !== false && profile.account_status !== 'pending') {
+      if (profile.email_verified !== false && profile.account_status !== 'pending_approval') {
         router.push('/dashboard')
       }
     }

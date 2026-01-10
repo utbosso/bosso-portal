@@ -327,6 +327,10 @@ export interface Event {
   end_at: string
   created_by: string
   audience_scope: UserRole | null
+  attendance_code?: string | null
+  code_expires_at?: string | null
+  point_value?: number | null
+  track_attendance?: boolean | null
 }
 
 export interface DocumentItem {
@@ -362,12 +366,16 @@ export interface PersonalDocumentAccess {
 }
 
 export type TaskStatus = 'not_started' | 'in_progress' | 'in_review' | 'completed'
+export type AssigneeStatus = 'not_started' | 'in_progress' | 'completed'
+export type ReviewStatus = 'not_reviewed' | 'in_review' | 'approved'
 
 export interface Task {
   id: string
   title: string
   description: string | null
   status: TaskStatus
+  assignee_status?: AssigneeStatus
+  priority?: 'low' | 'medium' | 'high'
   due_at: string | null
   assigned_to: string
   assigned_by: string
@@ -396,7 +404,7 @@ export interface PersonalTask {
   created_at?: string
 }
 
-export type ApplicationStatus = 'saved' | 'applied' | 'not_applied'
+export type ApplicationStatus = 'saved' | 'applied' | 'not_applied' | 'interviewing' | 'offered' | 'rejected' | 'accepted' | 'withdrawn'
 
 export interface Opportunity {
   id: string
@@ -428,8 +436,20 @@ export interface ApplicationDocument {
   application_id: string
   file_path: string
   file_name: string
+  document_url?: string
+  document_name?: string
+  document_type?: string
   uploaded_by: string
   uploaded_at?: string
+}
+
+export interface AttendanceRecord {
+  id: string
+  event_id: string
+  user_id: string
+  checked_in_at?: string
+  points_earned: number
+  created_at?: string
 }
 
 export type ResourceType = 'article' | 'video' | 'course' | 'tool' | 'guide' | 'template' | 'other'

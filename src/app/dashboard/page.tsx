@@ -392,16 +392,16 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {myTasks.map((task) => {
-              const isOverdue = task.due_date && new Date(task.due_date) < new Date()
+              const isOverdue = task.due_at && new Date(task.due_at) < new Date()
               return (
                 <div
                   key={task.id}
                   className="p-4 rounded-lg bg-dark-100 border border-primary/10 hover:border-primary/30 transition-all"
                 >
                   <p className="text-sm font-semibold text-foreground">{task.title}</p>
-                  {task.due_date && (
+                  {task.due_at && (
                     <p className={`text-xs mt-1 ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
-                      Due: {new Date(task.due_date).toLocaleDateString()}
+                      Due: {new Date(task.due_at).toLocaleDateString()}
                     </p>
                   )}
                   <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-full ${
@@ -447,7 +447,7 @@ export default function DashboardPage() {
                     {announcement.title}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                    {announcement.content}
+                    {announcement.body}
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     {new Date(announcement.created_at!).toLocaleDateString()}
@@ -486,7 +486,7 @@ export default function DashboardPage() {
                   </p>
                   <div className="flex flex-wrap gap-2 mt-2">
                     <span className="text-xs px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 font-medium">
-                      {opportunity.type}
+                      {opportunity.opportunity_type}
                     </span>
                     {opportunity.company && (
                       <span className="text-xs px-2 py-1 rounded-full bg-purple-500/20 text-purple-400 font-medium">

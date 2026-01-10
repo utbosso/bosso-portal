@@ -663,7 +663,7 @@ export default function AttendancePage() {
               <div>
                 <p className="text-sm text-muted-foreground">Recent Activity</p>
                 <p className="text-sm font-semibold text-foreground">
-                  {myAttendance.length > 0
+                  {myAttendance.length > 0 && myAttendance[0].checked_in_at
                     ? new Date(myAttendance[0].checked_in_at).toLocaleDateString()
                     : 'No activity'}
                 </p>

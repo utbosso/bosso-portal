@@ -89,7 +89,7 @@ export default function SettingsPage() {
             <label className="text-sm font-medium text-muted-foreground">Member Since</label>
             <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
               <Calendar className="w-4 h-4 text-muted-foreground" />
-              {new Date(profile.created_at).toLocaleDateString()}
+              {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'N/A'}
             </div>
           </div>
         </div>

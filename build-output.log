@@ -1,0 +1,29 @@
+
+> org-portal@1.0.0 build
+> next build
+
+ ⚠ Invalid next.config.js options detected: 
+ ⚠     Expected object, received boolean at "experimental.serverActions"
+ ⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+ ⚠ Server Actions are available by default now, `experimental.serverActions` option can be safely removed.
+  ▲ Next.js 14.2.35
+  - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+Failed to compile.
+
+./src/app/admin/page.tsx:652:84
+Type error: This comparison appears to be unintentional because the types '"approved" | "active" | "rejected" | undefined' and '"pending"' have no overlap.
+
+[0m [90m 650 |[39m   [36mconst[39m filteredUsers [33m=[39m users[33m.[39mfilter(user [33m=>[39m {[0m
+[0m [90m 651 |[39m     [36mif[39m (filter [33m===[39m [32m'all'[39m) [36mreturn[39m [36mtrue[39m[0m
+[0m[31m[1m>[22m[39m[90m 652 |[39m     [36mif[39m (filter [33m===[39m [32m'pending'[39m) [36mreturn[39m user[33m.[39maccount_status [33m===[39m [32m'pending_approval'[39m [33m||[39m user[33m.[39maccount_status [33m===[39m [32m'pending'[39m[0m
+[0m [90m     |[39m                                                                                    [31m[1m^[22m[39m[0m
+[0m [90m 653 |[39m     [36mif[39m (filter [33m===[39m [32m'active'[39m) [36mreturn[39m user[33m.[39maccount_status [33m===[39m [32m'approved'[39m [33m||[39m user[33m.[39maccount_status [33m===[39m [32m'active'[39m [33m||[39m user[33m.[39maccount_status [33m===[39m [36mnull[39m[0m
+[0m [90m 654 |[39m     [36mif[39m (filter [33m===[39m [32m'rejected'[39m) [36mreturn[39m user[33m.[39maccount_status [33m===[39m [32m'rejected'[39m[0m
+[0m [90m 655 |[39m     [36mreturn[39m [36mtrue[39m[0m
+Next.js build worker exited with code: 1 and signal: null

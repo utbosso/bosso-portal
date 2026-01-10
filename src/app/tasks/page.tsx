@@ -597,18 +597,18 @@ export default function TasksPage() {
 
             {!loading && (() => {
               // Filter tasks into active and completed
-              const assignedToMe = tasks.filter(t => t.assigned_to === profile?.id && t.assigned_by !== profile?.id && t.status !== 'approved')
-              const assignedByMe = tasks.filter(t => t.assigned_by === profile?.id && t.status !== 'approved')
+              const assignedToMe = tasks.filter(t => t.assigned_to === profile?.id && t.assigned_by !== profile?.id && t.status !== 'completed')
+              const assignedByMe = tasks.filter(t => t.assigned_by === profile?.id && t.status !== 'completed')
               const completedTasks = tasks.filter(t =>
                 (t.assigned_to === profile?.id || t.assigned_by === profile?.id) &&
-                t.status === 'approved'
+                t.status === 'completed'
               )
 
               const renderTask = (task: Task, section: 'assigned' | 'created') => {
                 const updates = taskUpdatesById.get(task.id) ?? []
                 const isAssignee = task.assigned_to === profile?.id
                 const isCreator = task.assigned_by === profile?.id
-                const isApproved = task.status === 'approved'
+                const isApproved = task.status === 'completed'
 
                 // Determine which status field to use and which handler to call
                 let statusValue: AssigneeStatus | ReviewStatus
@@ -622,7 +622,7 @@ export default function TasksPage() {
                   statusHandler = null
                 } else if (section === 'assigned' && isAssignee && !isCreator) {
                   // Assignee working on task: always show assignee_status dropdown
-                  statusValue = task.assignee_status
+                  statusValue = task.assignee_status || 'not_started'
                   availableStatuses = assigneeStatusOptions
                   statusHandler = handleAssigneeStatusChange
                 } else if (isCreator) {
@@ -634,7 +634,7 @@ export default function TasksPage() {
                     statusHandler = handleReviewStatusChange
                   } else {
                     // Still in progress, creator sees assignee's status (read-only)
-                    statusValue = task.assignee_status
+                    statusValue = task.assignee_status || 'not_started'
                     availableStatuses = []
                     statusHandler = null
                   }
@@ -648,7 +648,7 @@ export default function TasksPage() {
                 const canChangeStatus = availableStatuses.length > 0 && statusHandler !== null
 
                 // Highlight tasks waiting for creator review
-                const needsReview = isCreator && task.assignee_status === 'completed' && task.status === 'not_reviewed'
+                const needsReview = isCreator && task.assignee_status === 'completed' && task.status === 'in_review'
                 const taskCardClass = needsReview
                   ? "card-glow p-4 space-y-4 border-2 border-primary/40 bg-primary/5"
                   : "card-glow p-4 space-y-4"
@@ -660,8 +660,8 @@ export default function TasksPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="text-lg font-semibold text-foreground">{task.title}</h2>
                         {/* Show assignee status badge */}
-                        <span className={`px-2 py-0.5 rounded-md text-xs uppercase tracking-wide ${TASK_STATUS_COLORS[task.assignee_status]}`}>
-                          Work: {TASK_STATUS_LABELS[task.assignee_status]}
+                        <span className={`px-2 py-0.5 rounded-md text-xs uppercase tracking-wide ${TASK_STATUS_COLORS[task.assignee_status || 'not_started']}`}>
+                          Work: {TASK_STATUS_LABELS[task.assignee_status || 'not_started']}
                         </span>
                         {/* Show review status badge if assignee completed */}
                         {task.assignee_status === 'completed' && (

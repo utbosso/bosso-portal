@@ -26,7 +26,8 @@ import {
   X,
   Clock,
   BarChart3,
-  Sparkles
+  Sparkles,
+  FileText
 } from 'lucide-react'
 
 const supabase = createClient()
@@ -50,6 +51,7 @@ const emptyForm: ApplicationFormState = {
 const statusLabels: Record<ApplicationStatus, string> = {
   saved: 'Saved',
   applied: 'Applied',
+  not_applied: 'Not Applied',
   interviewing: 'Interviewing',
   offered: 'Offered',
   rejected: 'Rejected',
@@ -60,6 +62,7 @@ const statusLabels: Record<ApplicationStatus, string> = {
 const statusColors: Record<ApplicationStatus, string> = {
   saved: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   applied: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  not_applied: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   interviewing: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   offered: 'bg-green-500/20 text-green-400 border-green-500/30',
   rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -70,6 +73,7 @@ const statusColors: Record<ApplicationStatus, string> = {
 const statusIcons: Record<ApplicationStatus, any> = {
   saved: Bookmark,
   applied: CheckCircle2,
+  not_applied: FileText,
   interviewing: TrendingUp,
   offered: Sparkles,
   rejected: X,
@@ -725,7 +729,7 @@ export default function ApplicationsPage() {
                             <LinkIcon className="w-4 h-4 text-primary flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="truncate text-foreground">{doc.document_name}</p>
-                              <p className="text-xs text-muted-foreground truncate">{doc.document_type.replace('_', ' ')}</p>
+                              <p className="text-xs text-muted-foreground truncate">{doc.document_type?.replace('_', ' ')}</p>
                             </div>
                           </button>
                           <button
