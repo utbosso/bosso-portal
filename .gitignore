@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# registration codes (sensitive)
+REGISTRATION_CODES_*.md
+
+# deployment documentation (keep local only)
+DEPLOYMENT.md
+DEPLOYMENT_CHECKLIST.md
+PUSH_TO_GITHUB.md
+push-to-github.sh

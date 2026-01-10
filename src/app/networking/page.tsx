@@ -25,11 +25,13 @@ import {
   TrendingUp,
   Lightbulb
 } from 'lucide-react'
+import { isAdmin } from '@/lib/admin'
 
 const supabase = createClient()
 
 export default function NetworkingPage() {
   const { profile } = useAuth()
+  const isUserAdmin = isAdmin(profile?.role)
   const [contacts, setContacts] = useState<NetworkingContact[]>([])
   const [filteredContacts, setFilteredContacts] = useState<NetworkingContact[]>([])
   const [loading, setLoading] = useState(true)
@@ -202,6 +204,12 @@ export default function NetworkingPage() {
     }
   }
 
+  const canManageContact = (contact: NetworkingContact) => {
+    if (!profile) return false
+    if (isUserAdmin) return true
+    return contact.added_by === profile.id
+  }
+
   const resetForm = () => {
     setFormData({
       name: '',
@@ -286,11 +294,8 @@ export default function NetworkingPage() {
         <div className="space-y-2">
           <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
             <Users className="w-7 h-7 text-primary" />
-            Networking & Alumni Database
+            Networking & Alumni
           </h1>
-          <p className="text-muted-foreground text-sm max-w-2xl">
-            Share external contacts with positive experiences. Help fellow members connect with industry professionals.
-          </p>
           <div className="flex items-start gap-2 bg-primary/10 border border-primary/30 rounded-lg p-3 text-sm">
             <AlertCircle className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
             <p className="text-primary">
@@ -323,12 +328,14 @@ export default function NetworkingPage() {
               placeholder="Search by name, company, title, location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-neon w-full pl-10"
+              className="input-neon w-full !pl-10"
+              style={{ paddingLeft: '2.75rem' }}
             />
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
+        {/* Desktop filters */}
+        <div className="hidden md:flex flex-wrap gap-2 items-center">
           <Filter className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Industry:</span>
           {industries.map(ind => (
@@ -346,7 +353,7 @@ export default function NetworkingPage() {
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="hidden md:flex flex-wrap gap-2 items-center">
           <Filter className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Relationship:</span>
           {relationships.map(rel => (
@@ -363,6 +370,38 @@ export default function NetworkingPage() {
               {rel === 'all' ? 'All' : getRelationshipLabel(rel)}
             </button>
           ))}
+        </div>
+
+        {/* Mobile dropdowns */}
+        <div className="md:hidden grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5">Industry</label>
+            <select
+              value={selectedIndustry}
+              onChange={(e) => setSelectedIndustry(e.target.value as any)}
+              className="input-neon w-full text-sm py-2"
+            >
+              {industries.map(ind => (
+                <option key={ind} value={ind}>
+                  {ind === 'all' ? 'All' : getIndustryLabel(ind)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5">Relationship</label>
+            <select
+              value={selectedRelationship}
+              onChange={(e) => setSelectedRelationship(e.target.value as any)}
+              className="input-neon w-full text-sm py-2"
+            >
+              {relationships.map(rel => (
+                <option key={rel} value={rel}>
+                  {rel === 'all' ? 'All' : getRelationshipLabel(rel)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -582,7 +621,7 @@ export default function NetworkingPage() {
                     )}
                   </div>
                 </div>
-                {profile.id === contact.added_by && (
+                {canManageContact(contact) && (
                   <div className="flex gap-1">
                     <button
                       onClick={() => handleEdit(contact)}
@@ -667,11 +706,13 @@ export default function NetworkingPage() {
                     <Phone className="w-4 h-4" />
                   </a>
                 )}
-                <div className="ml-auto text-xs text-muted-foreground">
-                  {contact.contributor && (
-                    <span>Added by {contact.contributor.full_name}</span>
-                  )}
-                </div>
+                {isUserAdmin && (
+                  <div className="ml-auto text-xs text-muted-foreground">
+                    {contact.contributor && (
+                      <span>Added by {contact.contributor.full_name}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}

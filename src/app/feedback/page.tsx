@@ -48,7 +48,7 @@ export default function FeedbackPage() {
     is_anonymous: false,
   })
 
-  const isAdmin = hasMinimumRole('board_member')
+  const isAdmin = profile?.role === 'admin'
 
   useEffect(() => {
     fetchFeedback()
@@ -281,11 +281,8 @@ export default function FeedbackPage() {
         <div className="space-y-2">
           <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
             <MessageSquare className="w-7 h-7 text-primary" />
-            Feedback & Suggestions
+            Feedback
           </h1>
-          <p className="text-muted-foreground text-sm max-w-2xl">
-            Share your thoughts on events, the portal, or anything else. Your feedback helps us improve BOSSO for everyone.
-          </p>
         </div>
         <div className="flex gap-3">
           {isAdmin && filteredFeedback.length > 0 && (
@@ -332,12 +329,14 @@ export default function FeedbackPage() {
                 placeholder="Search feedback..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-neon w-full pl-10"
+                className="input-neon w-full !pl-10"
+                style={{ paddingLeft: '2.75rem' }}
               />
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 items-center">
+          {/* Desktop filters */}
+          <div className="hidden md:flex flex-wrap gap-2 items-center">
             <Filter className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Category:</span>
             {categories.map(cat => (
@@ -357,7 +356,7 @@ export default function FeedbackPage() {
           </div>
 
           {isAdmin && (
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="hidden md:flex flex-wrap gap-2 items-center">
               <Filter className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Status:</span>
               {statuses.map(status => (
@@ -375,6 +374,40 @@ export default function FeedbackPage() {
               ))}
             </div>
           )}
+
+          {/* Mobile dropdowns */}
+          <div className={`md:hidden grid gap-3 ${isAdmin ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1.5">Category</label>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value as any)}
+                className="input-neon w-full text-sm py-2"
+              >
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>
+                    {cat === 'all' ? 'All' : getCategoryLabel(cat)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isAdmin && (
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1.5">Status</label>
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value as any)}
+                  className="input-neon w-full text-sm py-2"
+                >
+                  {statuses.map(status => (
+                    <option key={status} value={status}>
+                      {status === 'all' ? 'All' : getStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -66,22 +66,28 @@ export const DATETIME_FORMAT = 'MMM dd, yyyy h:mm a'
 export const TASK_STATUS = {
   NOT_STARTED: 'not_started',
   IN_PROGRESS: 'in_progress',
-  IN_REVIEW: 'in_review',
   COMPLETED: 'completed',
+  NOT_REVIEWED: 'not_reviewed',
+  IN_REVIEW: 'in_review',
+  APPROVED: 'approved',
 } as const
 
 export const TASK_STATUS_LABELS = {
   not_started: 'Not Started',
   in_progress: 'In Progress',
-  in_review: 'In Review',
   completed: 'Completed',
+  not_reviewed: 'Not Reviewed',
+  in_review: 'In Review',
+  approved: 'Approved',
 } as const
 
 export const TASK_STATUS_COLORS = {
   not_started: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   in_progress: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  completed: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  not_reviewed: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
   in_review: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  completed: 'bg-green-500/20 text-green-400 border-green-500/30',
+  approved: 'bg-green-500/20 text-green-400 border-green-500/30',
 } as const
 
 // Task Priority

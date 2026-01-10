@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
+import { isAdmin } from '@/lib/admin'
 import type { Announcement, AnnouncementRead, Profile, UserRole } from '@/types/database.types'
 import { ArrowLeft, Pencil, Save, Trash2, X } from 'lucide-react'
 
@@ -36,13 +37,16 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
       analyst: 2,
       project_manager: 3,
       board_member: 4,
+      admin: 5,
     }),
     []
   )
 
-  const canManage = hasMinimumRole('board_member')
+  const isUserAdmin = isAdmin(profile?.role)
+  const canManage = isUserAdmin || announcement?.created_by === profile?.id || hasMinimumRole('board_member')
   const canView = (item: Announcement | null) => {
     if (!item) return false
+    if (isUserAdmin) return true // Admins can view all announcements
     if (!item.role_scope) return true
     if (!profile) return false
     return roleHierarchy[profile.role] >= roleHierarchy[item.role_scope]

@@ -6,33 +6,63 @@
   :root {
     --background: 0 0% 4%;
     --foreground: 0 0% 98%;
-    
+
     --card: 0 0% 7%;
     --card-foreground: 0 0% 98%;
-    
+
     --popover: 0 0% 7%;
     --popover-foreground: 0 0% 98%;
-    
-    --primary: 24 92% 53%;
+
+    --primary: 25 85% 42%;
     --primary-foreground: 0 0% 100%;
-    
+
     --secondary: 0 0% 7%;
     --secondary-foreground: 0 0% 98%;
-    
+
     --muted: 0 0% 15%;
     --muted-foreground: 0 0% 65%;
-    
-    --accent: 24 100% 64%;
+
+    --accent: 25 90% 48%;
     --accent-foreground: 0 0% 0%;
-    
+
     --destructive: 350 100% 62%;
     --destructive-foreground: 0 0% 98%;
-    
+
     --border: 0 0% 15%;
     --input: 0 0% 15%;
-    --ring: 24 92% 53%;
-    
+    --ring: 25 85% 42%;
+
     --radius: 0.75rem;
+  }
+
+  .light {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 25 85% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 25 90% 48%;
+    --accent-foreground: 0 0% 10%;
+
+    --destructive: 350 100% 62%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 25 85% 42%;
   }
 }
 
@@ -40,11 +70,32 @@
   * {
     @apply border-border;
   }
-  
+
   body {
-    @apply bg-dark-300 text-foreground;
+    @apply bg-background text-foreground;
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-outfit), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  h1 {
+    font-weight: 700;
+    letter-spacing: -0.03em;
+  }
+
+  body:not(.light) {
+    background-color: #0A0A0A;
     background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23F57D1F' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  body.light {
+    background-color: #F9F9F9;
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23F57D1F' fill-opacity='0.08'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
   
   /* Smooth scrolling */
@@ -57,16 +108,20 @@
     width: 10px;
     height: 10px;
   }
-  
-  ::-webkit-scrollbar-track {
+
+  body:not(.light) ::-webkit-scrollbar-track {
     background: #111111;
   }
-  
+
+  body.light ::-webkit-scrollbar-track {
+    background: #e5e5e5;
+  }
+
   ::-webkit-scrollbar-thumb {
     background: linear-gradient(180deg, #F57D1F, #FF9147);
     border-radius: 5px;
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(180deg, #FF9147, #F57D1F);
   }
@@ -75,15 +130,24 @@
 @layer components {
   /* Glowing card effect */
   .card-glow {
-    @apply relative bg-dark-200 border border-primary/20 rounded-lg overflow-hidden;
+    @apply relative bg-card border border-primary/20 rounded-lg overflow-hidden;
     box-shadow: 0 0 20px rgba(245, 125, 31, 0.1);
     transition: all 0.3s ease;
   }
-  
+
+  .light .card-glow {
+    background-color: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
   .card-glow:hover {
     @apply border-primary/40;
     box-shadow: 0 0 30px rgba(245, 125, 31, 0.2);
     transform: translateY(-2px);
+  }
+
+  .light .card-glow:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
   
   /* Neon button */
@@ -106,8 +170,16 @@
   }
   
   /* Glass morphism effect */
-  .glass {
-    @apply bg-dark-200/40 backdrop-blur-xl border border-primary/10;
+  body:not(.light) .glass {
+    background-color: rgba(26, 26, 26, 0.4);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(245, 125, 31, 0.1);
+  }
+
+  body.light .glass {
+    background-color: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(245, 125, 31, 0.1);
   }
   
   /* Neon border */
@@ -156,18 +228,32 @@
   }
   
   /* Input styling */
-  .input-neon {
-    @apply bg-dark-300 border border-dark-100 rounded-lg px-3 py-2 text-foreground;
-    @apply transition-all duration-200;
+  body:not(.light) .input-neon {
+    background-color: #111111;
+    border: 1px solid #222222;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: hsl(var(--foreground));
+    transition: all 0.2s;
+  }
+
+  body.light .input-neon {
+    background-color: white;
+    border: 1px solid hsl(var(--input));
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: hsl(var(--foreground));
+    transition: all 0.2s;
   }
 
   .input-neon:focus {
-    @apply outline-none border-primary;
+    outline: none;
+    border-color: #F57D1F;
     box-shadow: 0 0 15px rgba(245, 125, 31, 0.3);
   }
 
   .input-neon::placeholder {
-    @apply text-muted-foreground;
+    color: hsl(var(--muted-foreground));
   }
 }
 
@@ -176,29 +262,136 @@
   .text-glow-sm {
     text-shadow: 0 0 10px currentColor;
   }
-  
+
   .text-glow {
     text-shadow: 0 0 20px currentColor;
   }
-  
+
   .text-glow-lg {
     text-shadow: 0 0 30px currentColor;
   }
-  
+
   /* Animation delays */
   .animation-delay-100 {
     animation-delay: 100ms;
   }
-  
+
   .animation-delay-200 {
     animation-delay: 200ms;
   }
-  
+
   .animation-delay-300 {
     animation-delay: 300ms;
   }
-  
+
   .animation-delay-400 {
     animation-delay: 400ms;
+  }
+
+  /* Theme-aware dark backgrounds - use these instead of bg-dark-* */
+  .bg-surface {
+    background-color: hsl(var(--card));
+  }
+
+  .bg-surface-elevated {
+    background-color: hsl(var(--secondary));
+  }
+
+  body:not(.light) .bg-dark-100 {
+    background-color: #222222;
+  }
+
+  body.light .bg-dark-100 {
+    background-color: hsl(var(--input));
+  }
+
+  body:not(.light) .bg-dark-200 {
+    background-color: #1A1A1A;
+  }
+
+  body.light .bg-dark-200 {
+    background-color: hsl(var(--card));
+  }
+
+  body:not(.light) .bg-dark-300 {
+    background-color: #111111;
+  }
+
+  body.light .bg-dark-300 {
+    background-color: hsl(var(--background));
+  }
+
+  /* Dark backgrounds with opacity */
+  body:not(.light) .bg-dark-200\/50 {
+    background-color: rgba(26, 26, 26, 0.5);
+  }
+
+  body.light .bg-dark-200\/50 {
+    background-color: rgba(0, 0, 0, 0.03);
+  }
+
+  body:not(.light) .bg-dark-200\/80 {
+    background-color: rgba(26, 26, 26, 0.8);
+  }
+
+  body.light .bg-dark-200\/80 {
+    background-color: rgba(255, 255, 255, 0.95);
+  }
+
+  body:not(.light) .bg-dark-300\/50 {
+    background-color: rgba(17, 17, 17, 0.5);
+  }
+
+  body.light .bg-dark-300\/50 {
+    background-color: rgba(0, 0, 0, 0.02);
+  }
+
+  body:not(.light) .bg-dark-900\/80 {
+    background-color: rgba(0, 0, 0, 0.8);
+  }
+
+  body.light .bg-dark-900\/80 {
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+
+  body:not(.light) .border-dark-100 {
+    border-color: #222222;
+  }
+
+  body.light .border-dark-100 {
+    border-color: hsl(var(--border));
+  }
+
+  body:not(.light) .text-dark-300 {
+    color: #111111;
+  }
+
+  body.light .text-dark-300 {
+    color: white;
+  }
+
+  /* Hover states for dark backgrounds */
+  body:not(.light) .hover\:bg-dark-100:hover {
+    background-color: #222222;
+  }
+
+  body.light .hover\:bg-dark-100:hover {
+    background-color: hsl(var(--muted));
+  }
+
+  body:not(.light) .hover\:bg-dark-200:hover {
+    background-color: #1A1A1A;
+  }
+
+  body.light .hover\:bg-dark-200:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+  }
+
+  body:not(.light) .hover\:bg-dark-200\/50:hover {
+    background-color: rgba(26, 26, 26, 0.5);
+  }
+
+  body.light .hover\:bg-dark-200\/50:hover {
+    background-color: rgba(0, 0, 0, 0.05);
   }
 }

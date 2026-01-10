@@ -14,7 +14,11 @@ import {
   PlusCircle,
   Trash2,
   X,
+  Calendar,
+  AlertCircle,
+  Mail,
 } from 'lucide-react'
+import { isAdmin } from '@/lib/admin'
 
 const supabase = createClient()
 
@@ -26,6 +30,8 @@ type EventFormState = {
   startTime: string
   endTime: string
   audience: UserRole | 'all'
+  trackAttendance: boolean
+  pointValue: string
 }
 
 const emptyForm: EventFormState = {
@@ -36,6 +42,8 @@ const emptyForm: EventFormState = {
   startTime: '',
   endTime: '',
   audience: 'all',
+  trackAttendance: false,
+  pointValue: '',
 }
 
 export default function CalendarPage() {
@@ -52,6 +60,7 @@ export default function CalendarPage() {
   const [form, setForm] = useState<EventFormState>(emptyForm)
 
   const canManage = hasMinimumRole('project_manager')
+  const isUserAdmin = isAdmin(profile?.role)
 
   const roleHierarchy: Record<UserRole, number> = useMemo(
     () => ({
@@ -59,6 +68,7 @@ export default function CalendarPage() {
       analyst: 2,
       project_manager: 3,
       board_member: 4,
+      admin: 5,
     }),
     []
   )
@@ -67,6 +77,11 @@ export default function CalendarPage() {
     if (!item.audience_scope) return true
     if (!profile) return false
     return roleHierarchy[profile.role] >= roleHierarchy[item.audience_scope]
+  }
+
+  const canAccessAttendanceCode = (event: Event) => {
+    if (!profile) return false
+    return isUserAdmin || event.created_by === profile.id
   }
 
   const toDateKey = (value: Date) => {
@@ -178,6 +193,8 @@ export default function CalendarPage() {
       startTime: start.toTimeString().slice(0, 5),
       endTime: end.toTimeString().slice(0, 5),
       audience: event.audience_scope ?? 'all',
+      trackAttendance: event.track_attendance ?? false,
+      pointValue: event.point_value?.toString() ?? '',
     })
     setFormOpen(true)
   }
@@ -188,17 +205,36 @@ export default function CalendarPage() {
     return new Date(year, month - 1, day, hour, minute)
   }
 
+  const generateAttendanceCode = () => {
+    // Generate a random 6-character alphanumeric code
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // Exclude ambiguous characters
+    let code = ''
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return code
+  }
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
     if (!form.date || !form.startTime) return
+
+    // Validate point value if attendance tracking is enabled
+    if (form.trackAttendance && (!form.pointValue || isNaN(Number(form.pointValue)) || Number(form.pointValue) < 0)) {
+      setError('Please enter a valid point value (0 or greater)')
+      return
+    }
 
     const start = combineDateTime(form.date, form.startTime)
     const end = form.endTime
       ? combineDateTime(form.date, form.endTime)
       : new Date(start.getTime() + 60 * 60 * 1000)
 
-    const payload = {
+    // Calculate code expiration time (5 minutes after event ends)
+    const codeExpiresAt = new Date(end.getTime() + 5 * 60 * 1000)
+
+    const payload: any = {
       title: form.title,
       description: form.description || null,
       location: form.location || null,
@@ -206,6 +242,10 @@ export default function CalendarPage() {
       end_at: end.toISOString(),
       created_by: profile.id,
       audience_scope: form.audience === 'all' ? null : form.audience,
+      track_attendance: form.trackAttendance,
+      point_value: form.trackAttendance ? Number(form.pointValue) : 0,
+      attendance_code: form.trackAttendance ? generateAttendanceCode() : null,
+      code_expires_at: form.trackAttendance ? codeExpiresAt.toISOString() : null,
     }
 
     try {
@@ -249,17 +289,102 @@ export default function CalendarPage() {
     }
   }
 
+  const addToGoogleCalendar = (event: Event) => {
+    const startDate = new Date(event.start_at)
+    const endDate = new Date(event.end_at)
+
+    // Format dates for Google Calendar (YYYYMMDDTHHmmssZ)
+    const formatGoogleDate = (date: Date) => {
+      return date.toISOString().replace(/-|:|\.\d+/g, '')
+    }
+
+    // Add note about checking portal for updates in the description
+    const descriptionWithNote = event.description
+      ? `${event.description}\n\n⚠️ Note: If this event is updated or cancelled, please check the BOSSO portal for the latest information.`
+      : '⚠️ Note: If this event is updated or cancelled, please check the BOSSO portal for the latest information.'
+
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: event.title,
+      dates: `${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}`,
+      details: descriptionWithNote,
+      location: event.location || '',
+    })
+
+    const googleCalendarUrl = `https://calendar.google.com/calendar/render?${params.toString()}`
+    window.open(googleCalendarUrl, '_blank')
+  }
+
+  const sendCalendarInvites = async (eventId: string) => {
+    const event = events.find(e => e.id === eventId)
+    if (!event) return
+
+    try {
+      // Fetch all eligible users based on audience_scope
+      let query = supabase
+        .from('profiles')
+        .select('email, full_name, role')
+        .eq('account_status', 'active')
+
+      const { data: users, error } = await query
+
+      if (error) throw error
+
+      // Filter users based on role hierarchy
+      let eligibleUsers = users || []
+      if (event.audience_scope) {
+        const minRoleLevel = roleHierarchy[event.audience_scope as UserRole]
+        eligibleUsers = users?.filter(u =>
+          roleHierarchy[u.role as UserRole] >= minRoleLevel
+        ) || []
+      }
+
+      // Get list of email addresses for BCC
+      const bccEmails = eligibleUsers.map(u => u.email).join(',')
+
+      // Format dates for Google Calendar link
+      const startDate = new Date(event.start_at)
+      const endDate = new Date(event.end_at)
+
+      const formatGoogleDate = (date: Date) => {
+        return date.toISOString().replace(/-|:|\.\d+/g, '')
+      }
+
+      const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}&details=${encodeURIComponent(event.description || '')}&location=${encodeURIComponent(event.location || '')}`
+
+      // Create email subject and body
+      const subject = encodeURIComponent(`BOSSO Event: ${event.title}`)
+      const emailBody = encodeURIComponent(`Come join us at our BOSSO event!
+
+Event: ${event.title}
+Location: ${event.location || 'TBA'}
+Time: ${startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}
+
+${event.description || ''}
+
+Add to your calendar: ${calendarUrl}
+
+View on portal: ${window.location.origin}/calendar`)
+
+      // Open Gmail compose with BCC
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails)}&su=${subject}&body=${emailBody}`
+
+      window.open(gmailUrl, '_blank')
+    } catch (error) {
+      console.error('Error preparing calendar invite email:', error)
+      alert('Failed to prepare calendar invite. Please try again.')
+    }
+  }
+
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
             <CalendarDays className="w-7 h-7 text-primary" />
-            BOSSO Calendar
+            Calendar
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Track upcoming events, meetings, and deadlines.
-          </p>
         </div>
 
         {canManage && (
@@ -373,6 +498,15 @@ export default function CalendarPage() {
               )}
             </div>
 
+            {!loading && selectedEvents.length > 0 && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                <AlertCircle className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-muted-foreground">
+                  Events added to your Google calendar won't auto-update. Check back here for any changes or cancellations.
+                </p>
+              </div>
+            )}
+
             {loading && (
               <p className="text-sm text-muted-foreground">Loading events...</p>
             )}
@@ -384,7 +518,7 @@ export default function CalendarPage() {
             {!loading && selectedEvents.map((event) => (
               <div key={event.id} className="rounded-lg border border-primary/10 p-3 space-y-2">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-sm font-semibold text-foreground">{event.title}</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
@@ -400,34 +534,64 @@ export default function CalendarPage() {
                       )}
                     </div>
                   </div>
-                  {canManage && (
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => addToGoogleCalendar(event)}
+                      className="p-2 rounded-md text-primary hover:bg-primary/10"
+                      title="Add to Google Calendar"
+                    >
+                      <Calendar className="w-4 h-4" />
+                    </button>
+                    {(isUserAdmin || event.created_by === profile?.id) && (
                       <button
                         type="button"
-                        onClick={() => openEdit(event)}
-                        className="p-2 rounded-md text-primary hover:bg-primary/10"
+                        onClick={() => sendCalendarInvites(event.id)}
+                        className="p-2 rounded-md text-green-400 hover:bg-green-500/10"
+                        title="Send Calendar Invites to Members"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <Mail className="w-4 h-4" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(event.id)}
-                        className="p-2 rounded-md text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
+                    )}
+                    {canManage && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(event)}
+                          className="p-2 rounded-md text-primary hover:bg-primary/10"
+                          title="Edit Event"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(event.id)}
+                          className="p-2 rounded-md text-destructive hover:bg-destructive/10"
+                          title="Delete Event"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {event.description && (
                   <p className="text-sm text-muted-foreground">{event.description}</p>
                 )}
 
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-primary">
-                  <span>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide">
+                  <span className="text-primary">
                     Visible to {event.audience_scope ? event.audience_scope.replace('_', ' ') : 'all members'}
                   </span>
+                  {event.track_attendance && (
+                    <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                      ✓ Attendance: {event.point_value} pts
+                      {canAccessAttendanceCode(event) && (
+                        <span className="ml-2 text-[10px] font-mono">({event.attendance_code})</span>
+                      )}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -530,6 +694,40 @@ export default function CalendarPage() {
                     rows={4}
                     className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
                   />
+                </div>
+
+                <div className="space-y-3 pt-2 border-t border-primary/10">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="trackAttendance"
+                      checked={form.trackAttendance}
+                      onChange={(e) => setForm((prev) => ({ ...prev, trackAttendance: e.target.checked, pointValue: e.target.checked ? prev.pointValue : '' }))}
+                      className="w-4 h-4 rounded border-primary/20 bg-dark-100 text-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <label htmlFor="trackAttendance" className="text-sm text-foreground font-medium cursor-pointer">
+                      Track attendance for this event
+                    </label>
+                  </div>
+
+                  {form.trackAttendance && (
+                    <div className="space-y-1 ml-7">
+                      <label className="text-xs text-muted-foreground uppercase tracking-wide">Point Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={form.pointValue}
+                        onChange={(e) => setForm((prev) => ({ ...prev, pointValue: e.target.value }))}
+                        placeholder="e.g. 5"
+                        required={form.trackAttendance}
+                        className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Points members will earn for attending this event
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <button

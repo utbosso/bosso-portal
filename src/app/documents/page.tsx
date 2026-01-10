@@ -22,6 +22,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { isAdmin } from '@/lib/admin'
 
 const supabase = createClient()
 
@@ -79,6 +80,7 @@ export default function DocumentsPage() {
   const [profileSearch, setProfileSearch] = useState('')
 
   const isBoard = profile?.role === 'board_member'
+  const isUserAdmin = isAdmin(profile?.role)
 
   const roleHierarchy: Record<UserRole, number> = useMemo(
     () => ({
@@ -86,12 +88,21 @@ export default function DocumentsPage() {
       analyst: 2,
       project_manager: 3,
       board_member: 4,
+      admin: 5,
     }),
     []
   )
 
+  const canManageDocument = (item: DocumentItem) => {
+    if (!profile) return false
+    if (isUserAdmin) return true
+    if (isBoard) return true
+    return item.created_by === profile.id
+  }
+
   const canSeeDocument = (item: DocumentItem) => {
     if (!profile) return false
+    if (isUserAdmin) return true
     if (item.created_by === profile.id) return true
     if (item.is_restricted) {
       return accessRows.some((row) => row.document_id === item.id)
@@ -481,13 +492,10 @@ export default function DocumentsPage() {
             <Folder className="w-7 h-7 text-primary" />
             Internal Docs
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Shared folders and documents with role-based access and people-specific sharing.
-          </p>
         </div>
 
         {viewMode === 'org' ? (
-          isBoard && (
+          (isBoard || isUserAdmin) && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -601,7 +609,7 @@ export default function DocumentsPage() {
                         <Folder className="w-5 h-5 text-primary" />
                         <span className="text-sm font-semibold">{folder.name}</span>
                       </div>
-                      {isBoard && (
+                      {canManageDocument(folder) && (
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -687,7 +695,7 @@ export default function DocumentsPage() {
                           Open
                         </a>
                       )}
-                      {isBoard && (
+                      {canManageDocument(doc) && (
                         <>
                           <button
                             type="button"
@@ -714,15 +722,7 @@ export default function DocumentsPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="card-glow p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-foreground">Access rules</h3>
-            <p className="text-sm text-muted-foreground">
-              General members see folders marked for everyone or specifically shared with them. Analysts, PMs, and Board
-              members automatically inherit broader access. Board members can share with specific people.
-            </p>
-          </div>
-
-          {isBoard && formOpen && (
+          {(isBoard || isUserAdmin) && formOpen && (
             <div className="card-glow p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-foreground">

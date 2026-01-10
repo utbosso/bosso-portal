@@ -1,4 +1,5 @@
-export type UserRole = 'general_member' | 'analyst' | 'project_manager' | 'board_member'
+export type UserRole = 'general_member' | 'analyst' | 'project_manager' | 'board_member' | 'admin'
+export type AccountStatus = 'pending_approval' | 'approved' | 'active' | 'rejected'
 
 export type Database = {
   public: {
@@ -292,6 +293,11 @@ export interface Profile {
   email: string
   full_name: string
   role: UserRole
+  email_verified?: boolean | null
+  account_status?: AccountStatus
+  verification_token?: string | null
+  verified_at?: string | null
+  created_at?: string
   // other columns if you have them
 }
 

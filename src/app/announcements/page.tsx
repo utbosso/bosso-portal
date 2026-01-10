@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import type { Announcement, AnnouncementRead, Profile, UserRole } from '@/types/database.types'
-import { Megaphone, PlusCircle } from 'lucide-react'
+import { Megaphone, PlusCircle, Trash2, Pencil, Mail } from 'lucide-react'
+import { isAdmin, hasMinimumRole as checkRole } from '@/lib/admin'
 
 const supabase = createClient()
 
@@ -25,12 +26,15 @@ export default function AnnouncementsPage() {
   const [error, setError] = useState<string | null>(null)
 
   const canPost = hasMinimumRole('project_manager')
+  const isUserAdmin = isAdmin(profile?.role)
+
   const roleHierarchy: Record<UserRole, number> = useMemo(
     () => ({
       general_member: 1,
       analyst: 2,
       project_manager: 3,
       board_member: 4,
+      admin: 5,
     }),
     []
   )
@@ -122,27 +126,99 @@ export default function AnnouncementsPage() {
     }
   }
 
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const confirmDelete = window.confirm('Delete this announcement?')
+    if (!confirmDelete) return
+
+    try {
+      const { error } = await supabase
+        .from('announcements')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+      await fetchAnnouncements()
+    } catch (err: any) {
+      console.error('Error deleting announcement:', err)
+      setError('Failed to delete announcement.')
+    }
+  }
+
+  const canManageAnnouncement = (announcement: AnnouncementWithAuthor) => {
+    if (!profile) return false
+    // Admins can manage everything
+    if (isUserAdmin) return true
+    // Creators can manage their own
+    return announcement.created_by === profile.id
+  }
+
+  const sendAnnouncementEmail = async (announcement: AnnouncementWithAuthor) => {
+    try {
+      // Fetch all eligible users based on role_scope
+      let query = supabase
+        .from('profiles')
+        .select('email, full_name, role')
+        .eq('account_status', 'active')
+
+      const { data: users, error } = await query
+
+      if (error) throw error
+
+      // Filter users based on role hierarchy
+      let eligibleUsers = users || []
+      if (announcement.role_scope) {
+        const minRoleLevel = roleHierarchy[announcement.role_scope as UserRole]
+        eligibleUsers = users?.filter(u =>
+          roleHierarchy[u.role as UserRole] >= minRoleLevel
+        ) || []
+      }
+
+      // Get list of email addresses for BCC
+      const bccEmails = eligibleUsers.map(u => u.email).join(',')
+
+      // Create email subject and body
+      const subject = encodeURIComponent(`BOSSO Announcement: ${announcement.title}`)
+      const emailBody = encodeURIComponent(`${announcement.body}
+
+---
+Posted by: ${announcement.author?.full_name || 'BOSSO Team'}
+${announcement.role_scope ? `Target Audience: ${announcement.role_scope.replace('_', ' ')}` : 'All BOSSO Members'}
+Date: ${new Date(announcement.created_at).toLocaleString()}
+
+View on portal: ${window.location.origin}/announcements/${announcement.id}`)
+
+      // Open Gmail compose with BCC
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails)}&su=${subject}&body=${emailBody}`
+
+      window.open(gmailUrl, '_blank')
+    } catch (error) {
+      console.error('Error preparing announcement email:', error)
+      alert('Failed to prepare email. Please try again.')
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
             <Megaphone className="w-7 h-7 text-primary" />
-            BOSSO Announcements
+            Announcements
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Central hub for BOSSO updates, events, and opportunities.
-          </p>
         </div>
 
         {canPost && (
           <button
             type="button"
             onClick={() => setFormOpen((v) => !v)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition whitespace-nowrap"
           >
             <PlusCircle className="w-4 h-4" />
-            {formOpen ? 'Close form' : 'New announcement'}
+            <span className="hidden sm:inline">{formOpen ? 'Close form' : 'New announcement'}</span>
+            <span className="sm:hidden">{formOpen ? 'Close' : 'New'}</span>
           </button>
         )}
       </div>
@@ -233,36 +309,60 @@ export default function AnnouncementsPage() {
         )}
 
         {!loading && announcements.map((a) => (
-          <Link
+          <div
             key={a.id}
-            href={`/announcements/${a.id}`}
-            className="block card-glow p-4 space-y-2 hover:border-primary/60 transition"
+            className="card-glow p-4 space-y-2 hover:border-primary/60 transition"
           >
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-foreground">
-                {a.title}
-              </h2>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                {new Date(a.created_at).toLocaleString()}
-              </span>
-            </div>
+            <Link href={`/announcements/${a.id}`} className="block">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground">
+                  {a.title}
+                </h2>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {new Date(a.created_at).toLocaleString()}
+                </span>
+              </div>
 
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>
-                Posted by {a.author?.full_name ?? 'Unknown'}
-              </span>
-              {a.unread && (
-                <span className="px-2 py-0.5 rounded-md bg-destructive/15 text-destructive uppercase tracking-wide text-[11px]">
-                  Unread
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>
+                  Posted by {a.author?.full_name ?? 'Unknown'}
                 </span>
-              )}
-              {a.role_scope && (
-                <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
-                  Target: {a.role_scope.replace('_', ' ')}
-                </span>
-              )}
-            </div>
-          </Link>
+                {a.unread && (
+                  <span className="px-2 py-0.5 rounded-md bg-destructive/15 text-destructive uppercase tracking-wide text-[11px]">
+                    Unread
+                  </span>
+                )}
+                {a.role_scope && (
+                  <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
+                    Target: {a.role_scope.replace('_', ' ')}
+                  </span>
+                )}
+              </div>
+            </Link>
+
+            {canManageAnnouncement(a) && (
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    sendAnnouncementEmail(a)
+                  }}
+                  className="p-1.5 rounded-md bg-dark-200 hover:bg-green-500/10 text-green-400 hover:text-green-300 transition"
+                  title="Send email to members"
+                >
+                  <Mail className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => handleDelete(a.id, e)}
+                  className="p-1.5 rounded-md bg-dark-200 hover:bg-red-500/10 text-red-400 hover:text-red-300 transition"
+                  title="Delete announcement"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>

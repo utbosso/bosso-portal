@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/lib/constants'
-import type { PersonalTask, Profile, Task, TaskStatus, TaskUpdate } from '@/types/database.types'
+import type { AssigneeStatus, PersonalTask, Profile, ReviewStatus, Task, TaskStatus, TaskUpdate } from '@/types/database.types'
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -53,7 +53,7 @@ const emptyPersonalForm: PersonalTaskFormState = {
 
 export default function TasksPage() {
   const { profile, hasMinimumRole } = useAuth()
-  const canManage = hasMinimumRole('project_manager')
+  const canManage = hasMinimumRole('project_manager') // PM, Board Member, or Admin can assign tasks
   const isGeneralMember = profile?.role === 'general_member'
 
   const [viewMode, setViewMode] = useState<'team' | 'personal'>('team')
@@ -61,6 +61,7 @@ export default function TasksPage() {
   const [taskUpdates, setTaskUpdates] = useState<TaskUpdate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showCompleted, setShowCompleted] = useState(false)
 
   const [personalTasks, setPersonalTasks] = useState<PersonalTask[]>([])
   const [personalLoading, setPersonalLoading] = useState(true)
@@ -89,7 +90,8 @@ export default function TasksPage() {
     return map
   }, [taskUpdates])
 
-  const statusOptions: TaskStatus[] = ['not_started', 'in_progress', 'in_review', 'completed']
+  const assigneeStatusOptions: AssigneeStatus[] = ['not_started', 'in_progress', 'completed']
+  const creatorStatusOptions: ReviewStatus[] = ['not_reviewed', 'in_review', 'approved']
 
   const fetchProfiles = async () => {
     if (!profile) return
@@ -124,6 +126,7 @@ export default function TasksPage() {
           title,
           description,
           status,
+          assignee_status,
           due_at,
           assigned_to,
           assigned_by,
@@ -136,11 +139,19 @@ export default function TasksPage() {
 
       if (error) throw error
 
-      const rows = ((data as any[]) ?? []).map((row) => ({
-        ...row,
-        assignee: Array.isArray(row.assignee) ? row.assignee[0] ?? null : row.assignee ?? null,
-        assigner: Array.isArray(row.assigner) ? row.assigner[0] ?? null : row.assigner ?? null,
-      })) as Task[]
+      const rows = ((data as any[]) ?? []).map((row) => {
+        return {
+          ...row,
+          assignee: Array.isArray(row.assignee) ? row.assignee[0] ?? null : row.assignee ?? null,
+          assigner: Array.isArray(row.assigner) ? row.assigner[0] ?? null : row.assigner ?? null,
+          // Fallback: if assignee_status doesn't exist in DB yet, derive it from status
+          assignee_status: row.assignee_status ?? (
+            ['not_started', 'in_progress'].includes(row.status)
+              ? row.status
+              : 'completed'
+          ) as AssigneeStatus,
+        }
+      }) as Task[]
       const visible = canManage && profile
         ? rows
         : rows.filter((task) => task.assigned_to === profile?.id)
@@ -286,15 +297,27 @@ export default function TasksPage() {
 
     try {
       if (editingId) {
+        // Check if assignee changed - if so, reset statuses
+        const currentTask = tasks.find(t => t.id === editingId)
+        const assigneeChanged = currentTask && currentTask.assigned_to !== payload.assigned_to
+
+        const updatePayload: any = {
+          title: payload.title,
+          description: payload.description,
+          due_at: payload.due_at,
+          assigned_to: payload.assigned_to,
+          status: payload.status,
+        }
+
+        // If reassigning, reset both statuses
+        if (assigneeChanged) {
+          updatePayload.assignee_status = 'not_started'
+          updatePayload.status = 'not_started'
+        }
+
         const { error } = await supabase
           .from('tasks')
-          .update({
-            title: payload.title,
-            description: payload.description,
-            due_at: payload.due_at,
-            assigned_to: payload.assigned_to,
-            status: payload.status,
-          })
+          .update(updatePayload)
           .eq('id', editingId)
         if (error) throw error
       } else {
@@ -329,17 +352,63 @@ export default function TasksPage() {
     }
   }
 
-  const handleStatusChange = async (taskId: string, status: TaskStatus) => {
+  const handleAssigneeStatusChange = async (taskId: string, status: AssigneeStatus) => {
+    if (!profile) return
+
     try {
+      // Update the assignee_status field
+      // When assignee marks as completed, set review status to 'not_reviewed'
+      const updateData: any = {
+        assignee_status: status,
+      }
+
+      if (status === 'completed') {
+        updateData.status = 'not_reviewed'
+      } else {
+        // If not completed, keep status in sync with assignee progress
+        updateData.status = status
+      }
+
+      const { data, error } = await supabase
+        .from('tasks')
+        .update(updateData)
+        .eq('id', taskId)
+        .select()
+
+      if (error) {
+        setError(`Failed to update task status: ${error.message}`)
+        throw error
+      }
+
+      if (!data || data.length === 0) {
+        setError('Failed to update task status - you may not have permission')
+        return
+      }
+
+      await fetchTasks()
+    } catch (err: any) {
+      console.error('Error updating assignee status:', err)
+      setError(`Failed to update task status: ${err.message || 'Unknown error'}`)
+    }
+  }
+
+  const handleReviewStatusChange = async (taskId: string, status: ReviewStatus) => {
+    if (!profile) return
+
+    try {
+      // Update only the status field (review status)
       const { error } = await supabase
         .from('tasks')
         .update({ status })
         .eq('id', taskId)
+        .select()
+
       if (error) throw error
+
       await fetchTasks()
     } catch (err: any) {
-      console.error('Error updating status', err)
-      setError('Failed to update task status.')
+      console.error('Error updating review status:', err)
+      setError(`Failed to update review status: ${err.message || 'Unknown error'}`)
     }
   }
 
@@ -364,6 +433,19 @@ export default function TasksPage() {
         .insert(payload)
 
       if (error) throw error
+
+      // Create notification for task creator if assignee submitted update
+      const task = tasks.find(t => t.id === taskId)
+      if (task && task.assigned_to === profile.id && task.assigned_by !== profile.id) {
+        await supabase
+          .from('task_notifications')
+          .insert({
+            task_id: taskId,
+            user_id: task.assigned_by,
+            type: 'update_submitted',
+            message: `${profile.full_name} submitted an update on "${task.title}"`,
+          })
+      }
 
       setUpdateDrafts((prev) => ({ ...prev, [taskId]: { note: '', link: '' } }))
       await fetchTasks()
@@ -448,9 +530,6 @@ export default function TasksPage() {
             <ClipboardCheck className="w-7 h-7 text-primary" />
             Action Items
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Track projects, assign tasks, and share progress updates.
-          </p>
         </div>
 
         {viewMode === 'team' ? (
@@ -508,25 +587,88 @@ export default function TasksPage() {
 
       {viewMode === 'team' && !isGeneralMember ? (
         <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
-          <div className="space-y-4">
+          <div className="space-y-6">
             {loading && <p className="text-sm text-muted-foreground">Loading tasks...</p>}
             {!loading && tasks.length === 0 && (
               <div className="card-glow p-4 text-sm text-muted-foreground">
                 No team tasks yet.
               </div>
             )}
-            {!loading && tasks.map((task) => {
-              const updates = taskUpdatesById.get(task.id) ?? []
-              const canUpdate = canManage || task.assigned_to === profile?.id
-              return (
-                <div key={task.id} className="card-glow p-4 space-y-4">
+
+            {!loading && (() => {
+              // Filter tasks into active and completed
+              const assignedToMe = tasks.filter(t => t.assigned_to === profile?.id && t.assigned_by !== profile?.id && t.status !== 'approved')
+              const assignedByMe = tasks.filter(t => t.assigned_by === profile?.id && t.status !== 'approved')
+              const completedTasks = tasks.filter(t =>
+                (t.assigned_to === profile?.id || t.assigned_by === profile?.id) &&
+                t.status === 'approved'
+              )
+
+              const renderTask = (task: Task, section: 'assigned' | 'created') => {
+                const updates = taskUpdatesById.get(task.id) ?? []
+                const isAssignee = task.assigned_to === profile?.id
+                const isCreator = task.assigned_by === profile?.id
+                const isApproved = task.status === 'approved'
+
+                // Determine which status field to use and which handler to call
+                let statusValue: AssigneeStatus | ReviewStatus
+                let availableStatuses: AssigneeStatus[] | ReviewStatus[] = []
+                let statusHandler: ((taskId: string, status: any) => void) | null = null
+
+                if (isApproved) {
+                  // Approved tasks are read-only
+                  statusValue = task.status as ReviewStatus
+                  availableStatuses = []
+                  statusHandler = null
+                } else if (section === 'assigned' && isAssignee && !isCreator) {
+                  // Assignee working on task: always show assignee_status dropdown
+                  statusValue = task.assignee_status
+                  availableStatuses = assigneeStatusOptions
+                  statusHandler = handleAssigneeStatusChange
+                } else if (isCreator) {
+                  // Creator viewing task
+                  if (task.assignee_status === 'completed') {
+                    // Assignee completed work, creator can review
+                    statusValue = task.status as ReviewStatus
+                    availableStatuses = creatorStatusOptions
+                    statusHandler = handleReviewStatusChange
+                  } else {
+                    // Still in progress, creator sees assignee's status (read-only)
+                    statusValue = task.assignee_status
+                    availableStatuses = []
+                    statusHandler = null
+                  }
+                } else {
+                  // Fallback
+                  statusValue = task.status
+                  availableStatuses = []
+                  statusHandler = null
+                }
+
+                const canChangeStatus = availableStatuses.length > 0 && statusHandler !== null
+
+                // Highlight tasks waiting for creator review
+                const needsReview = isCreator && task.assignee_status === 'completed' && task.status === 'not_reviewed'
+                const taskCardClass = needsReview
+                  ? "card-glow p-4 space-y-4 border-2 border-primary/40 bg-primary/5"
+                  : "card-glow p-4 space-y-4"
+
+                return (
+                <div key={task.id} className={taskCardClass}>
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="text-lg font-semibold text-foreground">{task.title}</h2>
-                        <span className={`px-2 py-0.5 rounded-md text-xs uppercase tracking-wide ${TASK_STATUS_COLORS[task.status]}`}>
-                          {TASK_STATUS_LABELS[task.status]}
+                        {/* Show assignee status badge */}
+                        <span className={`px-2 py-0.5 rounded-md text-xs uppercase tracking-wide ${TASK_STATUS_COLORS[task.assignee_status]}`}>
+                          Work: {TASK_STATUS_LABELS[task.assignee_status]}
                         </span>
+                        {/* Show review status badge if assignee completed */}
+                        {task.assignee_status === 'completed' && (
+                          <span className={`px-2 py-0.5 rounded-md text-xs uppercase tracking-wide ${TASK_STATUS_COLORS[task.status]}`}>
+                            Review: {TASK_STATUS_LABELS[task.status]}
+                          </span>
+                        )}
                       </div>
                       {task.description && (
                         <p className="text-sm text-muted-foreground">{task.description}</p>
@@ -552,20 +694,20 @@ export default function TasksPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {canUpdate && (
+                      {canChangeStatus && statusHandler && (
                         <select
-                          value={task.status}
-                          onChange={(e) => handleStatusChange(task.id, e.target.value as TaskStatus)}
+                          value={statusValue}
+                          onChange={(e) => statusHandler(task.id, e.target.value as any)}
                           className="px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-xs text-foreground"
                         >
-                          {statusOptions.map((status) => (
+                          {availableStatuses.map((status) => (
                             <option key={status} value={status}>
                               {TASK_STATUS_LABELS[status]}
                             </option>
                           ))}
                         </select>
                       )}
-                      {canManage && (
+                      {isCreator && !isApproved && (
                         <>
                           <button
                             type="button"
@@ -620,7 +762,7 @@ export default function TasksPage() {
                     ))}
                   </div>
 
-                  {canUpdate && (
+                  {(isAssignee || isCreator) && !isApproved && (
                     <div className="border-t border-primary/10 pt-3 space-y-2">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Add update</p>
                       <textarea
@@ -659,18 +801,59 @@ export default function TasksPage() {
                   )}
                 </div>
               )
-            })}
+            }
+
+            return (
+              <>
+                {/* Section 1: Tasks Assigned to Me */}
+                {assignedToMe.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                      <Users className="w-5 h-5 text-primary" />
+                      Tasks Assigned to Me ({assignedToMe.length})
+                    </h3>
+                    {assignedToMe.map(task => renderTask(task, 'assigned'))}
+                  </div>
+                )}
+
+                {/* Section 2: Tasks I Assigned */}
+                {assignedByMe.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                      <ClipboardCheck className="w-5 h-5 text-primary" />
+                      Tasks I Assigned ({assignedByMe.length})
+                    </h3>
+                    {assignedByMe.map(task => renderTask(task, 'created'))}
+                  </div>
+                )}
+
+                {/* Section 3: Completed Tasks */}
+                {completedTasks.length > 0 && (
+                  <div className="space-y-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowCompleted(!showCompleted)}
+                      className="flex items-center gap-2 text-lg font-semibold text-foreground hover:text-primary transition-colors"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-green-400" />
+                      Completed Tasks ({completedTasks.length})
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {showCompleted ? '(Click to hide)' : '(Click to show)'}
+                      </span>
+                    </button>
+                    {showCompleted && (
+                      <div className="space-y-3">
+                        {completedTasks.map(task => renderTask(task, task.assigned_by === profile?.id ? 'created' : 'assigned'))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )
+          })()}
           </div>
 
           <div className="space-y-4">
-            <div className="card-glow p-4 space-y-2">
-              <h3 className="text-lg font-semibold text-foreground">Team workflow</h3>
-              <p className="text-sm text-muted-foreground">
-                PMs and Board members assign tasks, track progress, and keep updates in one place. Analysts can update
-                status and submit notes or document links as they complete work.
-              </p>
-            </div>
-
             {canManage && formOpen && (
               <div className="card-glow p-4 space-y-4">
                 <div className="flex items-center justify-between">
@@ -731,7 +914,7 @@ export default function TasksPage() {
                         onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as TaskStatus }))}
                         className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
                       >
-                        {statusOptions.map((status) => (
+                        {assigneeStatusOptions.map((status) => (
                           <option key={status} value={status}>
                             {TASK_STATUS_LABELS[status]}
                           </option>
@@ -796,7 +979,7 @@ export default function TasksPage() {
                       onChange={(e) => handlePersonalStatusChange(task.id, e.target.value as TaskStatus)}
                       className="px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-xs text-foreground"
                     >
-                      {statusOptions.map((status) => (
+                      {assigneeStatusOptions.map((status) => (
                         <option key={status} value={status}>
                           {TASK_STATUS_LABELS[status]}
                         </option>
@@ -874,7 +1057,7 @@ export default function TasksPage() {
                       onChange={(e) => setPersonalForm((prev) => ({ ...prev, status: e.target.value as TaskStatus }))}
                       className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
                     >
-                      {statusOptions.map((status) => (
+                      {assigneeStatusOptions.map((status) => (
                         <option key={status} value={status}>
                           {TASK_STATUS_LABELS[status]}
                         </option>

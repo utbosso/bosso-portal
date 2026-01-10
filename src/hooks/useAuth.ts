@@ -21,14 +21,51 @@ export function useAuth() {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single()
+        .maybeSingle() // Use maybeSingle() to avoid error when no profile exists
 
       if (error) {
         console.error('Error fetching profile:', error)
         return
       }
 
+      if (!data) {
+        console.log('[auth] No profile found for user')
+        return
+      }
+
+      console.log('[auth] Profile data:', {
+        email_verified: data.email_verified,
+        account_status: data.account_status,
+        hasEmailVerifiedField: 'email_verified' in data,
+        hasAccountStatusField: 'account_status' in data
+      })
+
+      // Check if email is verified and account is active
+      // For existing users without these fields, default to verified and active
+      // Only block access for explicitly set values
+
+      // Always set the profile first, so pages can access user data
       setProfile(data)
+
+      // Skip email verification check - Google OAuth verifies emails automatically
+      // No need to check email_verified since we trust Google's verification
+
+      // If account_status is explicitly 'pending_approval' or 'pending', redirect
+      if (data.account_status === 'pending_approval' || data.account_status === 'pending') {
+        console.log('[auth] Account pending approval, redirecting to pending')
+        router.push('/pending-approval')
+        return
+      }
+
+      // If account_status is explicitly 'rejected', sign out
+      if (data.account_status === 'rejected') {
+        console.log('[auth] Account rejected, signing out')
+        await supabase.auth.signOut()
+        router.push('/login?error=account_rejected')
+        return
+      }
+
+      console.log('[auth] Profile checks passed')
     } catch (error) {
       console.error('Error fetching profile:', error)
     }
@@ -155,6 +192,8 @@ export function useAuth() {
           email,
           full_name: fullName,
           role,
+          email_verified: false,
+          account_status: 'pending_approval',
         })
         .select()
         .single()
@@ -221,6 +260,7 @@ export function useAuth() {
       analyst: 2,
       project_manager: 3,
       board_member: 4,
+      admin: 5,
     }
 
     return roleHierarchy[profile.role] >= roleHierarchy[minimumRole]
