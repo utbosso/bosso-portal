@@ -10,3 +10,118 @@
  ✓ Ready in 4.4s
  ○ Compiling / ...
 [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+ ✓ Compiled /login in 18.7s (974 modules)
+ GET /login 200 in 9483ms
+ ○ Compiling /auth/callback ...
+ ✓ Compiled /auth/callback in 1164ms (694 modules)
+[auth/callback] User authenticated: internal@txbosso.com
+[auth/callback] User ID: 0d3ed942-e117-41d5-b56c-8d537e405730
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=f7db28da-3c14-4494-8fe2-d1b4de413b9e 307 in 1554ms
+ ✓ Compiled /auth/complete-signup in 351ms (1158 modules)
+ GET /auth/complete-signup 200 in 576ms
+ ✓ Compiled /dashboard in 479ms (1179 modules)
+ ○ Compiling /calendar ...
+ ✓ Compiled /calendar in 618ms (1205 modules)
+ ✓ Compiled in 1255ms (1008 modules)
+ ✓ Compiled in 459ms (1008 modules)
+ ✓ Compiled in 472ms (1008 modules)
+ ✓ Compiled in 415ms (1010 modules)
+ ✓ Compiled in 3.3s (1014 modules)
+ ✓ Compiled in 1391ms (1014 modules)
+ ✓ Compiled in 3.8s (1014 modules)
+ ✓ Compiled in 481ms (1014 modules)
+ ✓ Compiled in 472ms (1014 modules)
+ ✓ Compiled in 614ms (1014 modules)
+ ✓ Compiled in 404ms (1014 modules)
+ ○ Compiling /admin ...
+ ✓ Compiled /admin in 1198ms (1018 modules)
+ ○ Compiling /attendance ...
+ ✓ Compiled /attendance in 536ms (1033 modules)
+ ✓ Compiled /dashboard in 151ms (545 modules)
+ ✓ Compiled /signup in 389ms (1049 modules)
+ ○ Compiling /auth/callback ...
+ ✓ Compiled /auth/callback in 548ms (741 modules)
+[auth/callback] User authenticated: riddhimay@utexas.edu
+[auth/callback] User ID: f00b81bf-86d2-4f4e-bb4d-f6c703af41b0
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=6af300e5-d641-4e82-ba91-f9774fef895b 307 in 1158ms
+ ✓ Compiled /auth/complete-signup in 238ms (745 modules)
+ GET /auth/complete-signup 200 in 435ms
+ ✓ Compiled /pending-approval in 362ms (1251 modules)
+[auth/callback] User authenticated: internal@txbosso.com
+[auth/callback] User ID: 0d3ed942-e117-41d5-b56c-8d537e405730
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=92459709-9a25-4bb8-b8ca-4b7ac5129973 307 in 279ms
+ GET /auth/complete-signup 200 in 110ms
+[auth/callback] User authenticated: riddhimay@utexas.edu
+[auth/callback] User ID: f00b81bf-86d2-4f4e-bb4d-f6c703af41b0
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=52d22fd4-044a-4f04-9087-f925c2c30cfa 307 in 189ms
+ GET /auth/complete-signup 200 in 52ms
+[auth/callback] User authenticated: internal@txbosso.com
+[auth/callback] User ID: 0d3ed942-e117-41d5-b56c-8d537e405730
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=687a3946-4341-4b8f-866b-74f36bb25ec5 307 in 150ms
+ GET /auth/complete-signup 200 in 110ms
+ ✓ Compiled in 1435ms (516 modules)
+[auth/callback] User authenticated: riddhimay@utexas.edu
+[auth/callback] User ID: f00b81bf-86d2-4f4e-bb4d-f6c703af41b0
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=fa07cb7e-ddef-4bcb-83cc-e9a5de57945c 307 in 174ms
+ GET /auth/complete-signup 200 in 59ms
+ ✓ Compiled in 1190ms (516 modules)
+ ✓ Compiled in 2.8s (1061 modules)
+ ✓ Compiled in 1218ms (1065 modules)
+ ✓ Compiled in 2.9s (1065 modules)
+ ✓ Compiled in 1816ms (1065 modules)
+ GET /dashboard 200 in 690ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 619ms (579 modules)
+ GET /favicon.ico 200 in 748ms
+ ✓ Compiled in 416ms (518 modules)
+ GET /dashboard 200 in 251ms
+ GET /favicon.ico 200 in 42ms
+ ✓ Compiled in 1020ms (1065 modules)
+ ✓ Compiled in 611ms (1067 modules)
+ ✓ Compiled in 1119ms (1067 modules)
+ ✓ Compiled in 816ms (1067 modules)
+ GET /attendance 200 in 380ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 598ms (580 modules)
+ GET /favicon.ico 200 in 849ms
+ ○ Compiling /auth/callback ...
+ ✓ Compiled /auth/callback in 689ms (769 modules)
+[auth/callback] User authenticated: internal@txbosso.com
+[auth/callback] User ID: 0d3ed942-e117-41d5-b56c-8d537e405730
+[auth/callback] Redirecting to complete-signup for profile check
+ GET /auth/callback?code=82cf6012-cf43-43ed-ba6b-c011f6c09973 307 in 1146ms
+ ✓ Compiled /auth/complete-signup in 238ms (773 modules)
+ GET /auth/complete-signup 200 in 439ms
+ ✓ Compiled in 1234ms (1067 modules)
+ ✓ Compiled in 685ms (1067 modules)
+ ✓ Compiled in 683ms (1067 modules)
+ ✓ Compiled in 684ms (1067 modules)
+ GET /attendance 200 in 275ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 534ms (580 modules)
+ GET /favicon.ico 200 in 663ms
+ ✓ Compiled in 956ms (1067 modules)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /admin 200 in 353ms
+ ✓ Compiled /favicon.ico in 207ms (580 modules)
+ GET /favicon.ico 200 in 340ms
+ ✓ Compiled in 958ms (1099 modules)
+ GET /admin 200 in 413ms
+ GET /favicon.ico 200 in 22ms
+ ✓ Compiled in 1054ms (1067 modules)
+ ✓ Compiled in 805ms (1067 modules)
+ ○ Compiling /api/admin/delete-user ...
+ ✓ Compiled /api/admin/delete-user in 835ms (740 modules)
+ POST /api/admin/delete-user 200 in 2112ms
+ ✓ Compiled in 1372ms (1067 modules)
+ ✓ Compiled in 952ms (1067 modules)
+ ○ Compiling /announcements ...
+ ✓ Compiled /announcements in 1039ms (1061 modules)
+ ○ Compiling /documents ...
+ ✓ Compiled /documents in 581ms (1067 modules)

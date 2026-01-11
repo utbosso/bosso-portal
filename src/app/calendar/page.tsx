@@ -259,6 +259,9 @@ export default function CalendarPage() {
       endTime: end.toTimeString().slice(0, 5),
       audience: event.audience_scope ?? 'all',
       trackAttendance: event.track_attendance ?? false,
+      eventCategory: event.event_category ?? '',
+      eventType: event.event_type ?? '',
+      customEventType: event.custom_event_type ?? '',
       pointValue: event.point_value?.toString() ?? '',
     })
     setFormOpen(true)
