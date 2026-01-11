@@ -5,7 +5,9 @@ import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
+import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
 import type { Event, Task, Announcement, Opportunity, UserRole } from '@/types/database.types'
+import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
 import {
   Calendar,
   CheckSquare,
@@ -163,16 +165,8 @@ export default function DashboardPage() {
 
   const firstName = profile.full_name.split(' ')[0]
 
-  // Role-based point requirements (you can adjust these later)
-  const pointRequirements: Record<UserRole, number> = {
-    general_member: 50,
-    analyst: 75,
-    project_manager: 100,
-    board_member: 125,
-    admin: 0, // Admins don't have requirements
-  }
-
-  const requiredPoints = pointRequirements[profile.role]
+  // Get role-based point requirements from membership tiers system
+  const requiredPoints = ROLE_REQUIREMENTS[profile.role].minPoints
   const pointsProgress = requiredPoints > 0 ? Math.min((totalPoints / requiredPoints) * 100, 100) : 100
 
   return (
@@ -279,6 +273,11 @@ export default function DashboardPage() {
             </div>
           </Link>
         </div>
+      )}
+
+      {/* Category Points Breakdown (for non-admins) */}
+      {!isUserAdmin && profile && (
+        <CategoryPointsBreakdown userId={profile.id} />
       )}
 
       {/* Main content grid */}

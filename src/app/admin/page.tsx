@@ -3,7 +3,7 @@
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Shield,
   Users,
@@ -20,13 +20,29 @@ import {
   Clock,
   XCircle,
   Mail,
-  Trash2
+  Trash2,
+  Search,
+  Download
 } from 'lucide-react'
 import type { Profile, FeedbackSubmission, Application } from '@/types/database.types'
 
 const supabase = createClient()
 
-type TabType = 'overview' | 'users'
+type TabType = 'overview' | 'users' | 'points'
+
+type UserPointsBreakdown = {
+  user_id: string
+  full_name: string
+  email: string
+  role: string
+  total_points: number
+  membership_points: number
+  professional_points: number
+  social_points: number
+  philanthropy_points: number
+  is_active: boolean
+  meets_role_requirements: boolean
+}
 
 export default function AdminDashboard() {
   const { profile } = useAuth()
@@ -178,6 +194,19 @@ export default function AdminDashboard() {
             )}
           </div>
           {activeTab === 'users' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('points')}
+          className={`px-4 py-2 text-sm font-medium transition-all relative ${
+            activeTab === 'points'
+              ? 'text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Points Breakdown
+          {activeTab === 'points' && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
           )}
         </button>
@@ -411,6 +440,11 @@ export default function AdminDashboard() {
       {/* User Management Tab Content */}
       {activeTab === 'users' && (
         <UserManagementTab />
+      )}
+
+      {/* Points Breakdown Tab Content */}
+      {activeTab === 'points' && (
+        <PointsBreakdownTab />
       )}
     </div>
   )
@@ -842,6 +876,307 @@ BOSSO@UTAustin`)
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Points Breakdown Tab Component
+function PointsBreakdownTab() {
+  const [pointsData, setPointsData] = useState<UserPointsBreakdown[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'name' | 'total' | 'active'>('total')
+
+  useEffect(() => {
+    fetchPointsData()
+  }, [])
+
+  const fetchPointsData = async () => {
+    setLoading(true)
+    try {
+      // Fetch all users
+      const { data: users, error: usersError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role')
+        .order('full_name', { ascending: true })
+
+      if (usersError) throw usersError
+
+      // Fetch points breakdown for each user
+      const breakdownPromises = (users || []).map(async (user) => {
+        const { data: categoryData } = await supabase.rpc('get_user_points_by_category', {
+          user_uuid: user.id,
+        })
+
+        const { data: activeStatus } = await supabase.rpc('check_user_active_status', {
+          user_uuid: user.id,
+        })
+
+        const status = activeStatus?.[0] || {
+          is_active: false,
+          total_points: 0,
+          membership_points: 0,
+          professional_points: 0,
+          social_points: 0,
+          philanthropy_points: 0,
+        }
+
+        // Check if meets role requirements
+        const { data: roleCheck } = await supabase.rpc('check_role_requirements', {
+          user_uuid: user.id,
+          target_role: user.role,
+        })
+
+        return {
+          user_id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          role: user.role,
+          total_points: status.total_points,
+          membership_points: status.membership_points,
+          professional_points: status.professional_points,
+          social_points: status.social_points,
+          philanthropy_points: status.philanthropy_points,
+          is_active: status.is_active,
+          meets_role_requirements: roleCheck?.[0]?.meets_requirements || false,
+        }
+      })
+
+      const breakdown = await Promise.all(breakdownPromises)
+      setPointsData(breakdown)
+    } catch (error) {
+      console.error('Error fetching points data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredAndSortedData = useMemo(() => {
+    let filtered = pointsData.filter(
+      (user) =>
+        user.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+
+    return filtered.sort((a, b) => {
+      if (sortBy === 'name') return a.full_name.localeCompare(b.full_name)
+      if (sortBy === 'total') return b.total_points - a.total_points
+      if (sortBy === 'active') return (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)
+      return 0
+    })
+  }, [pointsData, searchQuery, sortBy])
+
+  const exportToCSV = () => {
+    const headers = [
+      'Name',
+      'Email',
+      'Role',
+      'Total Points',
+      'Membership',
+      'Professional/Education',
+      'Social',
+      'Philanthropy',
+      'Active Status',
+      'Meets Role Requirements',
+    ]
+    const rows = filteredAndSortedData.map((user) => [
+      user.full_name,
+      user.email,
+      user.role.replace('_', ' '),
+      user.total_points,
+      user.membership_points,
+      user.professional_points,
+      user.social_points,
+      user.philanthropy_points,
+      user.is_active ? 'Active' : 'Inactive',
+      user.meets_role_requirements ? 'Yes' : 'No',
+    ])
+
+    const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `points-breakdown-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header with search and export */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1 max-w-md">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by name or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="total">Sort by Total Points</option>
+            <option value="name">Sort by Name</option>
+            <option value="active">Sort by Active Status</option>
+          </select>
+          <button
+            onClick={exportToCSV}
+            className="px-4 py-2 bg-primary text-dark-300 rounded-md text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Points table */}
+      {loading ? (
+        <div className="text-center py-12">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-muted-foreground mt-4">Loading points data...</p>
+        </div>
+      ) : (
+        <div className="card-glow overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-dark-200/50 border-b border-primary/10">
+                <tr>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Member
+                  </th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Role
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Total
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Membership
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Prof/Edu
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Social
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Philanthropy
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-primary/10">
+                {filteredAndSortedData.map((user) => (
+                  <tr key={user.user_id} className="hover:bg-dark-200/30 transition">
+                    <td className="px-2 py-2">
+                      <div>
+                        <p className="text-xs font-medium text-foreground whitespace-nowrap">{user.full_name}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[200px]">{user.email}</p>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 whitespace-nowrap">
+                        {user.role.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <span className="text-xs font-bold text-foreground">{user.total_points}</span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <span
+                        className={`text-xs font-medium ${
+                          user.membership_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                        }`}
+                      >
+                        {user.membership_points}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <span
+                        className={`text-xs font-medium ${
+                          user.professional_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                        }`}
+                      >
+                        {user.professional_points}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <span
+                        className={`text-xs font-medium ${
+                          user.social_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                        }`}
+                      >
+                        {user.social_points}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <span
+                        className={`text-xs font-medium ${
+                          user.philanthropy_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                        }`}
+                      >
+                        {user.philanthropy_points}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                            user.is_active
+                              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                              : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                          }`}
+                        >
+                          {user.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                        {!user.meets_role_requirements && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
+                            Below req.
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="card-glow p-4">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Legend</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-green-400">●</span>
+            <span className="text-muted-foreground">Green: 25+ points (meets category minimum)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-orange-400">●</span>
+            <span className="text-muted-foreground">Orange: Below 25 points (needs more)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Active</span>
+            <span className="text-muted-foreground">100+ total points AND 25+ in each category</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">Below role req.</span>
+            <span className="text-muted-foreground">Doesn't meet minimum points for current role</span>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

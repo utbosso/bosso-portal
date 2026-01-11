@@ -318,6 +318,38 @@ export interface AnnouncementRead {
   read_at: string
 }
 
+// BOSSO Points System Categories (Spring 2026)
+export type EventCategory = 'membership' | 'professional_education' | 'social' | 'philanthropy'
+
+// BOSSO Points System Event Types
+export type EventType =
+  // Membership Events
+  | 'membership_profile_creation'
+  | 'on_time_dues_payment'
+  | 'resume_book_submission'
+  | 'semester_reflection'
+  | 'profit_share_participation'
+  | 'tabling_recruitment'
+  // Professional / Education Events
+  | 'general_meeting'
+  | 'workshop_attendance'
+  | 'director_board_coffee_chat'
+  | 'boss_attendance'
+  | 'case_competition_participation'
+  | 'member_project_participation'
+  // Social Events
+  | 'semesterly_org_social'
+  | 'project_team_social'
+  | 'role_based_social'
+  | 'org_wide_social'
+  // Philanthropy Events
+  | 'boss_volunteering_shift'
+  | 'individual_service_event'
+  | 'bosso_service_event'
+  | 'multi_org_service_event'
+  // Other
+  | 'other'
+
 export interface Event {
   id: string
   title: string
@@ -331,6 +363,9 @@ export interface Event {
   code_expires_at?: string | null
   point_value?: number | null
   track_attendance?: boolean | null
+  event_category?: EventCategory | null
+  event_type?: EventType | null
+  custom_event_type?: string | null
 }
 
 export interface DocumentItem {
@@ -449,7 +484,22 @@ export interface AttendanceRecord {
   user_id: string
   checked_in_at?: string
   points_earned: number
+  event_category?: EventCategory | null
   created_at?: string
+}
+
+export interface CustomEventType {
+  id: string
+  type_name: string
+  default_points: number
+  created_at?: string
+  created_by?: string
+}
+
+export interface CategoryPointsBreakdown {
+  category: EventCategory
+  category_points: number
+  events_attended: number
 }
 
 export type ResourceType = 'article' | 'video' | 'course' | 'tool' | 'guide' | 'template' | 'other'

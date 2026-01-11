@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
 import type { Event } from '@/types/database.types'
+import { getEventCategoryLabel, getEventTypeLabel, getEventCategoryColor } from '@/lib/bosso-points'
 import {
   RefreshCw,
   Calendar,
@@ -15,6 +16,8 @@ import {
   CheckCircle2,
   Shield,
   Hash,
+  Tag,
+  Folder,
 } from 'lucide-react'
 
 const supabase = createClient()
@@ -233,7 +236,7 @@ export default function AttendanceDisplayPage() {
           {/* Main Code Display - Large */}
           <div className="card-glow p-12 text-center space-y-8">
             {/* Event Info */}
-            <div className="space-y-2">
+            <div className="space-y-4">
               <h1 className="text-4xl font-bold text-gradient">{selectedEvent.title}</h1>
               <div className="flex flex-wrap items-center justify-center gap-4 text-muted-foreground">
                 {selectedEvent.location && (
@@ -250,6 +253,23 @@ export default function AttendanceDisplayPage() {
                   <Trophy className="w-4 h-4 text-primary" />
                   {selectedEvent.point_value} points
                 </span>
+              </div>
+              {/* Category and Type Badges */}
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
+                {selectedEvent.event_category && (
+                  <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border ${getEventCategoryColor(selectedEvent.event_category)}`}>
+                    <Folder className="w-4 h-4" />
+                    {getEventCategoryLabel(selectedEvent.event_category)}
+                  </span>
+                )}
+                {selectedEvent.event_type && (
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border bg-cyan-500/20 text-cyan-400 border-cyan-500/30">
+                    <Tag className="w-4 h-4" />
+                    {selectedEvent.event_type === 'other' && selectedEvent.custom_event_type
+                      ? selectedEvent.custom_event_type
+                      : getEventTypeLabel(selectedEvent.event_type)}
+                  </span>
+                )}
               </div>
             </div>
 

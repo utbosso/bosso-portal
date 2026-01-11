@@ -4,7 +4,9 @@ import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
+import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
 import type { AttendanceRecord, Event, Profile } from '@/types/database.types'
+import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
 import {
   ClipboardCheck,
   Trophy,
@@ -410,7 +412,7 @@ export default function AttendancePage() {
       // Find event with this code
       const { data: events, error: eventError } = await supabase
         .from('events')
-        .select('id, title, point_value, attendance_code, code_expires_at, end_at, start_at')
+        .select('id, title, point_value, attendance_code, code_expires_at, end_at, start_at, event_category')
         .eq('attendance_code', code)
         .eq('track_attendance', true)
         .single()
@@ -449,6 +451,7 @@ export default function AttendancePage() {
           event_id: events.id,
           user_id: profile.id,
           points_earned: events.point_value || 0,
+          event_category: events.event_category,
         })
 
       if (insertError) throw insertError
@@ -638,7 +641,7 @@ export default function AttendancePage() {
 
         {/* Stats Cards */}
         <div className="grid gap-4 sm:grid-cols-3">
-          <div className="card-glow p-5">
+          <div className="card-glow p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Points</p>
@@ -646,6 +649,27 @@ export default function AttendancePage() {
               </div>
               <Trophy className="w-10 h-10 text-primary opacity-50" />
             </div>
+            {(() => {
+              const requiredPoints = ROLE_REQUIREMENTS[profile.role].minPoints
+              const pointsProgress = requiredPoints > 0 ? Math.min((totalPoints / requiredPoints) * 100, 100) : 100
+              return requiredPoints > 0 ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Required for {profile.role.replace('_', ' ')}</span>
+                    <span className="text-primary font-medium">{requiredPoints} pts</span>
+                  </div>
+                  <div className="w-full h-2 bg-dark-200 rounded-full border border-primary/30">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all"
+                      style={{ width: `${pointsProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {totalPoints >= requiredPoints ? '✅ Requirement met!' : `${requiredPoints - totalPoints} points to go`}
+                  </p>
+                </div>
+              ) : null
+            })()}
           </div>
 
           <div className="card-glow p-5">
@@ -672,6 +696,9 @@ export default function AttendancePage() {
             </div>
           </div>
         </div>
+
+        {/* Category Points Breakdown */}
+        <CategoryPointsBreakdown userId={profile.id} />
 
         {/* Check-in Form */}
         <div className="card-glow p-6">

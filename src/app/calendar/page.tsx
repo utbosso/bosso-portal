@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
-import type { Event, UserRole } from '@/types/database.types'
+import type { Event, UserRole, EventCategory, EventType } from '@/types/database.types'
+import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
   ChevronLeft,
@@ -17,6 +18,8 @@ import {
   Calendar,
   AlertCircle,
   Mail,
+  Folder,
+  Tag,
 } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
 
@@ -31,6 +34,9 @@ type EventFormState = {
   endTime: string
   audience: UserRole | 'all'
   trackAttendance: boolean
+  eventCategory: EventCategory | ''
+  eventType: EventType | ''
+  customEventType: string
   pointValue: string
 }
 
@@ -43,6 +49,9 @@ const emptyForm: EventFormState = {
   endTime: '',
   audience: 'all',
   trackAttendance: false,
+  eventCategory: '',
+  eventType: '',
+  customEventType: '',
   pointValue: '',
 }
 
@@ -55,9 +64,33 @@ export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
 
-  const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<EventFormState>(emptyForm)
+  // Initialize form state from sessionStorage if available
+  const [formOpen, setFormOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('calendarFormOpen')
+      return saved === 'true'
+    }
+    return false
+  })
+  const [editingId, setEditingId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('calendarEditingId')
+    }
+    return null
+  })
+  const [form, setForm] = useState<EventFormState>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('calendarForm')
+      if (saved) {
+        try {
+          return JSON.parse(saved)
+        } catch {
+          return emptyForm
+        }
+      }
+    }
+    return emptyForm
+  })
 
   const canManage = hasMinimumRole('project_manager')
   const isUserAdmin = isAdmin(profile?.role)
@@ -150,6 +183,29 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.role])
 
+  // Persist form state to sessionStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('calendarFormOpen', formOpen.toString())
+    }
+  }, [formOpen])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (editingId) {
+        sessionStorage.setItem('calendarEditingId', editingId)
+      } else {
+        sessionStorage.removeItem('calendarEditingId')
+      }
+    }
+  }, [editingId])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('calendarForm', JSON.stringify(form))
+    }
+  }, [form])
+
   const eventsByDay = useMemo(() => {
     const map = new Map<string, Event[]>()
     for (const event of events) {
@@ -163,6 +219,15 @@ export default function CalendarPage() {
 
   const selectedKey = toDateKey(selectedDate)
   const selectedEvents = eventsByDay.get(selectedKey) ?? []
+
+  // Helper function to clear form state from sessionStorage
+  const clearFormState = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('calendarFormOpen')
+      sessionStorage.removeItem('calendarEditingId')
+      sessionStorage.removeItem('calendarForm')
+    }
+  }
 
   const handlePrevMonth = () => {
     setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
@@ -215,6 +280,28 @@ export default function CalendarPage() {
     return code
   }
 
+  // Handle category change
+  const handleCategoryChange = (category: EventCategory | '') => {
+    setForm((prev) => ({
+      ...prev,
+      eventCategory: category,
+      eventType: '', // Reset type when category changes
+      customEventType: '',
+      pointValue: '',
+    }))
+  }
+
+  // Handle event type change and auto-fill points
+  const handleEventTypeChange = (type: EventType | '') => {
+    const defaultPoints = type ? getDefaultPoints(type as EventType) : null
+    setForm((prev) => ({
+      ...prev,
+      eventType: type,
+      pointValue: defaultPoints !== null ? defaultPoints.toString() : prev.pointValue,
+      customEventType: type === 'other' ? prev.customEventType : '',
+    }))
+  }
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
@@ -246,6 +333,9 @@ export default function CalendarPage() {
       point_value: form.trackAttendance ? Number(form.pointValue) : 0,
       attendance_code: form.trackAttendance ? generateAttendanceCode() : null,
       code_expires_at: form.trackAttendance ? codeExpiresAt.toISOString() : null,
+      event_category: form.eventCategory || null,
+      event_type: form.eventType || null,
+      custom_event_type: (form.eventType === 'other' && form.customEventType) ? form.customEventType : null,
     }
 
     try {
@@ -262,6 +352,7 @@ export default function CalendarPage() {
         if (error) throw error
       }
 
+      clearFormState()
       setFormOpen(false)
       setEditingId(null)
       setForm(emptyForm)
@@ -606,6 +697,7 @@ View on portal: ${window.location.origin}/calendar`)
                 <button
                   type="button"
                   onClick={() => {
+                    clearFormState()
                     setFormOpen(false)
                     setEditingId(null)
                     setForm(emptyForm)
@@ -695,6 +787,75 @@ View on portal: ${window.location.origin}/calendar`)
                     className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
                   />
                 </div>
+
+                {/* Event Category Selection */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <Folder className="w-3.5 h-3.5" />
+                    Event Category
+                  </label>
+                  <select
+                    value={form.eventCategory}
+                    onChange={(e) => handleCategoryChange(e.target.value as EventCategory | '')}
+                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">Select Category (Optional)</option>
+                    {Object.entries(EVENT_CATEGORIES).map(([key, info]) => (
+                      <option key={key} value={key}>
+                        {info.label} ({info.maxPoints}+ pts possible)
+                      </option>
+                    ))}
+                  </select>
+                  {form.eventCategory && (
+                    <p className="text-xs text-muted-foreground">
+                      {EVENT_CATEGORIES[form.eventCategory as EventCategory].description}
+                    </p>
+                  )}
+                </div>
+
+                {/* Event Type Selection */}
+                {form.eventCategory && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5" />
+                      Event Type
+                    </label>
+                    <select
+                      value={form.eventType}
+                      onChange={(e) => handleEventTypeChange(e.target.value as EventType | '')}
+                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">Select Event Type (Optional)</option>
+                      {getEventTypesByCategory(form.eventCategory as EventCategory).map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label} {type.points !== null && `(${type.points} pts)`}
+                        </option>
+                      ))}
+                    </select>
+                    {form.eventType && form.eventType !== 'other' && (
+                      <p className="text-xs text-muted-foreground">
+                        {getEventTypesByCategory(form.eventCategory as EventCategory).find(t => t.value === form.eventType)?.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Custom Event Type Input (for "Other") */}
+                {form.eventType === 'other' && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground uppercase tracking-wide">Custom Event Type Name</label>
+                    <input
+                      type="text"
+                      value={form.customEventType}
+                      onChange={(e) => setForm((prev) => ({ ...prev, customEventType: e.target.value }))}
+                      placeholder="e.g., Board Retreat, Alumni Panel"
+                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter a custom name for this event type
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-3 pt-2 border-t border-primary/10">
                   <div className="flex items-center gap-3">
