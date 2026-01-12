@@ -298,7 +298,11 @@ export interface Profile {
   verification_token?: string | null
   verified_at?: string | null
   created_at?: string
-  // other columns if you have them
+  first_name?: string | null
+  last_name?: string | null
+  ut_eid?: string | null
+  ut_email?: string | null
+  phone_number?: string | null
 }
 
 export interface Announcement {

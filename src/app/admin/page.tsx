@@ -628,7 +628,7 @@ BOSSO Team`)
 
 Great news! Your BOSSO Portal account has been approved and is now active.
 
-You can now access the full portal at: https://portal.txbosso.com
+You can now access the full portal at: https://bosso-portal.vercel.app/login
 
 Your Account Details:
 • Name: ${user.full_name}
@@ -681,6 +681,26 @@ BOSSO@UTAustin`)
     window.open(gmailUrl, '_blank')
   }
 
+  const downloadMembersSpreadsheet = async () => {
+    try {
+      const response = await fetch('/api/admin/export-members')
+      if (!response.ok) throw new Error('Failed to download spreadsheet')
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `bosso-members-${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Error downloading spreadsheet:', error)
+      alert('Failed to download spreadsheet')
+    }
+  }
+
   const filteredUsers = users.filter(user => {
     if (filter === 'all') return true
     if (filter === 'pending') return user.account_status === 'pending_approval'
@@ -709,26 +729,35 @@ BOSSO@UTAustin`)
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {(['pending', 'active', 'rejected', 'all'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              filter === tab
-                ? 'bg-primary/20 text-primary border border-primary/30'
-                : 'bg-dark-200 text-muted-foreground hover:text-foreground border border-transparent'
-            }`}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            {tab === 'pending' && users.filter(u => u.account_status === 'pending_approval').length > 0 && (
-              <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
-                {users.filter(u => u.account_status === 'pending_approval').length}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Filter Tabs and Export */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {(['pending', 'active', 'rejected', 'all'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                filter === tab
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'bg-dark-200 text-muted-foreground hover:text-foreground border border-transparent'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'pending' && users.filter(u => u.account_status === 'pending_approval').length > 0 && (
+                <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
+                  {users.filter(u => u.account_status === 'pending_approval').length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={downloadMembersSpreadsheet}
+          className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-all flex items-center gap-2 whitespace-nowrap"
+        >
+          <Download className="w-4 h-4" />
+          Export Members
+        </button>
       </div>
 
       {/* Users List */}

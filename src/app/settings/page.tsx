@@ -2,13 +2,21 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { createClient } from '@/lib/supabase/client'
-import { Moon, Sun, User, Mail, Briefcase, Calendar, Settings as SettingsIcon } from 'lucide-react'
+import { Moon, Sun, User, Mail, Briefcase, Settings as SettingsIcon, Phone, Edit2 } from 'lucide-react'
+import ProfileEditForm from '@/components/ProfileEditForm'
+import { Profile } from '@/types/database.types'
 
 export default function SettingsPage() {
-  const { profile } = useAuth()
+  const { profile: authProfile } = useAuth()
 
+  const [profile, setProfile] = useState<Profile | null>(authProfile)
+  const [isEditing, setIsEditing] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+
+  // Update local profile when authProfile changes
+  useEffect(() => {
+    setProfile(authProfile)
+  }, [authProfile])
 
   // Load theme from localStorage on mount
   useEffect(() => {
@@ -32,6 +40,11 @@ export default function SettingsPage() {
     setTheme(newTheme)
     localStorage.setItem('theme', newTheme)
     applyTheme(newTheme)
+  }
+
+  const handleProfileUpdate = (updatedProfile: Profile) => {
+    setProfile(updatedProfile)
+    setIsEditing(false)
   }
 
 
@@ -60,39 +73,84 @@ export default function SettingsPage() {
 
       {/* Profile Information */}
       <div className="card-glow p-6 space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <User className="w-5 h-5 text-primary" />
-          Profile Information
-        </h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Full Name</label>
-            <div className="px-4 py-3 bg-muted rounded-lg text-foreground">
-              {profile.full_name}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Email</label>
-            <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
-              <Mail className="w-4 h-4 text-muted-foreground" />
-              {profile.email}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Role</label>
-            <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-muted-foreground" />
-              <span className="capitalize">{profile.role.replace('_', ' ')}</span>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Member Since</label>
-            <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-muted-foreground" />
-              {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'N/A'}
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+            <User className="w-5 h-5 text-primary" />
+            Profile Information
+          </h2>
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
+            >
+              <Edit2 className="w-4 h-4" />
+              Edit Profile
+            </button>
+          )}
         </div>
+
+        {isEditing ? (
+          <ProfileEditForm
+            profile={profile}
+            onSuccess={handleProfileUpdate}
+            onCancel={() => setIsEditing(false)}
+          />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">First Name</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground">
+                {profile.first_name || 'Not set'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Last Name</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground">
+                {profile.last_name || 'Not set'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Full Name</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground">
+                {profile.full_name}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Email</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+                <Mail className="w-4 h-4 text-muted-foreground" />
+                {profile.email}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">UT EID</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground">
+                {profile.ut_eid || 'Not set'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">UT Email</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+                <Mail className="w-4 h-4 text-muted-foreground" />
+                {profile.ut_email || 'Not set'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+                <Phone className="w-4 h-4 text-muted-foreground" />
+                {profile.phone_number || 'Not set'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Role</label>
+              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-muted-foreground" />
+                <span className="capitalize">{profile.role.replace('_', ' ')}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Appearance */}

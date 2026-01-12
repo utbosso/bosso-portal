@@ -69,10 +69,12 @@ export function getAccountApprovedEmail(userName: string, loginLink: string) {
             <li>Networking directory</li>
             <li>Learning resources</li>
             <li>Job opportunities</li>
+            <li>BOSSO points tracking</li>
             <li>And much more!</li>
           </ul>
           <a href="${loginLink}" class="button">Login to Portal</a>
           <p>We're excited to have you as part of the BOSSO community!</p>
+          <p><strong>Next Steps:</strong> Complete your profile in the Settings tab to ensure we have all your information.</p>
         </div>
         <div class="footer">
           <p>Business of Sports Student Organization @ UT Austin</p>
