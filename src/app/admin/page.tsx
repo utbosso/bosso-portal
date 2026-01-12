@@ -640,7 +640,7 @@ If you have any questions or need assistance, feel free to reach out to the boar
 Welcome to the team!
 
 Best regards,
-BOSSO@UTAustin`)
+BOSSO Team`)
 
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
     window.open(gmailUrl, '_blank')
