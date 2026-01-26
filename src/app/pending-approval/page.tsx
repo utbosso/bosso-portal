@@ -1,16 +1,58 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
+import { createClient } from '@/lib/supabase/client'
 
 export default function PendingApprovalPage() {
-  const { signOut, user, profile } = useAuth()
+  const { signOut, user, loading } = useAuth()
   const router = useRouter()
+  const [profile, setProfile] = useState<any>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+
+  // Fetch profile directly to avoid RLS/caching issues
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user) return
+
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      setProfile(data)
+      setProfileLoading(false)
+    }
+
+    if (user) {
+      fetchProfile()
+    } else if (!loading) {
+      setProfileLoading(false)
+    }
+  }, [user, loading])
+
+  // Check if user signed in with Google OAuth (email is auto-verified)
+  // Multiple detection methods:
+  // 1. Supabase metadata/identities
+  // 2. Email domain: @utexas.edu (non-eid) = Google OAuth, @eid.utexas.edu = email/password
+  const email = (user?.email || profile?.email || '').toLowerCase()
+  const isGoogleByEmail = email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu')
+  const isGoogleByMetadata =
+    user?.app_metadata?.provider === 'google' ||
+    user?.app_metadata?.providers?.includes('google') ||
+    user?.identities?.some((identity: any) => identity.provider === 'google')
+
+  const isGoogleUser = isGoogleByEmail || isGoogleByMetadata
+  const isEmailVerified = profile?.email_verified === true || isGoogleUser
 
   useEffect(() => {
-    // If no profile exists, sign out and redirect to signup
+    // Wait for profile loading to complete before making decisions
+    if (profileLoading) return
+
+    // If no profile exists after loading, sign out and redirect to signup
     if (!profile && user) {
       signOut()
       router.push('/signup?error=no_profile')
@@ -21,10 +63,29 @@ export default function PendingApprovalPage() {
     if (profile?.account_status === 'approved' || profile?.account_status === 'active') {
       router.push('/dashboard')
     }
-  }, [profile, user, router, signOut])
+  }, [profile, profileLoading, user, router, signOut])
 
   const handleSignOut = async () => {
     await signOut()
+  }
+
+  // Show loading while auth or profile is loading
+  const isUserDataReady = !loading && !profileLoading && user
+
+  if (!isUserDataReady) {
+    return (
+      <div className="min-h-screen bg-dark-300 flex items-center justify-center p-4">
+        <div className="card-glow p-8 text-center">
+          <div className="flex justify-center mb-4">
+            <svg className="animate-spin h-8 w-8 text-primary" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          </div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -60,7 +121,7 @@ export default function PendingApprovalPage() {
               <p className="text-xs text-muted-foreground mb-1">Signed in as</p>
               <p className="text-foreground font-medium">{user.email}</p>
               <p className="text-xs text-muted-foreground mt-2">
-                Email verified: {profile?.email_verified === true ? (
+                Email verified: {isEmailVerified ? (
                   <span className="text-green-400 font-semibold">Yes ✓</span>
                 ) : (
                   <span className="text-amber-400 font-semibold">No - Pending Admin</span>
@@ -75,7 +136,7 @@ export default function PendingApprovalPage() {
           {/* Information */}
           <div className="bg-dark-100 border border-primary/20 rounded-lg p-4 space-y-3">
             <h3 className="font-semibold text-foreground text-sm">What's happening?</h3>
-            {profile?.email_verified === true ? (
+            {isEmailVerified ? (
               <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
                 <li>Your email has been verified successfully</li>
                 <li>A BOSSO admin is reviewing your account</li>

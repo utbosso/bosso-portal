@@ -82,6 +82,20 @@ export default function CompleteSignupPage() {
 
           // Existing user logging in - support both old and new status values
           console.log('[complete-signup] Profile found, status:', profile.account_status)
+
+          // For Google OAuth users, ensure email_verified is true (in case it wasn't set before)
+          const isGoogleUser = user.app_metadata?.provider === 'google' ||
+                               user.app_metadata?.providers?.includes('google') ||
+                               user.identities?.some((identity: any) => identity.provider === 'google')
+
+          if (isGoogleUser && profile.email_verified !== true) {
+            console.log('[complete-signup] Google user without email_verified, updating...')
+            await supabase
+              .from('profiles')
+              .update({ email_verified: true })
+              .eq('id', user.id)
+          }
+
           if (profile.account_status === 'pending_approval' || profile.account_status === 'pending') {
             console.log('[complete-signup] Redirecting to pending-approval')
             router.push('/pending-approval')
