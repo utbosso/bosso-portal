@@ -26,7 +26,7 @@ export default function LoginPage() {
     } else if (errorParam === 'no_email') {
       setError('Unable to retrieve email from Google account.')
     } else if (errorParam === 'invalid_domain') {
-      setError('Only @utexas.edu, @eid.utexas.edu, and @txbosso.com email addresses are allowed.')
+      setError('Only @utexas.edu, @eid.utexas.edu, @my.utexas.edu, and @txbosso.com email addresses are allowed.')
     } else if (errorParam === 'account_not_approved') {
       setError('Your account is not approved. Please wait for admin approval.')
     }
@@ -134,7 +134,7 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
-                  placeholder="yourname@eid.utexas.edu"
+                  placeholder="yourname@eid.utexas.edu or @my.utexas.edu"
                 />
               </div>
 

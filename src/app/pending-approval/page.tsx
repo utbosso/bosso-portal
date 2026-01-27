@@ -37,9 +37,9 @@ export default function PendingApprovalPage() {
   // Check if user signed in with Google OAuth (email is auto-verified)
   // Multiple detection methods:
   // 1. Supabase metadata/identities
-  // 2. Email domain: @utexas.edu (non-eid) = Google OAuth, @eid.utexas.edu = email/password
+  // 2. Email domain: @utexas.edu (non-eid, non-my) = Google OAuth, @eid.utexas.edu / @my.utexas.edu = email/password
   const email = (user?.email || profile?.email || '').toLowerCase()
-  const isGoogleByEmail = email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu')
+  const isGoogleByEmail = email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu') && !email.endsWith('@my.utexas.edu')
   const isGoogleByMetadata =
     user?.app_metadata?.provider === 'google' ||
     user?.app_metadata?.providers?.includes('google') ||

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     // Validate UT Austin email
     const email = user.email.toLowerCase()
-    if (!email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu') && !email.endsWith('@txbosso.com')) {
+    if (!email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu') && !email.endsWith('@my.utexas.edu') && !email.endsWith('@txbosso.com')) {
       // Not a UT Austin email - sign out and redirect with error
       await supabase.auth.signOut()
       return NextResponse.redirect(`${requestUrl.origin}/signup?error=invalid_domain`)

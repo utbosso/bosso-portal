@@ -726,8 +726,8 @@ BOSSO Team`)
     const email = prompt('Enter the email address of the orphaned auth user to delete:')
     if (!email) return
 
-    if (!email.includes('@eid.utexas.edu') && !email.includes('@utexas.edu') && !email.includes('@txbosso.com')) {
-      alert('Please enter a valid @eid.utexas.edu, @utexas.edu, or @txbosso.com email address')
+    if (!email.includes('@eid.utexas.edu') && !email.includes('@my.utexas.edu') && !email.includes('@utexas.edu') && !email.includes('@txbosso.com')) {
+      alert('Please enter a valid @eid.utexas.edu, @my.utexas.edu, @utexas.edu, or @txbosso.com email address')
       return
     }
 
@@ -980,7 +980,7 @@ BOSSO@UTAustin`)
                         >
                           Request Dues
                         </button>
-                        {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
+                        {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
                           <>
                             <button
                               onClick={() => sendVerificationEmail(user)}
@@ -1016,7 +1016,7 @@ BOSSO@UTAustin`)
                             </span>
                           )}
                         </label>
-                        {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
+                        {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
                           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                             <input
                               type="checkbox"

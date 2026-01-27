@@ -30,7 +30,7 @@ export default function SignupPage() {
     if (errorParam === 'no_profile') {
       setError('No account found. Please sign up first before trying to log in.')
     } else if (errorParam === 'invalid_domain') {
-      setError('Only @utexas.edu, @eid.utexas.edu, and @txbosso.com email addresses are allowed.')
+      setError('Only @utexas.edu, @eid.utexas.edu, @my.utexas.edu, and @txbosso.com email addresses are allowed.')
     }
   }, [searchParams])
 
@@ -136,8 +136,8 @@ export default function SignupPage() {
 
     // Validate email domain
     const email = formData.email.toLowerCase().trim()
-    if (!email.endsWith('@eid.utexas.edu')) {
-      setError('Only @eid.utexas.edu email addresses are allowed for email/password signup')
+    if (!email.endsWith('@eid.utexas.edu') && !email.endsWith('@my.utexas.edu')) {
+      setError('Only @eid.utexas.edu and @my.utexas.edu email addresses are allowed for email/password signup')
       return
     }
 
@@ -337,7 +337,7 @@ export default function SignupPage() {
               />
             </div>
 
-            {/* Email/Password Form for @eid.utexas.edu */}
+            {/* Email/Password Form for @eid.utexas.edu / @my.utexas.edu */}
             {showPasswordForm && codeValidated && formData.fullName.trim() && (
               <>
                 <div className="space-y-2">
@@ -352,10 +352,10 @@ export default function SignupPage() {
                     onChange={handleChange}
                     required
                     className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
-                    placeholder="yourname@eid.utexas.edu"
+                    placeholder="yourname@eid.utexas.edu or @my.utexas.edu"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Must be an @eid.utexas.edu email address
+                    Must be an @eid.utexas.edu or @my.utexas.edu email address
                   </p>
                 </div>
 
@@ -444,14 +444,14 @@ export default function SignupPage() {
               </div>
             </div>
 
-            {/* Email/Password Option for @eid.utexas.edu */}
+            {/* Email/Password Option for @eid.utexas.edu / @my.utexas.edu */}
             <button
               type="button"
               onClick={() => setShowPasswordForm(true)}
               disabled={loading || !codeValidated || !formData.fullName.trim()}
               className="w-full py-3 border-2 border-primary/30 rounded-lg text-primary hover:bg-primary/10 hover:border-primary/60 transition-all hover-glow font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Sign up with Email/Password (@eid.utexas.edu)
+              Sign up with Email/Password (@eid / @my.utexas.edu)
             </button>
               </>
             )}

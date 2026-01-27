@@ -127,9 +127,9 @@ export default function CompleteSignupPage() {
 
         // Validate email domain again (extra safety check)
         const email = user.email.toLowerCase()
-        if (!email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu') && !email.endsWith('@txbosso.com')) {
+        if (!email.endsWith('@utexas.edu') && !email.endsWith('@eid.utexas.edu') && !email.endsWith('@my.utexas.edu') && !email.endsWith('@txbosso.com')) {
           await supabase.auth.signOut()
-          setErrorMessage('Only @utexas.edu, @eid.utexas.edu, and @txbosso.com email addresses are allowed.')
+          setErrorMessage('Only @utexas.edu, @eid.utexas.edu, @my.utexas.edu, and @txbosso.com email addresses are allowed.')
           setStatus('error')
           return
         }
