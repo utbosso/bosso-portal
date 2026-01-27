@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: "BOSSO Member Portal | Business of Sports",
   description:
     "Member portal for the Business of Sports Student Organization (BOSSO) at UT Austin. Track events, projects, opportunities, and the business of sports.",
+  icons: {
+    icon: "/bosso-logo-dark.png",
+    apple: "/bosso-logo-dark.png",
+  },
 };
 
 export const viewport: Viewport = {
