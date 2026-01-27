@@ -685,6 +685,21 @@ BOSSO Team`)
     }
   }
 
+  const toggleDuesEmailSent = async (userId: string, currentlySent: boolean) => {
+    try {
+      await supabase
+        .from('profiles')
+        .update({
+          dues_email_sent_at: currentlySent ? null : new Date().toISOString()
+        })
+        .eq('id', userId)
+
+      await fetchUsers()
+    } catch (error) {
+      console.error('Error updating dues email status:', error)
+    }
+  }
+
   const markEmailVerified = async (userId: string) => {
     setProcessingUserId(userId)
     try {
@@ -986,22 +1001,38 @@ BOSSO@UTAustin`)
                       </div>
 
                       {/* Email sent tracking */}
-                      {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
+                      <div className="flex flex-col gap-1">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                           <input
                             type="checkbox"
-                            checked={!!(user as any).verification_email_sent_at}
-                            onChange={() => toggleVerificationEmailSent(user.id, !!(user as any).verification_email_sent_at)}
+                            checked={!!(user as any).dues_email_sent_at}
+                            onChange={() => toggleDuesEmailSent(user.id, !!(user as any).dues_email_sent_at)}
                             className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
                           />
-                          Email sent
-                          {(user as any).verification_email_sent_at && (
+                          Dues email sent
+                          {(user as any).dues_email_sent_at && (
                             <span className="text-muted-foreground/70">
-                              ({new Date((user as any).verification_email_sent_at).toLocaleDateString()})
+                              ({new Date((user as any).dues_email_sent_at).toLocaleDateString()})
                             </span>
                           )}
                         </label>
-                      )}
+                        {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={!!(user as any).verification_email_sent_at}
+                              onChange={() => toggleVerificationEmailSent(user.id, !!(user as any).verification_email_sent_at)}
+                              className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
+                            />
+                            Verification email sent
+                            {(user as any).verification_email_sent_at && (
+                              <span className="text-muted-foreground/70">
+                                ({new Date((user as any).verification_email_sent_at).toLocaleDateString()})
+                              </span>
+                            )}
+                          </label>
+                        )}
+                      </div>
                     </>
                   )}
 
