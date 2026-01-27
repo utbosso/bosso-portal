@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
@@ -137,11 +137,13 @@ const quickLinks = [
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { user, profile, loading, signOut } = useAuth()
 
   // Track if we've loaded once - after first load, don't show loading spinner
   // This prevents scroll reset when switching browser tabs
   const hasLoadedOnceRef = useRef(false)
+  const scrollPositionRef = useRef(0)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -161,6 +163,63 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     () => pathname === '/login' || pathname === '/signup' || pathname?.startsWith('/auth/') || pathname === '/pending-approval' || pathname === '/verify-email',
     [pathname]
   )
+
+  const scrollKey = useMemo(() => {
+    const query = searchParams?.toString()
+    return query ? `${pathname}?${query}` : pathname
+  }, [pathname, searchParams])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual'
+    }
+    return () => {
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'auto'
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const key = `scroll:${scrollKey}`
+
+    const restoreIfNeeded = () => {
+      const stored = sessionStorage.getItem(key)
+      const y = stored ? Number(stored) : 0
+      if (Number.isFinite(y) && y > 0 && window.scrollY === 0) {
+        requestAnimationFrame(() => window.scrollTo(0, y))
+      }
+    }
+
+    const handleScroll = () => {
+      const y = window.scrollY
+      scrollPositionRef.current = y
+      sessionStorage.setItem(key, String(y))
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        sessionStorage.setItem(key, String(window.scrollY))
+      } else {
+        restoreIfNeeded()
+      }
+    }
+
+    restoreIfNeeded()
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('pageshow', restoreIfNeeded)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('pageshow', restoreIfNeeded)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      sessionStorage.setItem(key, String(window.scrollY))
+    }
+  }, [scrollKey])
 
   // Detect theme changes
   useEffect(() => {

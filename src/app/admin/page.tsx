@@ -771,9 +771,8 @@ Thank you for creating a BOSSO Portal account!
 Before we can approve your account, we need to confirm that you have paid your membership dues.
 
 Dues Payment Information:
-• Amount: [INSERT AMOUNT HERE]
-• Payment Method: [INSERT PAYMENT INSTRUCTIONS - Venmo/Zelle/etc.]
-• Payment Link: [INSERT LINK IF APPLICABLE]
+• Amount: $
+• Venmo: @hdave7
 
 Once you have completed the payment, please reply to this email with:
 1. Confirmation of payment (screenshot or transaction ID)
@@ -784,11 +783,6 @@ We will approve your portal account within 24-48 hours of receiving confirmation
 If you have already paid your dues, please reply with your confirmation details and we'll get you approved right away.
 
 If you have any questions about dues or the payment process, feel free to reach out.
-
-Account Details:
-Name: ${user.full_name}
-Email: ${user.email}
-Role: ${user.role.replace('_', ' ')}
 
 Best regards,
 BOSSO@UTAustin`)
