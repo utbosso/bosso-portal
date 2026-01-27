@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "scrape:teamwork": "node scripts/teamwork-scraper.js"
+    "scrape:teamwork": "node scripts/utils/teamwork-scraper.js"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.0.5",
