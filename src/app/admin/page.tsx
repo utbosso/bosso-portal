@@ -3,7 +3,8 @@
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import {
   Shield,
   Users,
@@ -46,7 +47,19 @@ type UserPointsBreakdown = {
 
 export default function AdminDashboard() {
   const { profile } = useAuth()
-  const [activeTab, setActiveTab] = useState<TabType>('overview')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  // Get active tab from URL, default to 'overview'
+  const tabFromUrl = searchParams.get('tab') as TabType | null
+  const activeTab: TabType = tabFromUrl && ['overview', 'users', 'points'].includes(tabFromUrl) ? tabFromUrl : 'overview'
+
+  // Ref to track scroll position through re-renders
+  const scrollPositionRef = useRef<number>(0)
+  // Track if we've loaded data at least once (to avoid showing loading spinner on refetch)
+  const hasLoadedOnceRef = useRef<boolean>(false)
+
+  // State declarations (must be before useEffects that use them)
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -60,6 +73,89 @@ export default function AdminDashboard() {
   const [recentFeedback, setRecentFeedback] = useState<FeedbackSubmission[]>([])
   const [usersByRole, setUsersByRole] = useState<Record<string, number>>({})
 
+  // Update URL when tab changes (without full page reload)
+  const setActiveTab = (tab: TabType) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('tab', tab)
+    router.replace(`/admin?${params.toString()}`, { scroll: false })
+  }
+
+  // Save and restore scroll position when switching browser tabs
+  useEffect(() => {
+    // Disable browser's automatic scroll restoration
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual'
+    }
+
+    // Save scroll position continuously while on page
+    const handleScroll = () => {
+      scrollPositionRef.current = window.scrollY
+      sessionStorage.setItem('admin-scroll-position', window.scrollY.toString())
+    }
+
+    // Aggressive scroll restoration function
+    const restoreScroll = (scrollY: number) => {
+      const restore = () => window.scrollTo(0, scrollY)
+      // Try multiple times at different intervals to combat any resets
+      restore()
+      requestAnimationFrame(restore)
+      setTimeout(restore, 0)
+      setTimeout(restore, 50)
+      setTimeout(restore, 100)
+      setTimeout(restore, 200)
+      setTimeout(restore, 500)
+      setTimeout(restore, 1000)
+    }
+
+    // Handle tab visibility changes
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab is being hidden - save current scroll position
+        scrollPositionRef.current = window.scrollY
+        sessionStorage.setItem('admin-scroll-position', window.scrollY.toString())
+      } else {
+        // Tab is becoming visible - restore scroll position
+        const savedScroll = sessionStorage.getItem('admin-scroll-position')
+        if (savedScroll) {
+          const scrollY = parseInt(savedScroll, 10)
+          scrollPositionRef.current = scrollY
+          restoreScroll(scrollY)
+        }
+      }
+    }
+
+    // Restore scroll position on initial mount
+    const savedScroll = sessionStorage.getItem('admin-scroll-position')
+    if (savedScroll) {
+      const scrollY = parseInt(savedScroll, 10)
+      scrollPositionRef.current = scrollY
+      setTimeout(() => {
+        window.scrollTo(0, scrollY)
+      }, 100)
+    }
+
+    window.addEventListener('scroll', handleScroll)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      // Restore browser's scroll restoration on unmount
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'auto'
+      }
+    }
+  }, [])
+
+  // Restore scroll position when loading completes
+  useEffect(() => {
+    if (!loading && scrollPositionRef.current > 0) {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollPositionRef.current)
+      })
+    }
+  }, [loading])
+
   useEffect(() => {
     if (profile && isAdmin(profile.role)) {
       fetchDashboardData()
@@ -67,7 +163,11 @@ export default function AdminDashboard() {
   }, [profile])
 
   const fetchDashboardData = async () => {
-    setLoading(true)
+    // Only show loading spinner on initial load, not on refetches
+    // This prevents scroll position from resetting when switching tabs
+    if (!hasLoadedOnceRef.current) {
+      setLoading(true)
+    }
     try {
       // Fetch all users
       const { data: users } = await supabase
@@ -121,6 +221,7 @@ export default function AdminDashboard() {
       console.error('Error fetching dashboard data:', error)
     } finally {
       setLoading(false)
+      hasLoadedOnceRef.current = true
     }
   }
 

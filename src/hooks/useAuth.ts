@@ -117,8 +117,22 @@ export function useAuth() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return
 
-      console.log('[auth] onAuthStateChange fired', { hasSession: !!session })
-      setLoading(true)
+      console.log('[auth] onAuthStateChange fired', { event: _event, hasSession: !!session })
+
+      // Only handle significant auth events (sign in/out), not token refreshes
+      // This prevents the app from unmounting and resetting state on tab switches
+      const isSignificantEvent = _event === 'SIGNED_IN' || _event === 'SIGNED_OUT'
+
+      // For token refreshes when we already have a user, just silently update the user object
+      // without triggering loading states or refetching profile
+      if (!isSignificantEvent && session?.user) {
+        setUser(session.user)
+        return
+      }
+
+      if (isSignificantEvent) {
+        setLoading(true)
+      }
 
       ;(async () => {
         try {
@@ -132,7 +146,7 @@ export function useAuth() {
         } catch (error) {
           console.error('Error in onAuthStateChange handler:', error)
         } finally {
-          if (isMounted) {
+          if (isMounted && isSignificantEvent) {
             console.log('[auth] onAuthStateChange done, setLoading(false)')
             setLoading(false)
           }

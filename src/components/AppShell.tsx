@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -138,6 +138,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const { user, profile, loading, signOut } = useAuth()
+
+  // Track if we've loaded once - after first load, don't show loading spinner
+  // This prevents scroll reset when switching browser tabs
+  const hasLoadedOnceRef = useRef(false)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -576,7 +580,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>
   }
 
-  if (loading) {
+  // Only show loading spinner on initial load, not on subsequent re-renders
+  // This prevents scroll position from resetting when switching browser tabs
+  if (loading && !hasLoadedOnceRef.current) {
     return (
       <div className="min-h-screen bg-dark-300 flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -589,6 +595,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!user || !profile) {
     return null
+  }
+
+  // Mark that we've loaded at least once
+  if (!hasLoadedOnceRef.current && user && profile) {
+    hasLoadedOnceRef.current = true
   }
 
   const sidebarWidth = sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'
