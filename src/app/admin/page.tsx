@@ -670,6 +670,21 @@ BOSSO Team`)
     window.open(gmailUrl, '_blank')
   }
 
+  const toggleVerificationEmailSent = async (userId: string, currentlySent: boolean) => {
+    try {
+      await supabase
+        .from('profiles')
+        .update({
+          verification_email_sent_at: currentlySent ? null : new Date().toISOString()
+        })
+        .eq('id', userId)
+
+      await fetchUsers()
+    } catch (error) {
+      console.error('Error updating verification email status:', error)
+    }
+  }
+
   const markEmailVerified = async (userId: string) => {
     setProcessingUserId(userId)
     try {
@@ -919,53 +934,79 @@ BOSSO@UTAustin`)
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3 min-w-[280px]">
                   {user.account_status === 'pending_approval' && (
                     <>
+                      {/* Primary Actions */}
                       <div className="flex gap-2">
                         <button
                           onClick={() => updateUserStatus(user.id, 'active')}
                           disabled={processingUserId === user.id}
-                          className="px-4 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-lg hover:bg-green-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex-1 px-3 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-lg hover:bg-green-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {processingUserId === user.id ? 'Processing...' : 'Approve'}
+                          {processingUserId === user.id ? '...' : 'Approve'}
                         </button>
                         <button
                           onClick={() => updateUserStatus(user.id, 'rejected')}
                           disabled={processingUserId === user.id}
-                          className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex-1 px-3 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {processingUserId === user.id ? 'Processing...' : 'Reject'}
+                          {processingUserId === user.id ? '...' : 'Reject'}
+                        </button>
+                        <button
+                          onClick={() => deleteUser(user.id, user.email)}
+                          disabled={processingUserId === user.id}
+                          className="px-3 py-2 bg-red-500/10 border border-red-500/20 text-red-400/70 rounded-lg hover:bg-red-500/20 hover:text-red-400 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Delete Account"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-                      <button
-                        onClick={() => sendDuesPaymentRequest(user)}
-                        className="px-4 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded-lg hover:bg-yellow-500/30 transition-all font-medium text-sm flex items-center justify-center gap-2"
-                      >
-                        <Mail className="w-4 h-4" />
-                        Request Dues Payment
-                      </button>
 
-                      {/* Email verification buttons for @eid.utexas.edu users */}
+                      {/* Email Actions */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => sendDuesPaymentRequest(user)}
+                          className="flex-1 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded text-xs hover:bg-yellow-500/30 transition-all"
+                        >
+                          Request Dues
+                        </button>
+                        {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
+                          <>
+                            <button
+                              onClick={() => sendVerificationEmail(user)}
+                              className="flex-1 px-3 py-1.5 bg-primary/20 border border-primary/30 text-primary rounded text-xs hover:bg-primary/30 transition-all"
+                            >
+                              Verify Email
+                            </button>
+                            <button
+                              onClick={() => markEmailVerified(user.id)}
+                              disabled={processingUserId === user.id}
+                              className="px-3 py-1.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded text-xs hover:bg-blue-500/30 transition-all disabled:opacity-50"
+                              title="Mark as verified"
+                            >
+                              ✓
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Email sent tracking */}
                       {user.email?.endsWith('@eid.utexas.edu') && user.email_verified !== true && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => sendVerificationEmail(user)}
-                            className="flex-1 px-4 py-2 bg-primary/20 border border-primary/30 text-primary rounded-lg hover:bg-primary/30 transition-all font-medium text-sm flex items-center justify-center gap-2"
-                            title="Open email client with pre-filled verification message"
-                          >
-                            <Mail className="w-4 h-4" />
-                            Send Verification Email
-                          </button>
-                          <button
-                            onClick={() => markEmailVerified(user.id)}
-                            disabled={processingUserId === user.id}
-                            className="flex-1 px-4 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
-                            title="Mark email as verified after receiving reply"
-                          >
-                            {processingUserId === user.id ? 'Processing...' : '✓ Mark Verified'}
-                          </button>
-                        </div>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={!!(user as any).verification_email_sent_at}
+                            onChange={() => toggleVerificationEmailSent(user.id, !!(user as any).verification_email_sent_at)}
+                            className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
+                          />
+                          Email sent
+                          {(user as any).verification_email_sent_at && (
+                            <span className="text-muted-foreground/70">
+                              ({new Date((user as any).verification_email_sent_at).toLocaleDateString()})
+                            </span>
+                          )}
+                        </label>
                       )}
                     </>
                   )}
@@ -991,15 +1032,17 @@ BOSSO@UTAustin`)
                     </button>
                   )}
 
-                  {/* Delete button - appears for all users */}
-                  <button
-                    onClick={() => deleteUser(user.id, user.email)}
-                    disabled={processingUserId === user.id}
-                    className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Delete Account
-                  </button>
+                  {/* Delete button - avoid duplicate for pending_approval users */}
+                  {user.account_status !== 'pending_approval' && (
+                    <button
+                      onClick={() => deleteUser(user.id, user.email)}
+                      disabled={processingUserId === user.id}
+                      className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete Account
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
