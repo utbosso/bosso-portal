@@ -205,7 +205,7 @@ export default function TasksPage() {
       }
     } catch (err: any) {
       console.error('Error loading tasks', err)
-      setError('Failed to load tasks.')
+      setError(`Failed to load tasks: ${err.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
