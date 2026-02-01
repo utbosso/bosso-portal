@@ -468,15 +468,24 @@ export default function AdminDashboard() {
                   <p className="text-sm font-medium text-foreground">{fb.subject}</p>
                   <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{fb.feedback}</p>
                 </div>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium border flex-shrink-0 ${
-                  fb.status === 'new' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-                  fb.status === 'reviewed' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                  fb.status === 'in_progress' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
-                  fb.status === 'resolved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                  'bg-gray-500/20 text-gray-400 border-gray-500/30'
-                }`}>
-                  {fb.status.replace('_', ' ')}
-                </span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium border ${
+                    fb.status === 'new' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                    fb.status === 'reviewed' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                    fb.status === 'in_progress' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
+                    fb.status === 'resolved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                    'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                  }`}>
+                    {fb.status.replace('_', ' ')}
+                  </span>
+                  <button
+                    onClick={() => deleteFeedback(fb.id)}
+                    className="p-1.5 rounded-md text-red-400 hover:bg-red-500/20 transition"
+                    title="Delete feedback"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-4 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
@@ -723,6 +732,26 @@ function UserManagementTab() {
       alert(error.message || 'Failed to delete user account. Please try again.')
     } finally {
       setProcessingUserId(null)
+    }
+  }
+
+  const deleteFeedback = async (feedbackId: string) => {
+    const confirmed = window.confirm('Are you sure you want to delete this feedback? This action cannot be undone.')
+    if (!confirmed) return
+
+    try {
+      const { error } = await supabase
+        .from('feedback')
+        .delete()
+        .eq('id', feedbackId)
+
+      if (error) throw error
+
+      // Remove from local state
+      setRecentFeedback(prev => prev.filter(fb => fb.id !== feedbackId))
+    } catch (error) {
+      console.error('Error deleting feedback:', error)
+      alert('Failed to delete feedback. Please try again.')
     }
   }
 
