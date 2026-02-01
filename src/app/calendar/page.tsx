@@ -834,7 +834,8 @@ View on portal: ${window.location.origin}/calendar`)
                     type="text"
                     value={form.location}
                     onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                    placeholder="Enter location..."
+                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
 

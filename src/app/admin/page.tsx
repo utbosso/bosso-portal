@@ -424,7 +424,7 @@ export default function AdminDashboard() {
             <Users className="w-5 h-5 text-primary" />
             <h2 className="text-xl font-semibold text-foreground">Recent Users</h2>
           </div>
-          <a href="/admin/users" className="text-sm text-primary hover:underline">
+          <a href="/admin?tab=users" className="text-sm text-primary hover:underline">
             View all
           </a>
         </div>
