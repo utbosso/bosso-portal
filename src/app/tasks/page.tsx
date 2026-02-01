@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/lib/constants'
-import type { AssigneeStatus, PersonalTask, Profile, ReviewStatus, Task, TaskStatus, TaskUpdate } from '@/types/database.types'
+import type { AssigneeStatus, EventCategory, PersonalTask, Profile, ReviewStatus, Task, TaskStatus, TaskUpdate, UserRole } from '@/types/database.types'
+import { EVENT_CATEGORIES } from '@/lib/bosso-points'
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -17,17 +18,25 @@ import {
   Trash2,
   Users,
   X,
+  Award,
 } from 'lucide-react'
 import UserSearch from '@/components/UserSearch'
 
 const supabase = createClient()
+
+type AssignmentType = 'individual' | 'role'
 
 type TaskFormState = {
   title: string
   description: string
   dueDate: string
   assignedTo: string
+  assignmentType: AssignmentType
+  assignToRole: UserRole | ''
   status: TaskStatus
+  pointValue: string
+  pointsCategory: EventCategory
+  autoApprove: boolean
 }
 
 type PersonalTaskFormState = {
@@ -42,7 +51,12 @@ const emptyTaskForm: TaskFormState = {
   description: '',
   dueDate: '',
   assignedTo: '',
+  assignmentType: 'individual',
+  assignToRole: '',
   status: 'not_started',
+  pointValue: '',
+  pointsCategory: 'membership',
+  autoApprove: false,
 }
 
 const emptyPersonalForm: PersonalTaskFormState = {
@@ -132,6 +146,10 @@ export default function TasksPage() {
           assigned_to,
           assigned_by,
           created_at,
+          point_value,
+          points_category,
+          auto_approve,
+          points_awarded,
           assignee:profiles!tasks_assigned_to_fkey(id, full_name, role),
           assigner:profiles!tasks_assigned_by_fkey(id, full_name, role)
         `
@@ -255,7 +273,12 @@ export default function TasksPage() {
       description: task.description ?? '',
       dueDate: task.due_at ? task.due_at.slice(0, 10) : '',
       assignedTo: task.assigned_to,
+      assignmentType: 'individual',
+      assignToRole: '',
       status: task.status,
+      pointValue: task.point_value?.toString() ?? '',
+      pointsCategory: task.points_category ?? 'membership',
+      autoApprove: task.auto_approve ?? false,
     })
   }
 
@@ -280,34 +303,32 @@ export default function TasksPage() {
     e.preventDefault()
     if (!profile) return
 
-    if (!form.assignedTo) {
+    // Validate assignment
+    if (form.assignmentType === 'individual' && !form.assignedTo) {
       setError('Select an assignee.')
+      return
+    }
+    if (form.assignmentType === 'role' && !form.assignToRole) {
+      setError('Select a role to assign to.')
       return
     }
 
     setError(null)
 
-    const payload = {
-      title: form.title,
-      description: form.description || null,
-      due_at: form.dueDate ? new Date(`${form.dueDate}T23:59:00`).toISOString() : null,
-      assigned_to: form.assignedTo,
-      status: form.status,
-      assigned_by: profile.id,
-    }
+    const pointVal = form.pointValue ? parseInt(form.pointValue, 10) : null
 
     try {
       if (editingId) {
-        // Check if assignee changed - if so, reset statuses
+        // Editing existing task - always individual
         const currentTask = tasks.find(t => t.id === editingId)
-        const assigneeChanged = currentTask && currentTask.assigned_to !== payload.assigned_to
+        const assigneeChanged = currentTask && currentTask.assigned_to !== form.assignedTo
 
         const updatePayload: any = {
-          title: payload.title,
-          description: payload.description,
-          due_at: payload.due_at,
-          assigned_to: payload.assigned_to,
-          status: payload.status,
+          title: form.title,
+          description: form.description || null,
+          due_at: form.dueDate ? new Date(`${form.dueDate}T23:59:00`).toISOString() : null,
+          assigned_to: form.assignedTo,
+          status: form.status,
         }
 
         // If reassigning, reset both statuses
@@ -322,10 +343,82 @@ export default function TasksPage() {
           .eq('id', editingId)
         if (error) throw error
       } else {
-        const { error } = await supabase
-          .from('tasks')
-          .insert(payload)
-        if (error) throw error
+        // Creating new task(s)
+        if (form.assignmentType === 'role' && form.assignToRole) {
+          // Bulk create: one task per user with the selected role
+          const usersWithRole = profiles.filter(p => p.role === form.assignToRole)
+
+          if (usersWithRole.length === 0) {
+            setError('No users found with the selected role.')
+            return
+          }
+
+          // Generate a unique group_task_id to link all tasks from this assignment
+          const groupTaskId = crypto.randomUUID()
+
+          // Check for existing tasks to prevent duplicates
+          // A user already has this task if they have a task with same title, assigner, and role assignment
+          const { data: existingTasks } = await supabase
+            .from('tasks')
+            .select('assigned_to')
+            .eq('title', form.title)
+            .eq('assigned_by', profile.id)
+            .eq('assigned_to_role', form.assignToRole)
+
+          const usersWithExistingTask = new Set(existingTasks?.map(t => t.assigned_to) ?? [])
+
+          // Filter out users who already have this task
+          const usersToAssign = usersWithRole.filter(user => !usersWithExistingTask.has(user.id))
+
+          if (usersToAssign.length === 0) {
+            setError('All users in this role already have this task.')
+            return
+          }
+
+          const tasksToInsert = usersToAssign.map(user => ({
+            title: form.title,
+            description: form.description || null,
+            due_at: form.dueDate ? new Date(`${form.dueDate}T23:59:00`).toISOString() : null,
+            assigned_to: user.id,
+            status: form.status,
+            assigned_by: profile.id,
+            point_value: pointVal && pointVal > 0 ? pointVal : null,
+            points_category: pointVal && pointVal > 0 ? form.pointsCategory : null,
+            auto_approve: form.autoApprove,
+            group_task_id: groupTaskId,
+            assigned_to_role: form.assignToRole,
+          }))
+
+          const { error } = await supabase
+            .from('tasks')
+            .insert(tasksToInsert)
+          if (error) throw error
+
+          // Show feedback if some users were skipped
+          const skippedCount = usersWithRole.length - usersToAssign.length
+          if (skippedCount > 0) {
+            // Task created, but some users skipped - we'll show this in UI later
+            console.log(`Created ${usersToAssign.length} tasks, skipped ${skippedCount} users who already had this task`)
+          }
+        } else {
+          // Single task creation
+          const payload = {
+            title: form.title,
+            description: form.description || null,
+            due_at: form.dueDate ? new Date(`${form.dueDate}T23:59:00`).toISOString() : null,
+            assigned_to: form.assignedTo,
+            status: form.status,
+            assigned_by: profile.id,
+            point_value: pointVal && pointVal > 0 ? pointVal : null,
+            points_category: pointVal && pointVal > 0 ? form.pointsCategory : null,
+            auto_approve: form.autoApprove,
+          }
+
+          const { error } = await supabase
+            .from('tasks')
+            .insert(payload)
+          if (error) throw error
+        }
       }
 
       resetTaskForm()
@@ -357,14 +450,24 @@ export default function TasksPage() {
     if (!profile) return
 
     try {
+      const task = tasks.find(t => t.id === taskId)
+      if (!task) return
+
       // Update the assignee_status field
-      // When assignee marks as completed, set review status to 'not_reviewed'
+      // When assignee marks as completed, set review status to 'not_reviewed' (or 'completed' if auto_approve)
       const updateData: any = {
         assignee_status: status,
       }
 
       if (status === 'completed') {
-        updateData.status = 'not_reviewed'
+        if (task.auto_approve) {
+          // Auto-approve: mark as completed and award points immediately
+          updateData.status = 'completed'
+          updateData.points_awarded = true
+        } else {
+          // Manual approval: set to not_reviewed for creator to review
+          updateData.status = 'not_reviewed'
+        }
       } else {
         // If not completed, keep status in sync with assignee progress
         updateData.status = status
@@ -386,6 +489,11 @@ export default function TasksPage() {
         return
       }
 
+      // If auto-approved and has points, award them
+      if (status === 'completed' && task.auto_approve && task.point_value && task.point_value > 0 && !task.points_awarded) {
+        await awardTaskPoints(task)
+      }
+
       await fetchTasks()
     } catch (err: any) {
       console.error('Error updating assignee status:', err)
@@ -393,18 +501,54 @@ export default function TasksPage() {
     }
   }
 
+  const awardTaskPoints = async (task: Task) => {
+    if (!task.point_value || task.point_value <= 0 || task.points_awarded) return
+
+    try {
+      // Create an attendance record for the task points
+      const { error } = await supabase.from('attendance_records').insert({
+        event_id: task.id, // Use task ID as the event_id reference
+        user_id: task.assigned_to,
+        points_earned: task.point_value,
+        event_category: task.points_category || 'membership',
+        checked_in_at: new Date().toISOString(),
+      })
+
+      if (error) {
+        console.error('Error awarding task points:', error)
+      }
+    } catch (err) {
+      console.error('Error awarding task points:', err)
+    }
+  }
+
   const handleReviewStatusChange = async (taskId: string, status: ReviewStatus) => {
     if (!profile) return
 
     try {
-      // Update only the status field (review status)
+      const task = tasks.find(t => t.id === taskId)
+      if (!task) return
+
+      const updateData: any = { status }
+
+      // If approving a task with points that hasn't been awarded yet, mark as awarded
+      if (status === 'approved' && task.point_value && task.point_value > 0 && !task.points_awarded) {
+        updateData.points_awarded = true
+        updateData.status = 'completed' // Mark as fully completed when approved
+      }
+
       const { error } = await supabase
         .from('tasks')
-        .update({ status })
+        .update(updateData)
         .eq('id', taskId)
         .select()
 
       if (error) throw error
+
+      // Award points if approving
+      if (status === 'approved' && task.point_value && task.point_value > 0 && !task.points_awarded) {
+        await awardTaskPoints(task)
+      }
 
       await fetchTasks()
     } catch (err: any) {
@@ -691,6 +835,18 @@ export default function TasksPage() {
                             Assigned by {task.assigner.full_name}
                           </span>
                         )}
+                        {task.point_value && task.point_value > 0 && (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                            task.points_awarded
+                              ? 'bg-green-500/20 text-green-400'
+                              : 'bg-primary/20 text-primary'
+                          }`}>
+                            <Award className="w-3 h-3" />
+                            {task.point_value} pts
+                            {task.points_awarded && ' (awarded)'}
+                            {!task.points_awarded && task.auto_approve && ' (auto)'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -882,14 +1038,61 @@ export default function TasksPage() {
                     />
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <label className="text-xs text-muted-foreground uppercase tracking-wide">Assign to</label>
-                    <UserSearch
-                      users={visibleAssignees}
-                      value={form.assignedTo}
-                      onChange={(value) => setForm((prev) => ({ ...prev, assignedTo: value as string }))}
-                      placeholder="Search by name..."
-                    />
+
+                    {/* Assignment type toggle */}
+                    <div className="flex items-center gap-4 text-sm">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="assignmentType"
+                          value="individual"
+                          checked={form.assignmentType === 'individual'}
+                          onChange={() => setForm((prev) => ({ ...prev, assignmentType: 'individual', assignToRole: '' }))}
+                          className="accent-primary"
+                        />
+                        <span className="text-foreground">Individual</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="assignmentType"
+                          value="role"
+                          checked={form.assignmentType === 'role'}
+                          onChange={() => setForm((prev) => ({ ...prev, assignmentType: 'role', assignedTo: '' }))}
+                          className="accent-primary"
+                        />
+                        <span className="text-foreground">Role Group</span>
+                      </label>
+                    </div>
+
+                    {form.assignmentType === 'individual' ? (
+                      <UserSearch
+                        users={visibleAssignees}
+                        value={form.assignedTo}
+                        onChange={(value) => setForm((prev) => ({ ...prev, assignedTo: value as string }))}
+                        placeholder="Search by name..."
+                      />
+                    ) : (
+                      <div className="space-y-1">
+                        <select
+                          value={form.assignToRole}
+                          onChange={(e) => setForm((prev) => ({ ...prev, assignToRole: e.target.value as UserRole | '' }))}
+                          className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                        >
+                          <option value="">Select a role...</option>
+                          <option value="analyst">Analysts ({profiles.filter(p => p.role === 'analyst').length})</option>
+                          <option value="project_manager">Project Managers ({profiles.filter(p => p.role === 'project_manager').length})</option>
+                          <option value="board_member">Board Members ({profiles.filter(p => p.role === 'board_member').length})</option>
+                        </select>
+                        {form.assignToRole && (
+                          <p className="text-xs text-muted-foreground">
+                            Will create {profiles.filter(p => p.role === form.assignToRole).length} individual tasks
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -926,6 +1129,62 @@ export default function TasksPage() {
                       rows={4}
                       className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
                     />
+                  </div>
+
+                  {/* Points Section */}
+                  <div className="border-t border-primary/20 pt-3 space-y-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wide">
+                      <Award className="w-4 h-4 text-primary" />
+                      Points (Optional)
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Point Value</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={form.pointValue}
+                          onChange={(e) => setForm((prev) => ({ ...prev, pointValue: e.target.value }))}
+                          placeholder="0"
+                          className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Points Category</label>
+                        <select
+                          value={form.pointsCategory}
+                          onChange={(e) => setForm((prev) => ({ ...prev, pointsCategory: e.target.value as EventCategory }))}
+                          className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                        >
+                          {Object.entries(EVENT_CATEGORIES).map(([key, info]) => (
+                            <option key={key} value={key}>
+                              {info.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.autoApprove}
+                          onChange={(e) => setForm((prev) => ({ ...prev, autoApprove: e.target.checked }))}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-dark-100 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-gray-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500/50 peer-checked:after:bg-green-400"></div>
+                      </label>
+                      <div className="text-sm">
+                        <span className="text-foreground font-medium">Auto-approve</span>
+                        <p className="text-xs text-muted-foreground">
+                          {form.autoApprove
+                            ? 'Points awarded automatically when assignee marks complete'
+                            : 'Requires manual approval before points are awarded'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
                   <button

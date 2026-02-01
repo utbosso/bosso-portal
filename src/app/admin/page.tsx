@@ -608,6 +608,9 @@ function UserManagementTab() {
         // Automatically open welcome email for approved users
         if (userToApprove) {
           sendApprovalEmail(userToApprove)
+
+          // Assign pending role-based tasks to the newly approved user
+          await assignPendingRoleTasks(userToApprove)
         }
       }
 
@@ -617,6 +620,75 @@ function UserManagementTab() {
       alert('Failed to update user status')
     } finally {
       setProcessingUserId(null)
+    }
+  }
+
+  // Assign pending role-based tasks to a newly approved user
+  const assignPendingRoleTasks = async (user: Profile) => {
+    try {
+      // Find all unique role-based task groups for the user's role that are not completed
+      const { data: roleTasks, error: roleTasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('assigned_to_role', user.role)
+        .not('group_task_id', 'is', null)
+        .neq('status', 'completed')
+
+      if (roleTasksError) {
+        console.error('Error fetching role tasks:', roleTasksError)
+        return
+      }
+
+      if (!roleTasks || roleTasks.length === 0) return
+
+      // Group tasks by group_task_id to find unique task groups
+      const taskGroups = new Map<string, typeof roleTasks[0]>()
+      roleTasks.forEach(task => {
+        if (task.group_task_id && !taskGroups.has(task.group_task_id)) {
+          taskGroups.set(task.group_task_id, task)
+        }
+      })
+
+      // Check which tasks the user already has
+      const { data: existingUserTasks } = await supabase
+        .from('tasks')
+        .select('group_task_id')
+        .eq('assigned_to', user.id)
+        .not('group_task_id', 'is', null)
+
+      const existingGroupIds = new Set(existingUserTasks?.map(t => t.group_task_id) || [])
+
+      // Create tasks for groups the user doesn't have yet
+      const tasksToCreate = Array.from(taskGroups.entries())
+        .filter(([groupId]) => !existingGroupIds.has(groupId))
+        .map(([groupId, templateTask]) => ({
+          title: templateTask.title,
+          description: templateTask.description,
+          due_at: templateTask.due_at,
+          assigned_to: user.id,
+          assigned_by: templateTask.assigned_by,
+          status: 'not_started' as const,
+          assignee_status: 'not_started' as const,
+          point_value: templateTask.point_value,
+          points_category: templateTask.points_category,
+          auto_approve: templateTask.auto_approve,
+          group_task_id: groupId,
+          assigned_to_role: user.role,
+        }))
+
+      if (tasksToCreate.length > 0) {
+        const { error: insertError } = await supabase
+          .from('tasks')
+          .insert(tasksToCreate)
+
+        if (insertError) {
+          console.error('Error creating tasks for new user:', insertError)
+        } else {
+          console.log(`Created ${tasksToCreate.length} tasks for newly approved user ${user.full_name}`)
+        }
+      }
+    } catch (err) {
+      console.error('Error assigning pending role tasks:', err)
     }
   }
 
@@ -1571,15 +1643,81 @@ function PointsBreakdownTab() {
               )}
 
               {/* User Selection */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="text-sm font-medium text-foreground">
                   Select Members <span className="text-red-400">*</span>
                 </label>
+
+                {/* Quick Select by Role */}
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Quick select by role:</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allUserIds = userOptions.map(u => u.id)
+                        setSelectedUsers(allUserIds)
+                      }}
+                      className="px-2.5 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-md hover:bg-primary/30 transition"
+                    >
+                      All Members
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = userOptions.filter(u => u.role === 'general_member').map(u => u.id)
+                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
+                      }}
+                      className="px-2.5 py-1 text-xs bg-gray-500/20 text-gray-400 border border-gray-500/30 rounded-md hover:bg-gray-500/30 transition"
+                    >
+                      General Members
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = userOptions.filter(u => u.role === 'analyst').map(u => u.id)
+                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
+                      }}
+                      className="px-2.5 py-1 text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-md hover:bg-blue-500/30 transition"
+                    >
+                      Analysts
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = userOptions.filter(u => u.role === 'project_manager').map(u => u.id)
+                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
+                      }}
+                      className="px-2.5 py-1 text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-md hover:bg-purple-500/30 transition"
+                    >
+                      Project Managers
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = userOptions.filter(u => u.role === 'board_member').map(u => u.id)
+                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
+                      }}
+                      className="px-2.5 py-1 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded-md hover:bg-yellow-500/30 transition"
+                    >
+                      Board Members
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUsers([])}
+                      className="px-2.5 py-1 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded-md hover:bg-red-500/30 transition"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                {/* Individual Search */}
                 <UserSearch
                   users={userOptions}
                   value={selectedUsers}
                   onChange={(value) => setSelectedUsers(value as string[])}
-                  placeholder="Search and select members..."
+                  placeholder="Search and select individual members..."
                   multiple={true}
                 />
                 <p className="text-xs text-muted-foreground">

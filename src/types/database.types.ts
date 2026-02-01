@@ -432,6 +432,14 @@ export interface Task {
   created_at?: string
   assignee?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
   assigner?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+  // Points system fields
+  point_value?: number | null
+  points_category?: EventCategory | null
+  auto_approve?: boolean
+  points_awarded?: boolean
+  // Role-based assignment fields
+  group_task_id?: string | null  // Links tasks created from same role assignment
+  assigned_to_role?: UserRole | null  // The role this task was assigned to
 }
 
 export interface TaskUpdate {
