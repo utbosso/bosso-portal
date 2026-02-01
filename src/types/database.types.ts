@@ -288,6 +288,16 @@ export type Database = {
   }
 }
 
+export interface WorkExperience {
+  id: string
+  company: string
+  title: string
+  start_date: string
+  end_date?: string | null
+  is_current?: boolean
+  description?: string | null
+}
+
 export interface Profile {
   id: string
   email: string
@@ -303,6 +313,7 @@ export interface Profile {
   ut_eid?: string | null
   ut_email?: string | null
   phone_number?: string | null
+  work_experiences?: WorkExperience[] | null
 }
 
 export interface Announcement {

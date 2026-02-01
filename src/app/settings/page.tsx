@@ -149,6 +149,40 @@ export default function SettingsPage() {
                 <span className="capitalize">{profile.role.replace('_', ' ')}</span>
               </div>
             </div>
+
+            {/* Work Experience Display */}
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Briefcase className="w-4 h-4" />
+                Work Experience
+              </label>
+              {profile.work_experiences && profile.work_experiences.length > 0 ? (
+                <div className="space-y-3">
+                  {profile.work_experiences.map((exp) => (
+                    <div key={exp.id} className="px-4 py-3 bg-muted rounded-lg">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-medium text-foreground">{exp.title}</p>
+                          <p className="text-sm text-muted-foreground">{exp.company}</p>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {exp.start_date && new Date(exp.start_date + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                          {' - '}
+                          {exp.is_current ? 'Present' : exp.end_date ? new Date(exp.end_date + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : ''}
+                        </span>
+                      </div>
+                      {exp.description && (
+                        <p className="text-sm text-muted-foreground mt-2">{exp.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-3 bg-muted rounded-lg text-muted-foreground italic">
+                  No work experience added yet
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

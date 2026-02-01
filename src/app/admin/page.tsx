@@ -23,9 +23,14 @@ import {
   Mail,
   Trash2,
   Search,
-  Download
+  Download,
+  Briefcase,
+  Plus,
+  X
 } from 'lucide-react'
-import type { Profile, FeedbackSubmission, Application } from '@/types/database.types'
+import type { Profile, FeedbackSubmission, Application, EventCategory, EventType } from '@/types/database.types'
+import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
+import UserSearch, { UserOption } from '@/components/UserSearch'
 
 const supabase = createClient()
 
@@ -940,6 +945,34 @@ BOSSO@UTAustin`)
                       </span>
                     )}
                   </div>
+
+                  {/* Work Experience */}
+                  {(user as any).work_experiences && (user as any).work_experiences.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-primary/10">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                        <Briefcase className="w-3 h-3" />
+                        Work Experience
+                      </div>
+                      <div className="space-y-1.5">
+                        {(user as any).work_experiences.slice(0, 3).map((exp: any) => (
+                          <div key={exp.id} className="text-xs">
+                            <span className="text-foreground font-medium">{exp.title}</span>
+                            <span className="text-muted-foreground"> at {exp.company}</span>
+                            {exp.is_current && (
+                              <span className="ml-1.5 px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded text-[10px]">
+                                Current
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                        {(user as any).work_experiences.length > 3 && (
+                          <p className="text-[10px] text-muted-foreground">
+                            +{(user as any).work_experiences.length - 3} more
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Action Buttons */}
@@ -1085,6 +1118,18 @@ function PointsBreakdownTab() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'total' | 'active'>('total')
 
+  // Modal state for manual points entry
+  const [showAddPointsModal, setShowAddPointsModal] = useState(false)
+  const [addingPoints, setAddingPoints] = useState(false)
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<EventCategory>('membership')
+  const [selectedEventType, setSelectedEventType] = useState<EventType | ''>('')
+  const [customEventType, setCustomEventType] = useState('')
+  const [pointsValue, setPointsValue] = useState<number>(0)
+  const [notes, setNotes] = useState('')
+  const [addPointsError, setAddPointsError] = useState<string | null>(null)
+  const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
+
   useEffect(() => {
     fetchPointsData()
   }, [])
@@ -1200,6 +1245,113 @@ function PointsBreakdownTab() {
     URL.revokeObjectURL(url)
   }
 
+  // Get available event types for selected category
+  const availableEventTypes = useMemo(() => {
+    return getEventTypesByCategory(selectedCategory)
+  }, [selectedCategory])
+
+  // Get all users for user selection
+  const userOptions: UserOption[] = useMemo(() => {
+    return pointsData.map((user) => ({
+      id: user.user_id,
+      full_name: user.full_name,
+      email: user.email,
+      role: user.role,
+    }))
+  }, [pointsData])
+
+  // Reset modal state
+  const resetModalState = () => {
+    setSelectedUsers([])
+    setSelectedCategory('membership')
+    setSelectedEventType('')
+    setCustomEventType('')
+    setPointsValue(0)
+    setNotes('')
+    setAddPointsError(null)
+    setAddPointsSuccess(null)
+  }
+
+  // Handle category change
+  const handleCategoryChange = (category: EventCategory) => {
+    setSelectedCategory(category)
+    setSelectedEventType('')
+    setCustomEventType('')
+    setPointsValue(0)
+  }
+
+  // Handle event type change
+  const handleEventTypeChange = (eventType: EventType | '') => {
+    setSelectedEventType(eventType)
+    if (eventType && eventType !== 'other') {
+      const typeInfo = EVENT_TYPES[eventType]
+      if (typeInfo.points !== null) {
+        setPointsValue(typeInfo.points)
+      }
+    } else {
+      setPointsValue(0)
+    }
+    setCustomEventType('')
+  }
+
+  // Add points to selected users
+  const handleAddPoints = async () => {
+    if (selectedUsers.length === 0) {
+      setAddPointsError('Please select at least one user')
+      return
+    }
+    if (!selectedEventType) {
+      setAddPointsError('Please select an event type')
+      return
+    }
+    if (pointsValue <= 0) {
+      setAddPointsError('Points value must be greater than 0')
+      return
+    }
+    if (selectedEventType === 'other' && !customEventType.trim()) {
+      setAddPointsError('Please enter a custom event type name')
+      return
+    }
+
+    setAddingPoints(true)
+    setAddPointsError(null)
+    setAddPointsSuccess(null)
+
+    try {
+      // Create attendance records for each selected user
+      const records = selectedUsers.map((userId) => ({
+        event_id: crypto.randomUUID(), // Generate a placeholder event ID for manual entries
+        user_id: userId,
+        points_earned: pointsValue,
+        event_category: selectedCategory,
+        checked_in_at: new Date().toISOString(),
+      }))
+
+      const { error } = await supabase.from('attendance_records').insert(records)
+
+      if (error) throw error
+
+      const userCount = selectedUsers.length
+      setAddPointsSuccess(
+        `Successfully added ${pointsValue} points to ${userCount} user${userCount > 1 ? 's' : ''}`
+      )
+
+      // Refresh points data
+      await fetchPointsData()
+
+      // Reset form after success
+      setTimeout(() => {
+        setShowAddPointsModal(false)
+        resetModalState()
+      }, 1500)
+    } catch (err: any) {
+      console.error('Error adding points:', err)
+      setAddPointsError(err.message || 'Failed to add points')
+    } finally {
+      setAddingPoints(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header with search and export */}
@@ -1226,6 +1378,13 @@ function PointsBreakdownTab() {
             <option value="name">Sort by Name</option>
             <option value="active">Sort by Active Status</option>
           </select>
+          <button
+            onClick={() => setShowAddPointsModal(true)}
+            className="px-4 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-md text-sm font-medium hover:bg-green-500/30 transition flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Points
+          </button>
           <button
             onClick={exportToCSV}
             className="px-4 py-2 bg-primary text-dark-300 rounded-md text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
@@ -1375,6 +1534,179 @@ function PointsBreakdownTab() {
           </div>
         </div>
       </div>
+
+      {/* Add Points Modal */}
+      {showAddPointsModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-200 border border-primary/20 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-primary/20">
+              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Plus className="w-5 h-5 text-green-400" />
+                Add Points Manually
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddPointsModal(false)
+                  resetModalState()
+                }}
+                className="p-1 text-muted-foreground hover:text-foreground transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-4">
+              {/* Error/Success Messages */}
+              {addPointsError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-md text-red-400 text-sm">
+                  {addPointsError}
+                </div>
+              )}
+              {addPointsSuccess && (
+                <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-md text-green-400 text-sm">
+                  {addPointsSuccess}
+                </div>
+              )}
+
+              {/* User Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Select Members <span className="text-red-400">*</span>
+                </label>
+                <UserSearch
+                  users={userOptions}
+                  value={selectedUsers}
+                  onChange={(value) => setSelectedUsers(value as string[])}
+                  placeholder="Search and select members..."
+                  multiple={true}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {selectedUsers.length} member{selectedUsers.length !== 1 ? 's' : ''} selected
+                </p>
+              </div>
+
+              {/* Category Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Category <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => handleCategoryChange(e.target.value as EventCategory)}
+                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  {Object.entries(EVENT_CATEGORIES).map(([key, info]) => (
+                    <option key={key} value={key}>
+                      {info.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Event Type Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Event Type <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={selectedEventType}
+                  onChange={(e) => handleEventTypeChange(e.target.value as EventType | '')}
+                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">Select event type...</option>
+                  {availableEventTypes.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label} {type.points !== null ? `(${type.points} pts)` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Custom Event Type Name (for "Other") */}
+              {selectedEventType === 'other' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Custom Event Name <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customEventType}
+                    onChange={(e) => setCustomEventType(e.target.value)}
+                    placeholder="Enter custom event name..."
+                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              )}
+
+              {/* Points Value */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Points <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={pointsValue}
+                  onChange={(e) => setPointsValue(parseInt(e.target.value) || 0)}
+                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+                {selectedEventType && selectedEventType !== 'other' && EVENT_TYPES[selectedEventType].points !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    Default: {EVENT_TYPES[selectedEventType].points} points
+                  </p>
+                )}
+              </div>
+
+              {/* Notes (optional) */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Notes <span className="text-muted-foreground text-xs">(optional)</span>
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add any notes about this points entry..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-4 border-t border-primary/20">
+              <button
+                onClick={() => {
+                  setShowAddPointsModal(false)
+                  resetModalState()
+                }}
+                disabled={addingPoints}
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddPoints}
+                disabled={addingPoints || selectedUsers.length === 0 || !selectedEventType || pointsValue <= 0}
+                className="px-4 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-md text-sm font-medium hover:bg-green-500/30 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {addingPoints ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    Add {pointsValue} Points to {selectedUsers.length} User{selectedUsers.length !== 1 ? 's' : ''}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
