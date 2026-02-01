@@ -18,6 +18,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import UserSearch from '@/components/UserSearch'
 
 const supabase = createClient()
 
@@ -883,18 +884,12 @@ export default function TasksPage() {
 
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground uppercase tracking-wide">Assign to</label>
-                    <select
+                    <UserSearch
+                      users={visibleAssignees}
                       value={form.assignedTo}
-                      onChange={(e) => setForm((prev) => ({ ...prev, assignedTo: e.target.value }))}
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
-                    >
-                      <option value="">Select member</option>
-                      {visibleAssignees.map((person) => (
-                        <option key={person.id} value={person.id}>
-                          {person.full_name} ({person.role.replace('_', ' ')})
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(value) => setForm((prev) => ({ ...prev, assignedTo: value as string }))}
+                      placeholder="Search by name..."
+                    />
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">

@@ -22,6 +22,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import UserSearch from '@/components/UserSearch'
 import { isAdmin } from '@/lib/admin'
 
 const supabase = createClient()
@@ -801,34 +802,13 @@ export default function DocumentsPage() {
                       This item will only be visible to the people you select below.
                     </p>
                   )}
-                  <input
-                    type="text"
-                    value={profileSearch}
-                    onChange={(e) => setProfileSearch(e.target.value)}
-                    placeholder="Search by name or email"
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                  <UserSearch
+                    users={profiles}
+                    value={form.sharedWith}
+                    onChange={(value) => setForm((prev) => ({ ...prev, sharedWith: value as string[] }))}
+                    placeholder="Search by name..."
+                    multiple
                   />
-                  <div className="max-h-40 overflow-y-auto mt-2 space-y-1">
-                    {visibleProfiles.map((person) => {
-                      const selected = form.sharedWith.includes(person.id)
-                      return (
-                        <label key={person.id} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(e) => {
-                              const next = e.target.checked
-                                ? [...form.sharedWith, person.id]
-                                : form.sharedWith.filter((id) => id !== person.id)
-                              setForm((prev) => ({ ...prev, sharedWith: next }))
-                            }}
-                          />
-                          <span className="text-foreground">{person.full_name}</span>
-                          <span className="text-xs text-muted-foreground">{person.email}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
                 </div>
 
                 <button
@@ -1053,34 +1033,13 @@ export default function DocumentsPage() {
 
                     <div className="space-y-1">
                       <label className="text-xs text-muted-foreground uppercase tracking-wide">Share with people</label>
-                      <input
-                        type="text"
-                        value={profileSearch}
-                        onChange={(e) => setProfileSearch(e.target.value)}
-                        placeholder="Search by name or email"
-                        className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                      <UserSearch
+                        users={profiles}
+                        value={personalForm.sharedWith}
+                        onChange={(value) => setPersonalForm((prev) => ({ ...prev, sharedWith: value as string[] }))}
+                        placeholder="Search by name..."
+                        multiple
                       />
-                      <div className="max-h-40 overflow-y-auto mt-2 space-y-1">
-                        {visibleProfiles.map((person) => {
-                          const selected = personalForm.sharedWith.includes(person.id)
-                          return (
-                            <label key={person.id} className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={(e) => {
-                                  const next = e.target.checked
-                                    ? [...personalForm.sharedWith, person.id]
-                                    : personalForm.sharedWith.filter((id) => id !== person.id)
-                                  setPersonalForm((prev) => ({ ...prev, sharedWith: next }))
-                                }}
-                              />
-                              <span className="text-foreground">{person.full_name}</span>
-                              <span className="text-xs text-muted-foreground">{person.email}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
                     </div>
 
                     <button

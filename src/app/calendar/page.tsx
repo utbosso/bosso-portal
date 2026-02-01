@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
-import type { Event, UserRole, EventCategory, EventType } from '@/types/database.types'
+import type { Event, UserRole, EventCategory, EventType, Task } from '@/types/database.types'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
@@ -20,6 +20,7 @@ import {
   Mail,
   Folder,
   Tag,
+  CheckSquare,
 } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
 
@@ -58,6 +59,7 @@ const emptyForm: EventFormState = {
 export default function CalendarPage() {
   const { profile, hasMinimumRole } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -162,14 +164,32 @@ export default function CalendarPage() {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      // Fetch events
+      const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
         .order('start_at', { ascending: true })
 
-      if (error) throw error
-      const rows = (data as Event[]) ?? []
+      if (eventsError) throw eventsError
+      const rows = (eventsData as Event[]) ?? []
       setEvents(rows.filter(canSeeEvent))
+
+      // Fetch tasks assigned to current user with due dates
+      if (profile?.id) {
+        const { data: tasksData, error: tasksError } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('assigned_to', profile.id)
+          .not('due_at', 'is', null)
+          .neq('status', 'completed')
+          .order('due_at', { ascending: true })
+
+        if (tasksError) {
+          console.error('Error loading tasks', tasksError)
+        } else {
+          setTasks((tasksData as Task[]) ?? [])
+        }
+      }
     } catch (err: any) {
       console.error('Error loading events', err)
       setError('Failed to load events.')
@@ -217,8 +237,22 @@ export default function CalendarPage() {
     return map
   }, [events])
 
+  const tasksByDay = useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const task of tasks) {
+      if (task.due_at) {
+        const key = toDateKey(new Date(task.due_at))
+        const list = map.get(key) ?? []
+        list.push(task)
+        map.set(key, list)
+      }
+    }
+    return map
+  }, [tasks])
+
   const selectedKey = toDateKey(selectedDate)
   const selectedEvents = eventsByDay.get(selectedKey) ?? []
+  const selectedTasks = tasksByDay.get(selectedKey) ?? []
 
   // Helper function to clear form state from sessionStorage
   const clearFormState = () => {
@@ -531,9 +565,18 @@ View on portal: ${window.location.origin}/calendar`)
             {daysInGrid.map((day) => {
               const key = toDateKey(day)
               const eventsForDay = eventsByDay.get(key) ?? []
+              const tasksForDay = tasksByDay.get(key) ?? []
+              const totalItems = eventsForDay.length + tasksForDay.length
               const isOutside = day.getMonth() !== currentMonth.getMonth()
               const isSelected = key === selectedKey
               const isToday = key === toDateKey(new Date())
+
+              // Combine events and tasks for display, showing up to 2 items
+              const displayItems: { type: 'event' | 'task'; id: string; title: string }[] = [
+                ...eventsForDay.map(e => ({ type: 'event' as const, id: e.id, title: e.title })),
+                ...tasksForDay.map(t => ({ type: 'task' as const, id: t.id, title: t.title })),
+              ].slice(0, 2)
+
               return (
                 <button
                   key={key}
@@ -547,24 +590,28 @@ View on portal: ${window.location.origin}/calendar`)
                     <span className={`text-sm font-semibold ${isToday ? 'text-primary' : 'text-foreground'}`}>
                       {day.getDate()}
                     </span>
-                    {eventsForDay.length > 0 && (
+                    {totalItems > 0 && (
                       <span className="text-[10px] text-primary font-semibold">
-                        {eventsForDay.length}
+                        {totalItems}
                       </span>
                     )}
                   </div>
                   <div className="mt-3 space-y-1">
-                    {eventsForDay.slice(0, 2).map((event) => (
+                    {displayItems.map((item) => (
                       <span
-                        key={event.id}
-                        className="block truncate rounded-md bg-primary/10 px-2 py-1 text-[11px] text-primary"
+                        key={`${item.type}-${item.id}`}
+                        className={`block truncate rounded-md px-2 py-1 text-[11px] ${
+                          item.type === 'task'
+                            ? 'bg-red-500/10 text-red-400'
+                            : 'bg-orange-500/10 text-orange-400'
+                        }`}
                       >
-                        {event.title}
+                        {item.title}
                       </span>
                     ))}
-                    {eventsForDay.length > 2 && (
+                    {totalItems > 2 && (
                       <span className="block text-[11px] text-muted-foreground">
-                        +{eventsForDay.length - 2} more
+                        +{totalItems - 2} more
                       </span>
                     )}
                   </div>
@@ -690,6 +737,31 @@ View on portal: ${window.location.origin}/calendar`)
               </div>
             ))}
           </div>
+
+          {/* Tasks Section */}
+          {selectedTasks.length > 0 && (
+            <div className="card-glow p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-5 h-5 text-red-400" />
+                <h3 className="text-lg font-semibold text-foreground">
+                  Tasks Due
+                </h3>
+              </div>
+
+              {selectedTasks.map((task) => (
+                <a
+                  key={task.id}
+                  href="/tasks"
+                  className="block rounded-lg border border-red-500/20 p-3 space-y-2 hover:border-red-500/40 transition-colors"
+                >
+                  <p className="text-sm font-semibold text-foreground">{task.title}</p>
+                  {task.description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
+                  )}
+                </a>
+              ))}
+            </div>
+          )}
 
           {formOpen && canManage && (
             <div className="card-glow p-4 space-y-3">
