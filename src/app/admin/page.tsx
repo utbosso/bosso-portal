@@ -748,32 +748,46 @@ BOSSO Team`)
   }
 
   const toggleVerificationEmailSent = async (userId: string, currentlySent: boolean) => {
+    const newValue = currentlySent ? null : new Date().toISOString()
+
+    // Update local state immediately (optimistic update)
+    setUsers(prev => prev.map(user =>
+      user.id === userId ? { ...user, verification_email_sent_at: newValue } as Profile : user
+    ))
+
     try {
       await supabase
         .from('profiles')
-        .update({
-          verification_email_sent_at: currentlySent ? null : new Date().toISOString()
-        })
+        .update({ verification_email_sent_at: newValue })
         .eq('id', userId)
-
-      await fetchUsers()
     } catch (error) {
       console.error('Error updating verification email status:', error)
+      // Revert on error
+      setUsers(prev => prev.map(user =>
+        user.id === userId ? { ...user, verification_email_sent_at: currentlySent ? new Date().toISOString() : null } as Profile : user
+      ))
     }
   }
 
   const toggleDuesEmailSent = async (userId: string, currentlySent: boolean) => {
+    const newValue = currentlySent ? null : new Date().toISOString()
+
+    // Update local state immediately (optimistic update)
+    setUsers(prev => prev.map(user =>
+      user.id === userId ? { ...user, dues_email_sent_at: newValue } as Profile : user
+    ))
+
     try {
       await supabase
         .from('profiles')
-        .update({
-          dues_email_sent_at: currentlySent ? null : new Date().toISOString()
-        })
+        .update({ dues_email_sent_at: newValue })
         .eq('id', userId)
-
-      await fetchUsers()
     } catch (error) {
       console.error('Error updating dues email status:', error)
+      // Revert on error
+      setUsers(prev => prev.map(user =>
+        user.id === userId ? { ...user, dues_email_sent_at: currentlySent ? new Date().toISOString() : null } as Profile : user
+      ))
     }
   }
 
