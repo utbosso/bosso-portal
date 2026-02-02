@@ -1245,6 +1245,12 @@ function PointsBreakdownTab() {
   const [addPointsError, setAddPointsError] = useState<string | null>(null)
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
 
+  const getCategoryFromAdjustmentReason = (reason: string | null): EventCategory | null => {
+    if (!reason) return null
+    const match = reason.match(/\((membership|professional_education|social|philanthropy)\)\s*$/)
+    return (match?.[1] as EventCategory) || null
+  }
+
   useEffect(() => {
     fetchPointsData()
   }, [])
@@ -1266,6 +1272,11 @@ function PointsBreakdownTab() {
           user_uuid: user.id,
         })
 
+        const { data: adjustments } = await supabase
+          .from('points_adjustments')
+          .select('points, reason')
+          .eq('user_id', user.id)
+
         const { data: activeStatus } = await supabase.rpc('check_user_active_status', {
           user_uuid: user.id,
         })
@@ -1285,16 +1296,36 @@ function PointsBreakdownTab() {
           target_role: user.role,
         })
 
+        const categoryTotals = {
+          membership: 0,
+          professional_education: 0,
+          social: 0,
+          philanthropy: 0,
+        }
+
+        ;(categoryData || []).forEach((row: any) => {
+          if (row.category && row.category in categoryTotals) {
+            categoryTotals[row.category as keyof typeof categoryTotals] += Number(row.category_points || 0)
+          }
+        })
+
+        ;(adjustments || []).forEach((adj) => {
+          const category = getCategoryFromAdjustmentReason(adj.reason)
+          if (category) {
+            categoryTotals[category] += Number(adj.points || 0)
+          }
+        })
+
         return {
           user_id: user.id,
           full_name: user.full_name,
           email: user.email,
           role: user.role,
           total_points: status.total_points,
-          membership_points: status.membership_points,
-          professional_points: status.professional_points,
-          social_points: status.social_points,
-          philanthropy_points: status.philanthropy_points,
+          membership_points: categoryTotals.membership,
+          professional_points: categoryTotals.professional_education,
+          social_points: categoryTotals.social,
+          philanthropy_points: categoryTotals.philanthropy,
           is_active: status.is_active,
           meets_role_requirements: roleCheck?.[0]?.meets_requirements || false,
         }
@@ -1445,7 +1476,7 @@ function PointsBreakdownTab() {
         points: pointsValue,
         reason:
           selectedEventType === 'other'
-            ? customEventType.trim()
+            ? `${customEventType.trim()} (${selectedCategory})`
             : `${selectedEventType} (${selectedCategory})`,
       }))
 
