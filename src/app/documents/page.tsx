@@ -9,7 +9,6 @@ import type {
   PersonalDocumentAccess,
   PersonalDocumentItem,
   Profile,
-  UserRole,
 } from '@/types/database.types'
 import {
   FileText,
@@ -24,6 +23,13 @@ import {
 } from 'lucide-react'
 import UserSearch from '@/components/UserSearch'
 import { isAdmin } from '@/lib/admin'
+import {
+  canAccessRoleScope,
+  fromRoleScopePayload,
+  getRoleScopeLabel,
+  toRoleScopePayload,
+  type RoleScopeOption,
+} from '@/lib/role-scope'
 
 const supabase = createClient()
 
@@ -31,7 +37,7 @@ type DocFormState = {
   name: string
   type: 'folder' | 'file'
   url: string
-  roleScope: UserRole | 'all' | 'selected_people'
+  roleScope: RoleScopeOption | 'selected_people'
   sharedWith: string[]
 }
 
@@ -83,17 +89,6 @@ export default function DocumentsPage() {
   const isBoard = profile?.role === 'board_member'
   const isUserAdmin = isAdmin(profile?.role)
 
-  const roleHierarchy: Record<UserRole, number> = useMemo(
-    () => ({
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5,
-    }),
-    []
-  )
-
   const canManageDocument = (item: DocumentItem) => {
     if (!profile) return false
     if (isUserAdmin) return true
@@ -108,8 +103,7 @@ export default function DocumentsPage() {
     if (item.is_restricted) {
       return accessRows.some((row) => row.document_id === item.id)
     }
-    if (!item.role_scope) return true
-    if (roleHierarchy[profile.role] >= roleHierarchy[item.role_scope]) return true
+    if (canAccessRoleScope(profile.role, item.role_scope, item.role_scope_mode)) return true
     return accessRows.some((row) => row.document_id === item.id)
   }
 
@@ -278,7 +272,9 @@ export default function DocumentsPage() {
       name: doc.name,
       type: doc.type,
       url: doc.file_url ?? '',
-      roleScope: doc.is_restricted ? 'selected_people' : (doc.role_scope ?? 'all'),
+      roleScope: doc.is_restricted
+        ? 'selected_people'
+        : fromRoleScopePayload(doc.role_scope, doc.role_scope_mode),
       sharedWith: accessRows
         .filter((row) => row.document_id === doc.id)
         .map((row) => row.user_id),
@@ -301,14 +297,17 @@ export default function DocumentsPage() {
 
     setError(null)
 
+    const scopePayload = form.roleScope === 'selected_people'
+      ? null
+      : toRoleScopePayload(form.roleScope)
+
     const payload = {
       name: form.name,
       type: form.type,
       file_url: form.type === 'file' ? form.url : null,
       parent_id: currentFolderId,
-      role_scope: form.roleScope === 'all' || form.roleScope === 'selected_people'
-        ? null
-        : form.roleScope,
+      role_scope: scopePayload?.roleScope ?? null,
+      ...(scopePayload?.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
       is_restricted: form.roleScope === 'selected_people',
       created_by: profile.id,
     }
@@ -640,7 +639,7 @@ export default function DocumentsPage() {
                       {folder.is_restricted
                         ? 'Only selected people'
                         : folder.role_scope
-                          ? folder.role_scope.replace('_', ' ')
+                          ? getRoleScopeLabel(folder.role_scope, folder.role_scope_mode)
                           : 'All members'}
                     </div>
                   </button>
@@ -672,7 +671,7 @@ export default function DocumentsPage() {
                             {doc.is_restricted
                               ? 'Only selected people'
                               : doc.role_scope
-                                ? doc.role_scope.replace('_', ' ')
+                                ? getRoleScopeLabel(doc.role_scope, doc.role_scope_mode)
                                 : 'All members'}
                           </span>
                           {accessRows.some((row) => row.document_id === doc.id) && (
@@ -790,6 +789,7 @@ export default function DocumentsPage() {
                     <option value="selected_people">Selected people only</option>
                     <option value="general_member">General Members only</option>
                     <option value="analyst">Analysts and above</option>
+                    <option value="analyst_only">Analysts only</option>
                     <option value="project_manager">PMs and Board</option>
                     <option value="board_member">Board only</option>
                   </select>

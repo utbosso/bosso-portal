@@ -1,13 +1,20 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
-import type { Announcement, AnnouncementRead, Profile, UserRole } from '@/types/database.types'
+import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
 import { ArrowLeft, Pencil, Save, Trash2, X } from 'lucide-react'
+import {
+  canAccessRoleScope,
+  fromRoleScopePayload,
+  getRoleScopeLabel,
+  toRoleScopePayload,
+  type RoleScopeOption,
+} from '@/lib/role-scope'
 
 const supabase = createClient()
 
@@ -29,27 +36,13 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [roleScope, setRoleScope] = useState<UserRole | 'all'>('all')
-
-  const roleHierarchy: Record<UserRole, number> = useMemo(
-    () => ({
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5,
-    }),
-    []
-  )
+  const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
 
   const isUserAdmin = isAdmin(profile?.role)
   const canManage = isUserAdmin || announcement?.created_by === profile?.id || hasMinimumRole('board_member')
   const canView = (item: Announcement | null) => {
     if (!item) return false
-    if (isUserAdmin) return true // Admins can view all announcements
-    if (!item.role_scope) return true
-    if (!profile) return false
-    return roleHierarchy[profile.role] >= roleHierarchy[item.role_scope]
+    return canAccessRoleScope(profile?.role, item.role_scope, item.role_scope_mode)
   }
 
   const fetchAnnouncement = async () => {
@@ -66,6 +59,7 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
           created_at,
           created_by,
           role_scope,
+          role_scope_mode,
           author:profiles!announcements_created_by_fkey(id, full_name, role)
         `
         )
@@ -78,7 +72,7 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
       setAnnouncement(record)
       setTitle(record?.title ?? '')
       setBody(record?.body ?? '')
-      setRoleScope((record?.role_scope as UserRole | null) ?? 'all')
+      setRoleScope(fromRoleScopePayload(record?.role_scope, record?.role_scope_mode))
 
       if (profile) {
         const readPayload: AnnouncementRead = {
@@ -109,10 +103,12 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
     setError(null)
 
     try {
+      const scopePayload = toRoleScopePayload(roleScope)
       const payload = {
         title,
         body,
-        role_scope: roleScope === 'all' ? null : roleScope,
+        role_scope: scopePayload.roleScope,
+        ...(scopePayload.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
       }
 
       const { error } = await supabase
@@ -244,7 +240,7 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
               )}
               {announcement.role_scope && (
                 <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
-                  Target: {announcement.role_scope.replace('_', ' ')}
+                  Target: {getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
                 </span>
               )}
             </div>
@@ -288,6 +284,7 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
               <option value="all">All BOSSO members</option>
               <option value="general_member">General Members only</option>
               <option value="analyst">Analysts and above</option>
+              <option value="analyst_only">Analysts only</option>
               <option value="project_manager">PMs and Board</option>
               <option value="board_member">Board only</option>
             </select>

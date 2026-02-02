@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
+import { canAccessRoleScope } from '@/lib/role-scope'
 import {
   LayoutDashboard,
   Megaphone,
@@ -248,17 +249,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         return
       }
 
-      const roleHierarchy = {
-        general_member: 1,
-        analyst: 2,
-        project_manager: 3,
-        board_member: 4,
-        admin: 5,
-      } as const
-
       const { data: announcements, error } = await supabase
         .from('announcements')
-        .select('id, role_scope')
+        .select('id, role_scope, role_scope_mode')
 
       if (error) {
         console.error('Failed to load announcements for unread count', error)
@@ -267,8 +260,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
 
       const visible = (announcements ?? []).filter((a: any) => {
-        if (!a.role_scope) return true
-        return roleHierarchy[profile.role] >= roleHierarchy[a.role_scope as keyof typeof roleHierarchy]
+        return canAccessRoleScope(profile.role, a.role_scope, a.role_scope_mode)
       })
 
       const { data: reads, error: readsError } = await supabase
@@ -521,24 +513,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const allNotifications: any[] = []
 
         // 1. Unread announcements
-        const roleHierarchy = {
-          general_member: 1,
-          analyst: 2,
-          project_manager: 3,
-          board_member: 4,
-          admin: 5,
-        } as const
-
         const { data: announcements } = await supabase
           .from('announcements')
-          .select('id, title, created_at, role_scope')
+          .select('id, title, created_at, role_scope, role_scope_mode')
           .order('created_at', { ascending: false })
           .limit(10)
 
         if (announcements) {
           const visible = announcements.filter((a: any) => {
-            if (!a.role_scope) return true
-            return roleHierarchy[profile.role] >= roleHierarchy[a.role_scope as keyof typeof roleHierarchy]
+            return canAccessRoleScope(profile.role, a.role_scope, a.role_scope_mode)
           })
 
           const { data: reads } = await supabase

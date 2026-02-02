@@ -1,12 +1,19 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
-import type { Announcement, AnnouncementRead, Profile, UserRole } from '@/types/database.types'
+import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
 import { Megaphone, PlusCircle, Trash2, Pencil, Mail } from 'lucide-react'
-import { isAdmin, hasMinimumRole as checkRole } from '@/lib/admin'
+import { isAdmin } from '@/lib/admin'
+import {
+  canAccessRoleScope,
+  filterUsersByRoleScope,
+  getRoleScopeLabel,
+  toRoleScopePayload,
+  type RoleScopeOption,
+} from '@/lib/role-scope'
 
 const supabase = createClient()
 
@@ -22,27 +29,14 @@ export default function AnnouncementsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [roleScope, setRoleScope] = useState<UserRole | 'all'>('all')
+  const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
   const [error, setError] = useState<string | null>(null)
 
   const canPost = hasMinimumRole('project_manager')
   const isUserAdmin = isAdmin(profile?.role)
 
-  const roleHierarchy: Record<UserRole, number> = useMemo(
-    () => ({
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5,
-    }),
-    []
-  )
-
   const canSeeAnnouncement = (item: Announcement) => {
-    if (!item.role_scope) return true
-    if (!profile) return false
-    return roleHierarchy[profile.role] >= roleHierarchy[item.role_scope]
+    return canAccessRoleScope(profile?.role, item.role_scope, item.role_scope_mode)
   }
 
   const fetchAnnouncements = async () => {
@@ -66,6 +60,7 @@ export default function AnnouncementsPage() {
           created_at,
           created_by,
           role_scope,
+          role_scope_mode,
           author:profiles!announcements_created_by_fkey(id, full_name, role)
         `
         )
@@ -102,11 +97,13 @@ export default function AnnouncementsPage() {
     setError(null)
 
     try {
+      const scopePayload = toRoleScopePayload(roleScope)
       const payload = {
         title,
         body,
         created_by: profile.id,
-        role_scope: roleScope === 'all' ? null : roleScope,
+        role_scope: scopePayload.roleScope,
+        ...(scopePayload.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
       }
 
       const { error } = await supabase
@@ -167,14 +164,11 @@ export default function AnnouncementsPage() {
 
       if (error) throw error
 
-      // Filter users based on role hierarchy
-      let eligibleUsers = users || []
-      if (announcement.role_scope) {
-        const minRoleLevel = roleHierarchy[announcement.role_scope as UserRole]
-        eligibleUsers = users?.filter(u =>
-          roleHierarchy[u.role as UserRole] >= minRoleLevel
-        ) || []
-      }
+      const eligibleUsers = filterUsersByRoleScope(
+        users || [],
+        announcement.role_scope,
+        announcement.role_scope_mode
+      )
 
       // Get list of email addresses for BCC
       const bccEmails = eligibleUsers.map(u => u.email).join(',')
@@ -185,7 +179,7 @@ export default function AnnouncementsPage() {
 
 ---
 Posted by: ${announcement.author?.full_name || 'BOSSO Team'}
-${announcement.role_scope ? `Target Audience: ${announcement.role_scope.replace('_', ' ')}` : 'All BOSSO Members'}
+Target Audience: ${getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
 Date: ${new Date(announcement.created_at).toLocaleString()}
 
 View on portal: ${window.location.origin}/announcements/${announcement.id}`)
@@ -268,6 +262,7 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
               <option value="all">All BOSSO members</option>
               <option value="general_member">General Members only</option>
               <option value="analyst">Analysts and above</option>
+              <option value="analyst_only">Analysts only</option>
               <option value="project_manager">PMs and Board</option>
               <option value="board_member">Board only</option>
             </select>
@@ -334,7 +329,7 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
                 )}
                 {a.role_scope && (
                   <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
-                    Target: {a.role_scope.replace('_', ' ')}
+                    Target: {getRoleScopeLabel(a.role_scope, a.role_scope_mode)}
                   </span>
                 )}
               </div>

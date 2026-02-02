@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS learning_resources (
   url TEXT,
   tags TEXT[] DEFAULT '{}',
   role_scope TEXT CHECK (role_scope IN ('general_member', 'analyst', 'project_manager', 'board_member')),
+  role_scope_mode TEXT DEFAULT 'minimum_role' CHECK (role_scope_mode IN ('minimum_role', 'exact_role')),
   created_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -28,6 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_learning_resources_created_at ON learning_resourc
 ALTER TABLE learning_resources ENABLE ROW LEVEL SECURITY;
 
 -- Policy: Anyone can view resources they have permission to see based on role_scope
+DROP POLICY IF EXISTS "Users can view resources based on role scope" ON learning_resources;
 CREATE POLICY "Users can view resources based on role scope"
   ON learning_resources
   FOR SELECT
@@ -37,10 +39,20 @@ CREATE POLICY "Users can view resources based on role scope"
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
       AND (
-        role_scope = 'general_member' OR
-        (role_scope = 'analyst' AND profiles.role IN ('analyst', 'project_manager', 'board_member')) OR
-        (role_scope = 'project_manager' AND profiles.role IN ('project_manager', 'board_member')) OR
-        (role_scope = 'board_member' AND profiles.role = 'board_member')
+        (
+          COALESCE(role_scope_mode, 'minimum_role') = 'exact_role'
+          AND profiles.role = role_scope::user_role
+        )
+        OR
+        (
+          COALESCE(role_scope_mode, 'minimum_role') <> 'exact_role'
+          AND (
+            role_scope = 'general_member' OR
+            (role_scope = 'analyst' AND profiles.role IN ('analyst', 'project_manager', 'board_member', 'admin')) OR
+            (role_scope = 'project_manager' AND profiles.role IN ('project_manager', 'board_member', 'admin')) OR
+            (role_scope = 'board_member' AND profiles.role IN ('board_member', 'admin'))
+          )
+        )
       )
     )
   );

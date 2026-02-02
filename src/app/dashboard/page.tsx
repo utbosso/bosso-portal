@@ -6,7 +6,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
 import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
-import type { Event, Task, Announcement, Opportunity, UserRole } from '@/types/database.types'
+import type { Event, Task, Announcement, Opportunity } from '@/types/database.types'
+import { canAccessRoleScope } from '@/lib/role-scope'
 import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
 import {
   Calendar,
@@ -39,14 +40,6 @@ export default function DashboardPage() {
 
   const isUserAdmin = isAdmin(profile?.role)
   const canManageContent = hasMinimumRole('project_manager')
-
-  const roleHierarchy: Record<UserRole, number> = {
-    general_member: 1,
-    analyst: 2,
-    project_manager: 3,
-    board_member: 4,
-    admin: 5,
-  }
 
   useEffect(() => {
     if (profile) {
@@ -87,8 +80,7 @@ export default function DashboardPage() {
     if (!error && data) {
       // Filter events based on audience_scope
       const filtered = data.filter(event => {
-        if (!event.audience_scope) return true
-        return roleHierarchy[profile.role] >= roleHierarchy[event.audience_scope as UserRole]
+        return canAccessRoleScope(profile.role, event.audience_scope, event.audience_scope_mode)
       })
       setUpcomingEvents(filtered as Event[])
     }
@@ -122,8 +114,7 @@ export default function DashboardPage() {
     if (!error && data) {
       // Filter announcements based on role_scope
       const filtered = data.filter(announcement => {
-        if (!announcement.role_scope) return true
-        return roleHierarchy[profile.role] >= roleHierarchy[announcement.role_scope as UserRole]
+        return canAccessRoleScope(profile.role, announcement.role_scope, announcement.role_scope_mode)
       })
       setRecentAnnouncements(filtered as Announcement[])
     }

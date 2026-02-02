@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
-import type { Event, UserRole, EventCategory, EventType, Task } from '@/types/database.types'
+import type { Event, EventCategory, EventType, Task } from '@/types/database.types'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
@@ -23,6 +23,14 @@ import {
   CheckSquare,
 } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
+import {
+  canAccessRoleScope,
+  filterUsersByRoleScope,
+  fromRoleScopePayload,
+  getRoleScopeLabel,
+  toRoleScopePayload,
+  type RoleScopeOption,
+} from '@/lib/role-scope'
 
 const supabase = createClient()
 
@@ -33,7 +41,7 @@ type EventFormState = {
   date: string
   startTime: string
   endTime: string
-  audience: UserRole | 'all'
+  audience: RoleScopeOption
   trackAttendance: boolean
   eventCategory: EventCategory | ''
   eventType: EventType | ''
@@ -97,21 +105,8 @@ export default function CalendarPage() {
   const canManage = hasMinimumRole('project_manager')
   const isUserAdmin = isAdmin(profile?.role)
 
-  const roleHierarchy: Record<UserRole, number> = useMemo(
-    () => ({
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5,
-    }),
-    []
-  )
-
   const canSeeEvent = (item: Event) => {
-    if (!item.audience_scope) return true
-    if (!profile) return false
-    return roleHierarchy[profile.role] >= roleHierarchy[item.audience_scope]
+    return canAccessRoleScope(profile?.role, item.audience_scope, item.audience_scope_mode)
   }
 
   const canAccessAttendanceCode = (event: Event) => {
@@ -291,7 +286,7 @@ export default function CalendarPage() {
       date: toDateKey(start),
       startTime: start.toTimeString().slice(0, 5),
       endTime: end.toTimeString().slice(0, 5),
-      audience: event.audience_scope ?? 'all',
+      audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
       trackAttendance: event.track_attendance ?? false,
       eventCategory: event.event_category ?? '',
       eventType: event.event_type ?? '',
@@ -358,6 +353,8 @@ export default function CalendarPage() {
     // Calculate code expiration time (5 minutes after event ends)
     const codeExpiresAt = new Date(end.getTime() + 5 * 60 * 1000)
 
+    const scopePayload = toRoleScopePayload(form.audience)
+
     const payload: any = {
       title: form.title,
       description: form.description || null,
@@ -365,7 +362,8 @@ export default function CalendarPage() {
       start_at: start.toISOString(),
       end_at: end.toISOString(),
       created_by: profile.id,
-      audience_scope: form.audience === 'all' ? null : form.audience,
+      audience_scope: scopePayload.roleScope,
+      ...(scopePayload.roleScopeMode ? { audience_scope_mode: scopePayload.roleScopeMode } : {}),
       track_attendance: form.trackAttendance,
       point_value: form.trackAttendance ? Number(form.pointValue) : 0,
       attendance_code: form.trackAttendance ? generateAttendanceCode() : null,
@@ -458,14 +456,11 @@ export default function CalendarPage() {
 
       if (error) throw error
 
-      // Filter users based on role hierarchy
-      let eligibleUsers = users || []
-      if (event.audience_scope) {
-        const minRoleLevel = roleHierarchy[event.audience_scope as UserRole]
-        eligibleUsers = users?.filter(u =>
-          roleHierarchy[u.role as UserRole] >= minRoleLevel
-        ) || []
-      }
+      const eligibleUsers = filterUsersByRoleScope(
+        users || [],
+        event.audience_scope,
+        event.audience_scope_mode
+      )
 
       // Get list of email addresses for BCC
       const bccEmails = eligibleUsers.map(u => u.email).join(',')
@@ -723,7 +718,7 @@ View on portal: ${window.location.origin}/calendar`)
 
                 <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide">
                   <span className="text-primary">
-                    Visible to {event.audience_scope ? event.audience_scope.replace('_', ' ') : 'all members'}
+                    Visible to {getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
                   </span>
                   {event.track_attendance && (
                     <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
@@ -849,6 +844,7 @@ View on portal: ${window.location.origin}/calendar`)
                     <option value="all">All BOSSO members</option>
                     <option value="general_member">General Members only</option>
                     <option value="analyst">Analysts and above</option>
+                    <option value="analyst_only">Analysts only</option>
                     <option value="project_manager">PMs and Board</option>
                     <option value="board_member">Board only</option>
                   </select>

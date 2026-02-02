@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
-import { LearningResource, ResourceType, ResourceCategory, UserRole } from '@/types/database.types'
+import { LearningResource, ResourceType, ResourceCategory, UserRole, RoleScopeMode } from '@/types/database.types'
 import { useState, useEffect } from 'react'
 import {
   BookOpen,
@@ -24,6 +24,13 @@ import {
   EyeOff
 } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
+import {
+  canAccessRoleScope,
+  fromRoleScopePayload,
+  getRoleScopeLabel,
+  toRoleScopePayload,
+  type RoleScopeOption,
+} from '@/lib/role-scope'
 
 const supabase = createClient()
 
@@ -47,6 +54,7 @@ export default function LearningHubPage() {
     url: '',
     tags: '',
     role_scope: null as UserRole | null,
+    role_scope_mode: null as RoleScopeMode | null,
   })
 
   useEffect(() => {
@@ -82,18 +90,7 @@ export default function LearningHubPage() {
   }
 
   const canViewResource = (resource: LearningResource) => {
-    if (!resource.role_scope) return true
-    if (!profile) return false
-
-    const roleHierarchy: Record<UserRole, number> = {
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5
-    }
-
-    return roleHierarchy[profile.role] >= roleHierarchy[resource.role_scope]
+    return canAccessRoleScope(profile?.role, resource.role_scope, resource.role_scope_mode)
   }
 
   const canManageResource = (resource: LearningResource) => {
@@ -144,6 +141,7 @@ export default function LearningHubPage() {
         url: formData.url || null,
         tags: tagsArray,
         role_scope: formData.role_scope,
+        ...(formData.role_scope_mode ? { role_scope_mode: formData.role_scope_mode } : {}),
         created_by: profile.id,
       }
 
@@ -182,6 +180,7 @@ export default function LearningHubPage() {
       url: resource.url || '',
       tags: resource.tags.join(', '),
       role_scope: resource.role_scope,
+      role_scope_mode: resource.role_scope_mode ?? null,
     })
     setShowForm(true)
   }
@@ -212,6 +211,7 @@ export default function LearningHubPage() {
       url: '',
       tags: '',
       role_scope: null,
+      role_scope_mode: null,
     })
   }
 
@@ -455,12 +455,21 @@ export default function LearningHubPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Visibility</label>
                 <select
-                  value={formData.role_scope || ''}
-                  onChange={(e) => setFormData({ ...formData, role_scope: e.target.value as UserRole | null || null })}
+                  value={fromRoleScopePayload(formData.role_scope, formData.role_scope_mode)}
+                  onChange={(e) => {
+                    const selection = e.target.value as RoleScopeOption
+                    const scopePayload = toRoleScopePayload(selection)
+                    setFormData({
+                      ...formData,
+                      role_scope: scopePayload.roleScope,
+                      role_scope_mode: scopePayload.roleScopeMode,
+                    })
+                  }}
                   className="input-neon w-full"
                 >
-                  <option value="">All Members</option>
+                  <option value="all">All Members</option>
                   <option value="analyst">Analysts & Above</option>
+                  <option value="analyst_only">Analysts Only</option>
                   <option value="project_manager">Project Managers & Above</option>
                   <option value="board_member">Board Members Only</option>
                 </select>
@@ -589,9 +598,7 @@ export default function LearningHubPage() {
                   {resource.role_scope && (
                     <span className="flex items-center gap-1 text-primary">
                       <EyeOff className="w-3 h-3" />
-                      {resource.role_scope === 'analyst' ? 'Analysts+' :
-                       resource.role_scope === 'project_manager' ? 'PMs+' :
-                       'Board Only'}
+                      {getRoleScopeLabel(resource.role_scope, resource.role_scope_mode)}
                     </span>
                   )}
                 </div>

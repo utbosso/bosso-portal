@@ -1,4 +1,5 @@
 export type UserRole = 'general_member' | 'analyst' | 'project_manager' | 'board_member' | 'admin'
+export type RoleScopeMode = 'minimum_role' | 'exact_role'
 export type AccountStatus = 'pending_approval' | 'approved' | 'active' | 'rejected'
 
 export type Database = {
@@ -323,6 +324,7 @@ export interface Announcement {
   created_at: string
   created_by: string
   role_scope: UserRole | null
+  role_scope_mode?: RoleScopeMode | null
   // Optional related author profile when joined in queries
   author?: Profile
 }
@@ -374,6 +376,7 @@ export interface Event {
   end_at: string
   created_by: string
   audience_scope: UserRole | null
+  audience_scope_mode?: RoleScopeMode | null
   attendance_code?: string | null
   code_expires_at?: string | null
   point_value?: number | null
@@ -390,6 +393,7 @@ export interface DocumentItem {
   file_url: string | null
   parent_id: string | null
   role_scope: UserRole | null
+  role_scope_mode?: RoleScopeMode | null
   is_restricted: boolean
   created_by: string
   created_at?: string
@@ -537,6 +541,7 @@ export interface LearningResource {
   url: string | null
   tags: string[]
   role_scope: UserRole | null
+  role_scope_mode?: RoleScopeMode | null
   created_by: string
   created_at?: string
   contributor?: Pick<Profile, 'id' | 'full_name' | 'email'> | null

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/route-handler'
 import { createCalendarEvent } from '@/lib/google-calendar'
-import type { UserRole } from '@/types/database.types'
+import { filterUsersByRoleScope, getRoleScopeLabel } from '@/lib/role-scope'
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,26 +52,15 @@ export async function POST(request: NextRequest) {
       }, { status: 403 })
     }
 
-    // Define role hierarchy for filtering
-    const roleHierarchy: Record<UserRole, number> = {
-      general_member: 1,
-      analyst: 2,
-      project_manager: 3,
-      board_member: 4,
-      admin: 5,
-    }
-
-    // Get users who should receive this event based on audience_scope
+    // Get users who should receive this event based on audience scope
     let usersQuery = supabase
       .from('profiles')
       .select('id, email, full_name, role')
       .eq('account_status', 'active')
 
-    // If event has audience_scope, filter users by role
+    // If event has audience_scope, filter users
     if (event.audience_scope) {
-      const minRoleLevel = roleHierarchy[event.audience_scope as UserRole]
-
-      // Fetch all active users and filter by role hierarchy
+      // Fetch all active users and filter by role scope rules
       const { data: allUsers, error: usersError } = await usersQuery
 
       if (usersError) {
@@ -79,10 +68,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 })
       }
 
-      // Filter users based on role hierarchy
-      const eligibleUsers = allUsers?.filter(u =>
-        roleHierarchy[u.role as UserRole] >= minRoleLevel
-      ) || []
+      const eligibleUsers = filterUsersByRoleScope(
+        allUsers || [],
+        event.audience_scope,
+        event.audience_scope_mode
+      )
 
       // Send calendar invites to all eligible users
       const results = await Promise.allSettled(
@@ -90,7 +80,7 @@ export async function POST(request: NextRequest) {
           try {
             await createCalendarEvent({
               summary: event.title,
-              description: event.description || `Event for ${event.audience_scope?.replace('_', ' ')} and above`,
+              description: event.description || `Event for ${getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}`,
               location: event.location || '',
               startDateTime: event.start_at,
               endDateTime: event.end_at,

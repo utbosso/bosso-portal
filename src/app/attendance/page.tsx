@@ -399,19 +399,27 @@ export default function AttendancePage() {
     setDeletingRecordId(item.id)
     try {
       if (item.type === 'event') {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('attendance_records')
           .delete()
           .eq('id', item.id)
+          .select('id')
 
         if (error) throw error
+        if (!data || data.length === 0) {
+          throw new Error('Delete blocked by permissions or record not found.')
+        }
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('points_adjustments')
           .delete()
           .eq('id', item.id)
+          .select('id')
 
         if (error) throw error
+        if (!data || data.length === 0) {
+          throw new Error('Delete blocked by permissions or record not found. Run the points_adjustments delete policy migration.')
+        }
       }
 
       await fetchAdminData()
@@ -432,12 +440,16 @@ export default function AttendancePage() {
 
     setDeletingRecordId(attendanceRecordId)
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('attendance_records')
         .delete()
         .eq('id', attendanceRecordId)
+        .select('id')
 
       if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error('Delete blocked by permissions or record not found.')
+      }
 
       await fetchAdminData()
       await fetchEventStats()
