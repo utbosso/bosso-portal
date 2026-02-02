@@ -11,7 +11,6 @@ import {
   ClipboardCheck,
   Trophy,
   Calendar,
-  TrendingUp,
   CheckCircle2,
   QrCode,
   Search,
@@ -684,57 +683,32 @@ export default function AttendancePage() {
           </div>
 
           <div className="card-glow p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Recent Activity</p>
-                <p className="text-sm font-semibold text-foreground">
-                  {myAttendance.length > 0 && myAttendance[0].checked_in_at
-                    ? new Date(myAttendance[0].checked_in_at).toLocaleDateString()
-                    : 'No activity'}
-                </p>
-              </div>
-              <TrendingUp className="w-10 h-10 text-green-400 opacity-50" />
+            <div className="flex items-center gap-2 mb-3">
+              <QrCode className="w-4 h-4 text-primary" />
+              <p className="text-sm text-muted-foreground">Check In Event</p>
             </div>
+            <form onSubmit={handleCheckIn} className="space-y-2">
+              <input
+                type="text"
+                value={checkInCode}
+                onChange={(e) => setCheckInCode(e.target.value.toUpperCase())}
+                placeholder="Enter code (e.g. ABC123)"
+                maxLength={6}
+                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm font-mono text-foreground uppercase tracking-wider placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+              <button
+                type="submit"
+                disabled={checkingIn || !checkInCode.trim()}
+                className="w-full px-3 py-2 rounded-md bg-primary text-dark-300 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {checkingIn ? 'Checking in...' : 'Check In'}
+              </button>
+            </form>
           </div>
         </div>
 
         {/* Category Points Breakdown */}
         <CategoryPointsBreakdown userId={profile.id} />
-
-        {/* Check-in Form */}
-        <div className="card-glow p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <QrCode className="w-6 h-6 text-primary" />
-            <h2 className="text-xl font-semibold text-foreground">Check In to Event</h2>
-          </div>
-
-          <form onSubmit={handleCheckIn} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-foreground mb-2 block">
-                Enter Check-In Code
-              </label>
-              <input
-                type="text"
-                value={checkInCode}
-                onChange={(e) => setCheckInCode(e.target.value.toUpperCase())}
-                placeholder="e.g. ABC123"
-                maxLength={6}
-                className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-md text-lg font-mono text-foreground uppercase tracking-widest placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-              <p className="text-xs text-muted-foreground mt-2">
-                Code will be displayed at the event. Enter it here to check in.
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={checkingIn || !checkInCode.trim()}
-              className="w-full px-4 py-3 rounded-lg bg-primary text-dark-300 font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {checkingIn ? 'Checking in...' : 'Check In'}
-            </button>
-          </form>
-        </div>
 
         {/* Attendance History */}
         <div className="card-glow p-6">
