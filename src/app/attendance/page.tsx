@@ -100,6 +100,7 @@ export default function AttendancePage() {
   const [adjustmentUser, setAdjustmentUser] = useState('')
   const [adjustmentPoints, setAdjustmentPoints] = useState('')
   const [adjustmentReason, setAdjustmentReason] = useState('')
+  const [adjustmentCategory, setAdjustmentCategory] = useState<'' | 'membership' | 'professional_education' | 'social' | 'philanthropy'>('')
   const [adjustmentType, setAdjustmentType] = useState<'event' | 'other'>('other')
   const [adjustmentEvent, setAdjustmentEvent] = useState('')
   const [allEvents, setAllEvents] = useState<Event[]>([])
@@ -575,6 +576,10 @@ export default function AttendancePage() {
       setError('Please provide a reason for the adjustment.')
       return
     }
+    if (adjustmentType === 'other' && !adjustmentCategory) {
+      setError('Please select a category for this manual adjustment.')
+      return
+    }
 
     const points = Number(adjustmentPoints)
     if (isNaN(points)) {
@@ -623,7 +628,7 @@ export default function AttendancePage() {
             user_id: adjustmentUser,
             adjusted_by: profile.id,
             points,
-            reason: adjustmentReason,
+            reason: `${adjustmentReason.trim()} (${adjustmentCategory})`,
           })
 
         if (error) throw error
@@ -633,6 +638,7 @@ export default function AttendancePage() {
       setAdjustmentUser('')
       setAdjustmentPoints('')
       setAdjustmentReason('')
+      setAdjustmentCategory('')
       setAdjustmentType('other')
       setAdjustmentEvent('')
       await fetchAdminData()
@@ -925,6 +931,7 @@ export default function AttendancePage() {
                 setAdjustmentUser('')
                 setAdjustmentPoints('')
                 setAdjustmentReason('')
+                setAdjustmentCategory('')
                 setAdjustmentType('other')
                 setAdjustmentEvent('')
               }}
@@ -1031,6 +1038,19 @@ export default function AttendancePage() {
 
             {adjustmentType === 'other' && (
               <div>
+                <label className="text-sm font-medium text-foreground mb-2 block">Category</label>
+                <select
+                  value={adjustmentCategory}
+                  onChange={(e) => setAdjustmentCategory(e.target.value as typeof adjustmentCategory)}
+                  required
+                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 mb-3"
+                >
+                  <option value="">Select category...</option>
+                  <option value="membership">Membership</option>
+                  <option value="professional_education">Professional / Education</option>
+                  <option value="social">Social</option>
+                  <option value="philanthropy">Philanthropy</option>
+                </select>
                 <label className="text-sm font-medium text-foreground mb-2 block">Reason</label>
                 <textarea
                   value={adjustmentReason}
@@ -1057,6 +1077,7 @@ export default function AttendancePage() {
                   setAdjustmentUser('')
                   setAdjustmentPoints('')
                   setAdjustmentReason('')
+                  setAdjustmentCategory('')
                   setAdjustmentType('other')
                   setAdjustmentEvent('')
                 }}

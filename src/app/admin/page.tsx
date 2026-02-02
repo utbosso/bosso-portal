@@ -24,6 +24,7 @@ import {
   Trash2,
   Search,
   Download,
+  RefreshCw,
   Briefcase,
   Plus,
   X
@@ -1247,9 +1248,25 @@ function PointsBreakdownTab() {
   const [notes, setNotes] = useState('')
   const [addPointsError, setAddPointsError] = useState<string | null>(null)
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
 
   useEffect(() => {
     fetchPointsData()
+
+    const onFocus = () => fetchPointsData()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchPointsData()
+      }
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   const fetchPointsData = async () => {
@@ -1321,6 +1338,7 @@ function PointsBreakdownTab() {
       })
 
       setPointsData(breakdown)
+      setLastUpdatedAt(new Date())
     } catch (error) {
       console.error('Error fetching points data:', error)
     } finally {
@@ -1522,6 +1540,13 @@ function PointsBreakdownTab() {
             <option value="active">Sort by Active Status</option>
           </select>
           <button
+            onClick={fetchPointsData}
+            className="px-4 py-2 border border-primary/30 text-primary rounded-md text-sm font-medium hover:bg-primary/10 transition flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+          <button
             onClick={() => setShowAddPointsModal(true)}
             className="px-4 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-md text-sm font-medium hover:bg-green-500/30 transition flex items-center gap-2"
           >
@@ -1537,6 +1562,11 @@ function PointsBreakdownTab() {
           </button>
         </div>
       </div>
+      {lastUpdatedAt && (
+        <p className="text-xs text-muted-foreground">
+          Last updated: {lastUpdatedAt.toLocaleTimeString()}
+        </p>
+      )}
 
       {/* Points table */}
       {loading ? (

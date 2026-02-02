@@ -22,7 +22,7 @@ type AdjustmentPointsRow = {
 
 export function getCategoryFromAdjustmentReason(reason: string | null): EventCategory | null {
   if (!reason) return null
-  const match = reason.match(/\((membership|professional_education|social|philanthropy)\)\s*$/)
+  const match = reason.match(/\((membership|professional_education|social|philanthropy)\)/)
   return (match?.[1] as EventCategory) || null
 }
 
