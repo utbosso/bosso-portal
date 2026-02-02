@@ -24,7 +24,7 @@ import UserSearch from '@/components/UserSearch'
 
 const supabase = createClient()
 
-type AssignmentType = 'individual' | 'role'
+type AssignmentType = 'individual' | 'role' | 'everyone'
 
 type TaskFormState = {
   title: string
@@ -344,34 +344,43 @@ export default function TasksPage() {
         if (error) throw error
       } else {
         // Creating new task(s)
-        if (form.assignmentType === 'role' && form.assignToRole) {
-          // Bulk create: one task per user with the selected role
-          const usersWithRole = profiles.filter(p => p.role === form.assignToRole)
+        if (form.assignmentType === 'role' || form.assignmentType === 'everyone') {
+          // Bulk create: one task per matching user
+          const targetUsers = form.assignmentType === 'role'
+            ? profiles.filter((p) => p.role === form.assignToRole)
+            : profiles
 
-          if (usersWithRole.length === 0) {
-            setError('No users found with the selected role.')
+          if (targetUsers.length === 0) {
+            setError(form.assignmentType === 'role' ? 'No users found with the selected role.' : 'No users found to assign.')
             return
           }
 
           // Generate a unique group_task_id to link all tasks from this assignment
           const groupTaskId = crypto.randomUUID()
 
-          // Check for existing tasks to prevent duplicates
-          // A user already has this task if they have a task with same title, assigner, and role assignment
-          const { data: existingTasks } = await supabase
+          // Check for existing tasks to prevent duplicates for bulk assignments.
+          let existingTasksQuery = supabase
             .from('tasks')
             .select('assigned_to')
             .eq('title', form.title)
             .eq('assigned_by', profile.id)
-            .eq('assigned_to_role', form.assignToRole)
+            .in('assigned_to', targetUsers.map((u) => u.id))
+
+          if (form.assignmentType === 'role') {
+            existingTasksQuery = existingTasksQuery.eq('assigned_to_role', form.assignToRole)
+          }
+
+          const { data: existingTasks } = await existingTasksQuery
 
           const usersWithExistingTask = new Set(existingTasks?.map(t => t.assigned_to) ?? [])
 
           // Filter out users who already have this task
-          const usersToAssign = usersWithRole.filter(user => !usersWithExistingTask.has(user.id))
+          const usersToAssign = targetUsers.filter(user => !usersWithExistingTask.has(user.id))
 
           if (usersToAssign.length === 0) {
-            setError('All users in this role already have this task.')
+            setError(form.assignmentType === 'role'
+              ? 'All users in this role already have this task.'
+              : 'All users already have this task.')
             return
           }
 
@@ -386,7 +395,7 @@ export default function TasksPage() {
             points_category: pointVal && pointVal > 0 ? form.pointsCategory : null,
             auto_approve: form.autoApprove,
             group_task_id: groupTaskId,
-            assigned_to_role: form.assignToRole,
+            assigned_to_role: form.assignmentType === 'role' ? form.assignToRole : null,
           }))
 
           const { error } = await supabase
@@ -395,7 +404,7 @@ export default function TasksPage() {
           if (error) throw error
 
           // Show feedback if some users were skipped
-          const skippedCount = usersWithRole.length - usersToAssign.length
+          const skippedCount = targetUsers.length - usersToAssign.length
           if (skippedCount > 0) {
             // Task created, but some users skipped - we'll show this in UI later
             console.log(`Created ${usersToAssign.length} tasks, skipped ${skippedCount} users who already had this task`)
@@ -463,7 +472,6 @@ export default function TasksPage() {
         if (task.auto_approve) {
           // Auto-approve: mark as completed and award points immediately
           updateData.status = 'completed'
-          updateData.points_awarded = true
         } else {
           // Manual approval: set to not_reviewed for creator to review
           updateData.status = 'not_reviewed'
@@ -504,20 +512,18 @@ export default function TasksPage() {
   const awardTaskPoints = async (task: Task) => {
     if (!profile || !task.point_value || task.point_value <= 0 || task.points_awarded) return
 
-    try {
-      // Task points are manual adjustments (not tied to calendar events).
-      const { error } = await supabase.from('points_adjustments').insert({
-        user_id: task.assigned_to,
-        adjusted_by: profile.id,
-        points: task.point_value,
-        reason: `Task completion: ${task.title}`,
-      })
+    const response = await fetch('/api/tasks/award-points', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ taskId: task.id }),
+    })
 
-      if (error) {
-        console.error('Error awarding task points:', error)
-      }
-    } catch (err) {
-      console.error('Error awarding task points:', err)
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to award task points.')
     }
   }
 
@@ -530,9 +536,8 @@ export default function TasksPage() {
 
       const updateData: any = { status }
 
-      // If approving a task with points that hasn't been awarded yet, mark as awarded
+      // If approving a task with points that hasn't been awarded yet, mark as completed
       if (status === 'approved' && task.point_value && task.point_value > 0 && !task.points_awarded) {
-        updateData.points_awarded = true
         updateData.status = 'completed' // Mark as fully completed when approved
       }
 
@@ -1064,6 +1069,17 @@ export default function TasksPage() {
                         />
                         <span className="text-foreground">Role Group</span>
                       </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="assignmentType"
+                          value="everyone"
+                          checked={form.assignmentType === 'everyone'}
+                          onChange={() => setForm((prev) => ({ ...prev, assignmentType: 'everyone', assignedTo: '', assignToRole: '' }))}
+                          className="accent-primary"
+                        />
+                        <span className="text-foreground">Everyone</span>
+                      </label>
                     </div>
 
                     {form.assignmentType === 'individual' ? (
@@ -1073,7 +1089,7 @@ export default function TasksPage() {
                         onChange={(value) => setForm((prev) => ({ ...prev, assignedTo: value as string }))}
                         placeholder="Search by name..."
                       />
-                    ) : (
+                    ) : form.assignmentType === 'role' ? (
                       <div className="space-y-1">
                         <select
                           value={form.assignToRole}
@@ -1091,6 +1107,10 @@ export default function TasksPage() {
                           </p>
                         )}
                       </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Will create {profiles.length} individual tasks for everyone (including general members).
+                      </p>
                     )}
                   </div>
 
