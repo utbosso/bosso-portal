@@ -28,8 +28,10 @@ import {
   Plus,
   X
 } from 'lucide-react'
-import type { Profile, FeedbackSubmission, Application, EventCategory, EventType } from '@/types/database.types'
+import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
+import { meetsRoleRequirements } from '@/lib/membership-tiers'
+import { buildCategoryTotals } from '@/lib/points-calculations'
 import UserSearch, { UserOption } from '@/components/UserSearch'
 
 const supabase = createClient()
@@ -1245,12 +1247,6 @@ function PointsBreakdownTab() {
   const [addPointsError, setAddPointsError] = useState<string | null>(null)
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
 
-  const getCategoryFromAdjustmentReason = (reason: string | null): EventCategory | null => {
-    if (!reason) return null
-    const match = reason.match(/\((membership|professional_education|social|philanthropy)\)\s*$/)
-    return (match?.[1] as EventCategory) || null
-  }
-
   useEffect(() => {
     fetchPointsData()
   }, [])
@@ -1266,81 +1262,62 @@ function PointsBreakdownTab() {
 
       if (usersError) throw usersError
 
-      // Fetch points breakdown for each user
-      const breakdownPromises = (users || []).map(async (user) => {
-        const { data: categoryData } = await supabase.rpc('get_user_points_by_category', {
-          user_uuid: user.id,
-        })
-
-        const { data: adjustments } = await supabase
+      const [attendanceResult, adjustmentsResult] = await Promise.all([
+        supabase
+          .from('attendance_records')
+          .select('user_id, points_earned, event_category, event:events(event_category)'),
+        supabase
           .from('points_adjustments')
-          .select('points, reason')
-          .eq('user_id', user.id)
+          .select('user_id, points, reason'),
+      ])
 
-        const { data: activeStatus } = await supabase.rpc('check_user_active_status', {
-          user_uuid: user.id,
-        })
+      if (attendanceResult.error) throw attendanceResult.error
+      if (adjustmentsResult.error) throw adjustmentsResult.error
 
-        const status = activeStatus?.[0] || {
-          is_active: false,
-          total_points: 0,
-          membership_points: 0,
-          professional_points: 0,
-          social_points: 0,
-          philanthropy_points: 0,
-        }
+      const attendanceByUser = new Map<string, any[]>()
+      for (const row of attendanceResult.data || []) {
+        const existing = attendanceByUser.get(row.user_id) || []
+        existing.push(row)
+        attendanceByUser.set(row.user_id, existing)
+      }
 
-        // Check if meets role requirements
-        const { data: roleCheck } = await supabase.rpc('check_role_requirements', {
-          user_uuid: user.id,
-          target_role: user.role,
-        })
+      const adjustmentsByUser = new Map<string, any[]>()
+      for (const row of adjustmentsResult.data || []) {
+        const existing = adjustmentsByUser.get(row.user_id) || []
+        existing.push(row)
+        adjustmentsByUser.set(row.user_id, existing)
+      }
 
-        const categoryTotals = {
-          membership: 0,
-          professional_education: 0,
-          social: 0,
-          philanthropy: 0,
-        }
+      const breakdown = (users || []).map((user) => {
+        const { categoryTotals, totalPoints } = buildCategoryTotals(
+          attendanceByUser.get(user.id) || [],
+          adjustmentsByUser.get(user.id) || []
+        )
 
-        ;(categoryData || []).forEach((row: any) => {
-          if (row.category && row.category in categoryTotals) {
-            categoryTotals[row.category as keyof typeof categoryTotals] += Number(row.category_points || 0)
-          }
-        })
+        const isActive =
+          totalPoints >= 100 &&
+          categoryTotals.membership >= 25 &&
+          categoryTotals.professional_education >= 25 &&
+          categoryTotals.social >= 25 &&
+          categoryTotals.philanthropy >= 25
 
-        ;(adjustments || []).forEach((adj) => {
-          const category = getCategoryFromAdjustmentReason(adj.reason)
-          if (category) {
-            categoryTotals[category] += Number(adj.points || 0)
-          }
-        })
-
-        const categorizedTotal =
-          categoryTotals.membership +
-          categoryTotals.professional_education +
-          categoryTotals.social +
-          categoryTotals.philanthropy
-        const uncategorizedAdjustmentTotal = (adjustments || []).reduce((sum, adj) => {
-          return getCategoryFromAdjustmentReason(adj.reason) ? sum : sum + Number(adj.points || 0)
-        }, 0)
+        const roleRequirement = meetsRoleRequirements(user.role as UserRole, totalPoints, categoryTotals)
 
         return {
           user_id: user.id,
           full_name: user.full_name,
           email: user.email,
           role: user.role,
-          total_points: categorizedTotal + uncategorizedAdjustmentTotal,
+          total_points: totalPoints,
           membership_points: categoryTotals.membership,
           professional_points: categoryTotals.professional_education,
           social_points: categoryTotals.social,
           philanthropy_points: categoryTotals.philanthropy,
-          is_active: status.is_active,
-          meets_role_requirements: roleCheck?.[0]?.meets_requirements || false,
+          is_active: isActive,
+          meets_role_requirements: roleRequirement.meets,
         }
       })
 
-      const breakdown = await Promise.all(breakdownPromises)
       setPointsData(breakdown)
     } catch (error) {
       console.error('Error fetching points data:', error)

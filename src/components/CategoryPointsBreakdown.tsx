@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { EVENT_CATEGORIES, MINIMUM_REQUIREMENTS } from '@/lib/bosso-points'
+import { POINTS_CATEGORIES, buildCategoryTotals } from '@/lib/points-calculations'
 import type { EventCategory } from '@/types/database.types'
 import { Folder, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react'
 
@@ -25,6 +26,7 @@ type Props = {
 export default function CategoryPointsBreakdown({ userId, showTitle = true, compact = false }: Props) {
   const [categoryData, setCategoryData] = useState<CategoryPoints[]>([])
   const [totalPoints, setTotalPoints] = useState(0)
+  const [uncategorizedPoints, setUncategorizedPoints] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -36,56 +38,44 @@ export default function CategoryPointsBreakdown({ userId, showTitle = true, comp
   const fetchCategoryBreakdown = async () => {
     setLoading(true)
     try {
-      // Fetch category breakdown
-      const { data, error } = await supabase.rpc('get_user_points_by_category', {
-        user_uuid: userId,
-      })
+      const [attendanceResult, adjustmentsResult] = await Promise.all([
+        supabase
+          .from('attendance_records')
+          .select('points_earned, event_category, event:events(event_category)')
+          .eq('user_id', userId),
+        supabase
+          .from('points_adjustments')
+          .select('points, reason')
+          .eq('user_id', userId),
+      ])
 
-      if (error) {
-        console.error('Error fetching category breakdown:', error)
+      if (attendanceResult.error) {
+        console.error('Error fetching attendance points:', attendanceResult.error)
         return
       }
 
-      // Ensure all 4 categories are present (fill with 0 if missing)
-      const allCategories: EventCategory[] = [
-        'membership',
-        'professional_education',
-        'social',
-        'philanthropy',
-      ]
+      if (adjustmentsResult.error) {
+        console.error('Error fetching adjustment points:', adjustmentsResult.error)
+        return
+      }
 
-      const categoryMap = new Map<EventCategory, CategoryPoints>()
-      data?.forEach((item: any) => {
-        categoryMap.set(item.category, {
-          category: item.category,
-          category_label: item.category_label,
-          category_points: item.category_points,
-          events_attended: item.events_attended,
-          max_possible_points: item.max_possible_points,
-        })
-      })
+      const { categoryTotals, totalPoints, uncategorizedPoints, eventsByCategory } =
+        buildCategoryTotals(attendanceResult.data || [], adjustmentsResult.data || [])
 
-      // Fill in missing categories with zeros
-      const completeData: CategoryPoints[] = allCategories.map((cat) => {
-        if (categoryMap.has(cat)) {
-          return categoryMap.get(cat)!
-        } else {
-          const catInfo = EVENT_CATEGORIES[cat]
-          return {
-            category: cat,
-            category_label: catInfo.label,
-            category_points: 0,
-            events_attended: 0,
-            max_possible_points: catInfo.maxPoints,
-          }
+      const completeData: CategoryPoints[] = POINTS_CATEGORIES.map((cat) => {
+        const catInfo = EVENT_CATEGORIES[cat]
+        return {
+          category: cat,
+          category_label: catInfo.label,
+          category_points: categoryTotals[cat],
+          events_attended: eventsByCategory[cat],
+          max_possible_points: catInfo.maxPoints,
         }
       })
 
       setCategoryData(completeData)
-
-      // Calculate total
-      const total = completeData.reduce((sum, cat) => sum + cat.category_points, 0)
-      setTotalPoints(total)
+      setTotalPoints(totalPoints)
+      setUncategorizedPoints(uncategorizedPoints)
     } catch (err) {
       console.error('Error fetching category breakdown:', err)
     } finally {
@@ -166,6 +156,12 @@ export default function CategoryPointsBreakdown({ userId, showTitle = true, comp
         {!isActive && (
           <div className="text-xs text-muted-foreground bg-dark-200/50 border border-primary/10 rounded-lg p-3 space-y-1">
             <p className="font-medium text-orange-400">Requirements for Active Status:</p>
+            {uncategorizedPoints !== 0 && (
+              <p className="flex items-center gap-1.5">
+                <AlertCircle className="w-3 h-3" />
+                {uncategorizedPoints} uncategorized points still count toward total
+              </p>
+            )}
             {!meetsTotal && (
               <p className="flex items-center gap-1.5">
                 <AlertCircle className="w-3 h-3" />
@@ -277,6 +273,12 @@ export default function CategoryPointsBreakdown({ userId, showTitle = true, comp
               {MINIMUM_REQUIREMENTS.perCategory}+ each {missingCategories.length === 0 ? '✓' : '✗'}
             </span>
           </div>
+          {uncategorizedPoints !== 0 && (
+            <div className="flex items-center justify-between md:col-span-2">
+              <span className="text-muted-foreground">Uncategorized Points:</span>
+              <span className="font-medium text-yellow-400">{uncategorizedPoints}</span>
+            </div>
+          )}
         </div>
 
         {!isActive && (
