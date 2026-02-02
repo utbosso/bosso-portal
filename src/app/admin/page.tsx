@@ -1316,12 +1316,21 @@ function PointsBreakdownTab() {
           }
         })
 
+        const categorizedTotal =
+          categoryTotals.membership +
+          categoryTotals.professional_education +
+          categoryTotals.social +
+          categoryTotals.philanthropy
+        const uncategorizedAdjustmentTotal = (adjustments || []).reduce((sum, adj) => {
+          return getCategoryFromAdjustmentReason(adj.reason) ? sum : sum + Number(adj.points || 0)
+        }, 0)
+
         return {
           user_id: user.id,
           full_name: user.full_name,
           email: user.email,
           role: user.role,
-          total_points: status.total_points,
+          total_points: categorizedTotal + uncategorizedAdjustmentTotal,
           membership_points: categoryTotals.membership,
           professional_points: categoryTotals.professional_education,
           social_points: categoryTotals.social,
