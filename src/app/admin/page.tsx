@@ -48,6 +48,7 @@ type UserPointsBreakdown = {
   professional_points: number
   social_points: number
   philanthropy_points: number
+  uncategorized_points: number
   is_active: boolean
   meets_role_requirements: boolean
 }
@@ -1289,7 +1290,7 @@ function PointsBreakdownTab() {
       }
 
       const breakdown = (users || []).map((user) => {
-        const { categoryTotals, totalPoints } = buildCategoryTotals(
+        const { categoryTotals, totalPoints, uncategorizedPoints } = buildCategoryTotals(
           attendanceByUser.get(user.id) || [],
           adjustmentsByUser.get(user.id) || []
         )
@@ -1313,6 +1314,7 @@ function PointsBreakdownTab() {
           professional_points: categoryTotals.professional_education,
           social_points: categoryTotals.social,
           philanthropy_points: categoryTotals.philanthropy,
+          uncategorized_points: uncategorizedPoints,
           is_active: isActive,
           meets_role_requirements: roleRequirement.meets,
         }
@@ -1351,6 +1353,7 @@ function PointsBreakdownTab() {
       'Professional/Education',
       'Social',
       'Philanthropy',
+      'Other/Uncategorized',
       'Active Status',
       'Meets Role Requirements',
     ]
@@ -1363,6 +1366,7 @@ function PointsBreakdownTab() {
       user.professional_points,
       user.social_points,
       user.philanthropy_points,
+      user.uncategorized_points,
       user.is_active ? 'Active' : 'Inactive',
       user.meets_role_requirements ? 'Yes' : 'No',
     ])
@@ -1568,6 +1572,9 @@ function PointsBreakdownTab() {
                     Philanthropy
                   </th>
                   <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Other
+                  </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     Status
                   </th>
                 </tr>
@@ -1626,6 +1633,15 @@ function PointsBreakdownTab() {
                       </span>
                     </td>
                     <td className="px-2 py-2 text-center">
+                      <span
+                        className={`text-xs font-medium ${
+                          user.uncategorized_points === 0 ? 'text-muted-foreground' : 'text-yellow-400'
+                        }`}
+                      >
+                        {user.uncategorized_points}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
                       <div className="flex flex-col items-center gap-0.5">
                         <span
                           className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap ${
@@ -1662,6 +1678,10 @@ function PointsBreakdownTab() {
           <div className="flex items-center gap-2">
             <span className="text-orange-400">●</span>
             <span className="text-muted-foreground">Orange: Below 25 points (needs more)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-yellow-400">●</span>
+            <span className="text-muted-foreground">Yellow: Uncategorized points (included in total)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Active</span>
