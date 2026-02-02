@@ -480,7 +480,7 @@ export default function AttendancePage() {
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('id, title, start_at, point_value, track_attendance')
+        .select('id, title, start_at, point_value, track_attendance, event_category')
         .order('start_at', { ascending: false })
         .limit(50)
 
@@ -540,6 +540,7 @@ export default function AttendancePage() {
             event_id: adjustmentEvent,
             user_id: adjustmentUser,
             points_earned: points,
+            event_category: selectedEvent.event_category || null,
           })
 
         if (attendanceError) throw attendanceError
