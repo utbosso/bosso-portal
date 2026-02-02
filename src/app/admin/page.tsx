@@ -1411,6 +1411,11 @@ function PointsBreakdownTab() {
 
   // Add points to selected users
   const handleAddPoints = async () => {
+    if (!profile) {
+      setAddPointsError('Unable to identify admin profile')
+      return
+    }
+
     if (selectedUsers.length === 0) {
       setAddPointsError('Please select at least one user')
       return
@@ -1433,16 +1438,18 @@ function PointsBreakdownTab() {
     setAddPointsSuccess(null)
 
     try {
-      // Create attendance records for each selected user
-      const records = selectedUsers.map((userId) => ({
-        event_id: crypto.randomUUID(), // Generate a placeholder event ID for manual entries
+      // Manual awards are stored as point adjustments, not event attendance.
+      const adjustments = selectedUsers.map((userId) => ({
         user_id: userId,
-        points_earned: pointsValue,
-        event_category: selectedCategory,
-        checked_in_at: new Date().toISOString(),
+        adjusted_by: profile.id,
+        points: pointsValue,
+        reason:
+          selectedEventType === 'other'
+            ? customEventType.trim()
+            : `${selectedEventType} (${selectedCategory})`,
       }))
 
-      const { error } = await supabase.from('attendance_records').insert(records)
+      const { error } = await supabase.from('points_adjustments').insert(adjustments)
 
       if (error) throw error
 

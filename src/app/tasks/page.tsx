@@ -502,16 +502,15 @@ export default function TasksPage() {
   }
 
   const awardTaskPoints = async (task: Task) => {
-    if (!task.point_value || task.point_value <= 0 || task.points_awarded) return
+    if (!profile || !task.point_value || task.point_value <= 0 || task.points_awarded) return
 
     try {
-      // Create an attendance record for the task points
-      const { error } = await supabase.from('attendance_records').insert({
-        event_id: task.id, // Use task ID as the event_id reference
+      // Task points are manual adjustments (not tied to calendar events).
+      const { error } = await supabase.from('points_adjustments').insert({
         user_id: task.assigned_to,
-        points_earned: task.point_value,
-        event_category: task.points_category || 'membership',
-        checked_in_at: new Date().toISOString(),
+        adjusted_by: profile.id,
+        points: task.point_value,
+        reason: `Task completion: ${task.title}`,
       })
 
       if (error) {
