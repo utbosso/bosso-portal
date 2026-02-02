@@ -33,6 +33,7 @@ type TaskFormState = {
   assignedTo: string
   assignmentType: AssignmentType
   assignToRole: UserRole | ''
+  allowDuplicates: boolean
   status: TaskStatus
   pointValue: string
   pointsCategory: EventCategory
@@ -53,6 +54,7 @@ const emptyTaskForm: TaskFormState = {
   assignedTo: '',
   assignmentType: 'individual',
   assignToRole: '',
+  allowDuplicates: false,
   status: 'not_started',
   pointValue: '',
   pointsCategory: 'membership',
@@ -275,6 +277,7 @@ export default function TasksPage() {
       assignedTo: task.assigned_to,
       assignmentType: 'individual',
       assignToRole: '',
+      allowDuplicates: false,
       status: task.status,
       pointValue: task.point_value?.toString() ?? '',
       pointsCategory: task.points_category ?? 'membership',
@@ -358,30 +361,32 @@ export default function TasksPage() {
           // Generate a unique group_task_id to link all tasks from this assignment
           const groupTaskId = crypto.randomUUID()
 
-          // Check for existing tasks to prevent duplicates for bulk assignments.
-          let existingTasksQuery = supabase
-            .from('tasks')
-            .select('assigned_to')
-            .eq('title', form.title)
-            .eq('assigned_by', profile.id)
-            .in('assigned_to', targetUsers.map((u) => u.id))
+          let usersToAssign = targetUsers
+          if (!form.allowDuplicates) {
+            // Check for existing tasks to prevent duplicates for bulk assignments.
+            let existingTasksQuery = supabase
+              .from('tasks')
+              .select('assigned_to')
+              .eq('title', form.title)
+              .eq('assigned_by', profile.id)
+              .in('assigned_to', targetUsers.map((u) => u.id))
 
-          if (form.assignmentType === 'role') {
-            existingTasksQuery = existingTasksQuery.eq('assigned_to_role', form.assignToRole)
-          }
+            if (form.assignmentType === 'role') {
+              existingTasksQuery = existingTasksQuery.eq('assigned_to_role', form.assignToRole)
+            }
 
-          const { data: existingTasks } = await existingTasksQuery
+            const { data: existingTasks } = await existingTasksQuery
+            const usersWithExistingTask = new Set(existingTasks?.map(t => t.assigned_to) ?? [])
 
-          const usersWithExistingTask = new Set(existingTasks?.map(t => t.assigned_to) ?? [])
+            // Filter out users who already have this task
+            usersToAssign = targetUsers.filter(user => !usersWithExistingTask.has(user.id))
 
-          // Filter out users who already have this task
-          const usersToAssign = targetUsers.filter(user => !usersWithExistingTask.has(user.id))
-
-          if (usersToAssign.length === 0) {
-            setError(form.assignmentType === 'role'
-              ? 'All users in this role already have this task.'
-              : 'All users already have this task.')
-            return
+            if (usersToAssign.length === 0) {
+              setError(form.assignmentType === 'role'
+                ? 'All users in this role already have this task.'
+                : 'All users already have this task.')
+              return
+            }
           }
 
           const tasksToInsert = usersToAssign.map(user => ({
@@ -411,6 +416,22 @@ export default function TasksPage() {
           }
         } else {
           // Single task creation
+          if (!form.allowDuplicates) {
+            const { data: existingTask } = await supabase
+              .from('tasks')
+              .select('id')
+              .eq('title', form.title)
+              .eq('assigned_by', profile.id)
+              .eq('assigned_to', form.assignedTo)
+              .limit(1)
+              .maybeSingle()
+
+            if (existingTask) {
+              setError('This user already has this task title from you. Enable duplicates to assign again.')
+              return
+            }
+          }
+
           const payload = {
             title: form.title,
             description: form.description || null,
@@ -1111,6 +1132,20 @@ export default function TasksPage() {
                       <p className="text-xs text-muted-foreground">
                         Will create {profiles.length} individual tasks for everyone (including general members).
                       </p>
+                    )}
+
+                    {!editingId && (
+                      <label className="flex items-start gap-2 cursor-pointer pt-1">
+                        <input
+                          type="checkbox"
+                          checked={form.allowDuplicates}
+                          onChange={(e) => setForm((prev) => ({ ...prev, allowDuplicates: e.target.checked }))}
+                          className="accent-primary mt-0.5"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          Allow duplicates (assign again even if they already have this task title)
+                        </span>
+                      </label>
                     )}
                   </div>
 
