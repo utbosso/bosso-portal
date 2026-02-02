@@ -230,6 +230,25 @@ export default function AdminDashboard() {
     }
   }
 
+  const deleteFeedback = async (feedbackId: string) => {
+    const confirmed = window.confirm('Are you sure you want to delete this feedback? This action cannot be undone.')
+    if (!confirmed) return
+
+    try {
+      const { error } = await supabase
+        .from('feedback_submissions')
+        .delete()
+        .eq('id', feedbackId)
+
+      if (error) throw error
+
+      setRecentFeedback(prev => prev.filter(fb => fb.id !== feedbackId))
+    } catch (error) {
+      console.error('Error deleting feedback:', error)
+      alert('Failed to delete feedback. Please try again.')
+    }
+  }
+
   if (!profile || !isAdmin(profile.role)) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -735,26 +754,6 @@ function UserManagementTab() {
     }
   }
 
-  const deleteFeedback = async (feedbackId: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this feedback? This action cannot be undone.')
-    if (!confirmed) return
-
-    try {
-      const { error } = await supabase
-        .from('feedback')
-        .delete()
-        .eq('id', feedbackId)
-
-      if (error) throw error
-
-      // Remove from local state
-      setRecentFeedback(prev => prev.filter(fb => fb.id !== feedbackId))
-    } catch (error) {
-      console.error('Error deleting feedback:', error)
-      alert('Failed to delete feedback. Please try again.')
-    }
-  }
-
   const getRoleDisplayName = (role: string) => {
     return role.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
   }
@@ -1228,6 +1227,7 @@ BOSSO@UTAustin`)
 
 // Points Breakdown Tab Component
 function PointsBreakdownTab() {
+  const { profile } = useAuth()
   const [pointsData, setPointsData] = useState<UserPointsBreakdown[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
