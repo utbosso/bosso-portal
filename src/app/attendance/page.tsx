@@ -20,6 +20,7 @@ import {
   Plus,
   Minus,
   X,
+  Trash2,
   LayoutList,
   CalendarDays,
 } from 'lucide-react'
@@ -92,6 +93,7 @@ export default function AttendancePage() {
   const [memberAttendance, setMemberAttendance] = useState<AttendanceWithEvent[]>([])
   const [memberHistory, setMemberHistory] = useState<AttendanceHistoryItem[]>([])
   const [eventAttendees, setEventAttendees] = useState<any[]>([])
+  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null)
 
   // Manual adjustment
   const [showAdjustmentForm, setShowAdjustmentForm] = useState(false)
@@ -168,7 +170,11 @@ export default function AttendancePage() {
         ...(adjustments || []).map(adj => ({
           id: adj.id,
           type: 'adjustment' as const,
-          title: adj.points > 0 ? 'Manual Points Added' : 'Manual Points Deducted',
+          title: adj.reason?.startsWith('Task completion:')
+            ? 'Task Points Awarded'
+            : adj.points > 0
+            ? 'Manual Points Added'
+            : 'Manual Points Deducted',
           points: adj.points,
           timestamp: adj.created_at,
           reason: adj.reason
@@ -360,7 +366,11 @@ export default function AttendancePage() {
         ...(adjustments || []).map(adj => ({
           id: adj.id,
           type: 'adjustment' as const,
-          title: adj.points > 0 ? 'Manual Points Added' : 'Manual Points Deducted',
+          title: adj.reason?.startsWith('Task completion:')
+            ? 'Task Points Awarded'
+            : adj.points > 0
+            ? 'Manual Points Added'
+            : 'Manual Points Deducted',
           points: adj.points,
           timestamp: adj.created_at,
           reason: adj.reason
@@ -374,6 +384,68 @@ export default function AttendancePage() {
     } catch (err: any) {
       console.error('Error fetching member attendance:', err)
       setError('Failed to load member attendance.')
+    }
+  }
+
+  const handleDeletePointsRecord = async (item: AttendanceHistoryItem) => {
+    if (!isUserAdmin) return
+    if (!selectedMember) return
+
+    const label = item.type === 'event' ? 'attendance record' : 'points adjustment'
+    const confirmed = window.confirm(`Delete this ${label}? This will remove its points impact.`)
+    if (!confirmed) return
+
+    setDeletingRecordId(item.id)
+    try {
+      if (item.type === 'event') {
+        const { error } = await supabase
+          .from('attendance_records')
+          .delete()
+          .eq('id', item.id)
+
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('points_adjustments')
+          .delete()
+          .eq('id', item.id)
+
+        if (error) throw error
+      }
+
+      await fetchAdminData()
+      await fetchMemberAttendance(selectedMember)
+    } catch (err: any) {
+      console.error('Error deleting points record:', err)
+      setError(err.message || 'Failed to delete points record.')
+    } finally {
+      setDeletingRecordId(null)
+    }
+  }
+
+  const handleRemoveEventAttendee = async (attendanceRecordId: string) => {
+    if (!isUserAdmin || !selectedEvent) return
+
+    const confirmed = window.confirm('Remove this attendee from the event? This will remove event points.')
+    if (!confirmed) return
+
+    setDeletingRecordId(attendanceRecordId)
+    try {
+      const { error } = await supabase
+        .from('attendance_records')
+        .delete()
+        .eq('id', attendanceRecordId)
+
+      if (error) throw error
+
+      await fetchAdminData()
+      await fetchEventStats()
+      await fetchEventAttendees(selectedEvent)
+    } catch (err: any) {
+      console.error('Error removing attendee:', err)
+      setError(err.message || 'Failed to remove attendee.')
+    } finally {
+      setDeletingRecordId(null)
     }
   }
 
@@ -1235,6 +1307,14 @@ export default function AttendancePage() {
                       }`}>
                         {item.points > 0 ? '+' : ''}{item.points} pts
                       </p>
+                      <button
+                        onClick={() => handleDeletePointsRecord(item)}
+                        disabled={deletingRecordId === item.id}
+                        className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {deletingRecordId === item.id ? 'Removing...' : 'Remove'}
+                      </button>
                     </div>
                   </div>
                 ))
@@ -1283,6 +1363,14 @@ export default function AttendancePage() {
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold text-primary">+{record.points_earned} pts</p>
+                      <button
+                        onClick={() => handleRemoveEventAttendee(record.id)}
+                        disabled={deletingRecordId === record.id}
+                        className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {deletingRecordId === record.id ? 'Removing...' : 'Remove'}
+                      </button>
                     </div>
                   </div>
                 ))
