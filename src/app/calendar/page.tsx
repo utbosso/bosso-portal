@@ -43,6 +43,7 @@ type EventFormState = {
   endTime: string
   audience: RoleScopeOption
   trackAttendance: boolean
+  codeHasExpiry: boolean
   eventCategory: EventCategory | ''
   eventType: EventType | ''
   customEventType: string
@@ -58,6 +59,7 @@ const emptyForm: EventFormState = {
   endTime: '',
   audience: 'all',
   trackAttendance: false,
+  codeHasExpiry: true,
   eventCategory: '',
   eventType: '',
   customEventType: '',
@@ -288,6 +290,7 @@ export default function CalendarPage() {
       endTime: end.toTimeString().slice(0, 5),
       audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
       trackAttendance: event.track_attendance ?? false,
+      codeHasExpiry: Boolean(event.code_expires_at),
       eventCategory: event.event_category ?? '',
       eventType: event.event_type ?? '',
       customEventType: event.custom_event_type ?? '',
@@ -350,8 +353,10 @@ export default function CalendarPage() {
       ? combineDateTime(form.date, form.endTime)
       : new Date(start.getTime() + 60 * 60 * 1000)
 
-    // Calculate code expiration time (5 minutes after event ends)
-    const codeExpiresAt = new Date(end.getTime() + 5 * 60 * 1000)
+    const existingEvent = editingId ? events.find((event) => event.id === editingId) : null
+    const minimumExpiryFromNow = new Date(Date.now() + 5 * 60 * 1000)
+    const codeExpiryFromEnd = new Date(end.getTime() + 5 * 60 * 1000)
+    const codeExpiresAt = codeExpiryFromEnd > minimumExpiryFromNow ? codeExpiryFromEnd : minimumExpiryFromNow
 
     const scopePayload = toRoleScopePayload(form.audience)
 
@@ -366,8 +371,12 @@ export default function CalendarPage() {
       ...(scopePayload.roleScopeMode ? { audience_scope_mode: scopePayload.roleScopeMode } : {}),
       track_attendance: form.trackAttendance,
       point_value: form.trackAttendance ? Number(form.pointValue) : 0,
-      attendance_code: form.trackAttendance ? generateAttendanceCode() : null,
-      code_expires_at: form.trackAttendance ? codeExpiresAt.toISOString() : null,
+      attendance_code: form.trackAttendance
+        ? (existingEvent?.attendance_code ?? generateAttendanceCode())
+        : null,
+      code_expires_at: form.trackAttendance
+        ? (form.codeHasExpiry ? codeExpiresAt.toISOString() : null)
+        : null,
       event_category: form.eventCategory || null,
       event_type: form.eventType || null,
       custom_event_type: (form.eventType === 'other' && form.customEventType) ? form.customEventType : null,
@@ -958,6 +967,24 @@ View on portal: ${window.location.origin}/calendar`)
                       />
                       <p className="text-xs text-muted-foreground">
                         Points members will earn for attending this event
+                      </p>
+
+                      <div className="flex items-center gap-3 pt-2">
+                        <input
+                          type="checkbox"
+                          id="codeHasExpiry"
+                          checked={form.codeHasExpiry}
+                          onChange={(e) => setForm((prev) => ({ ...prev, codeHasExpiry: e.target.checked }))}
+                          className="w-4 h-4 rounded border-primary/20 bg-dark-100 text-primary focus:ring-2 focus:ring-primary/20"
+                        />
+                        <label htmlFor="codeHasExpiry" className="text-sm text-foreground font-medium cursor-pointer">
+                          Attendance code expires after event
+                        </label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {form.codeHasExpiry
+                          ? 'Code expires 5 minutes after event end (or 5 minutes from now when reactivating past events).'
+                          : 'Code never expires until attendance tracking is turned off.'}
                       </p>
                     </div>
                   )}

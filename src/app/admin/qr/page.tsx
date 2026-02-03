@@ -188,7 +188,13 @@ export default function AttendanceDisplayPage() {
     )
   }
 
-  const isEventActive = selectedEvent && new Date() >= new Date(selectedEvent.start_at) && new Date() <= new Date(selectedEvent.code_expires_at!)
+  const now = new Date()
+  const isEventActive = selectedEvent
+    ? (
+      now >= new Date(selectedEvent.start_at) &&
+      (!selectedEvent.code_expires_at || now <= new Date(selectedEvent.code_expires_at))
+    )
+    : false
 
   return (
     <div className="min-h-screen bg-dark-300 p-6">
@@ -303,9 +309,19 @@ export default function AttendanceDisplayPage() {
               {/* Expiration Notice */}
               <div className="mt-8 p-4 rounded-lg bg-dark-200 border border-primary/10">
                 <p className="text-base text-muted-foreground">
-                  Code expires: <span className="text-foreground font-medium">
-                    {new Date(selectedEvent.code_expires_at!).toLocaleString()}
-                  </span> (5 min after event ends)
+                  {selectedEvent.code_expires_at ? (
+                    <>
+                      Code expires:{' '}
+                      <span className="text-foreground font-medium">
+                        {new Date(selectedEvent.code_expires_at).toLocaleString()}
+                      </span>{' '}
+                      (5 min after event ends)
+                    </>
+                  ) : (
+                    <>
+                      Code expiry: <span className="text-foreground font-medium">No expiry</span>
+                    </>
+                  )}
                 </p>
               </div>
             </div>

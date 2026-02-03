@@ -506,13 +506,16 @@ export default function AttendancePage() {
         return
       }
 
-      // Check if code is expired
-      const now = new Date()
-      const expiresAt = new Date(events.code_expires_at!)
+      // Check if code is expired (null means no expiry)
+      if (events.code_expires_at) {
+        const now = new Date()
+        const expiresAt = new Date(events.code_expires_at)
+        const hasValidExpiry = !Number.isNaN(expiresAt.getTime())
 
-      if (now > expiresAt) {
-        setError('This check-in code has expired.')
-        return
+        if (hasValidExpiry && now > expiresAt) {
+          setError('This check-in code has expired.')
+          return
+        }
       }
 
       // Check if already checked in
