@@ -45,6 +45,14 @@ type NavItem = {
   keywords?: string[]
 }
 
+function SpotifyIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12 1.5a10.5 10.5 0 1 0 0 21a10.5 10.5 0 0 0 0-21Zm4.73 14.99a.7.7 0 0 1-.97.24c-2.66-1.62-5.99-1.99-9.91-1.12a.7.7 0 0 1-.3-1.36c4.29-.95 7.96-.53 10.94 1.29a.7.7 0 0 1 .24.95Zm1.39-3.1a.88.88 0 0 1-1.21.3c-3.05-1.87-7.7-2.41-11.3-1.3a.88.88 0 1 1-.52-1.68c4.11-1.27 9.24-.67 12.74 1.48a.88.88 0 0 1 .29 1.2Zm.12-3.23C14.6 8 8.57 7.76 5.1 8.82a1.05 1.05 0 1 1-.61-2c3.99-1.2 10.61-.96 14.84 1.55a1.05 1.05 0 0 1-1.09 1.79Z" />
+    </svg>
+  )
+}
+
 // Helper function to get time ago
 function getTimeAgo(date: Date): string {
   const now = new Date()
@@ -132,6 +140,7 @@ const quickLinks = [
   { name: 'Linktree', url: 'https://linktr.ee/txbosso', icon: LinkTreeIcon },
   { name: 'HornsLink', url: 'https://utexas.campuslabs.com/engage/organization/txsportsanalytics', icon: ExternalLink },
   { name: 'Instagram', url: 'https://www.instagram.com/txbosso/', icon: Instagram },
+  { name: 'Spotify', url: 'https://open.spotify.com/show/16Nnwts9OfKgd134xZtdMu', icon: SpotifyIcon },
   { name: 'Slack', url: 'https://join.slack.com/t/txsportsanalytics/shared_invite/zt-35k0niv81-FW1kud7SUEvCDNgtZF6Ocw', icon: Slack },
 ]
 
