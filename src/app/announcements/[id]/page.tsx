@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
-import { ArrowLeft, Pencil, Save, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Pencil, Save, Trash2, X, Paperclip } from 'lucide-react'
 import {
   canAccessRoleScope,
   fromRoleScopePayload,
@@ -37,6 +37,9 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const [removeAttachment, setRemoveAttachment] = useState(false)
+  const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null)
 
   const isUserAdmin = isAdmin(profile?.role)
   const canManage = isUserAdmin || announcement?.created_by === profile?.id || hasMinimumRole('board_member')
@@ -44,6 +47,8 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
     if (!item) return false
     return canAccessRoleScope(profile?.role, item.role_scope, item.role_scope_mode)
   }
+
+  const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_')
 
   const fetchAnnouncement = async () => {
     setLoading(true)
@@ -60,6 +65,9 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
           created_by,
           role_scope,
           role_scope_mode,
+          attachment_path,
+          attachment_name,
+          attachment_mime_type,
           author:profiles!announcements_created_by_fkey(id, full_name, role)
         `
         )
@@ -73,6 +81,23 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
       setTitle(record?.title ?? '')
       setBody(record?.body ?? '')
       setRoleScope(fromRoleScopePayload(record?.role_scope, record?.role_scope_mode))
+      setAttachmentFile(null)
+      setRemoveAttachment(false)
+
+      if (record.attachment_path) {
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from('announcement-attachments')
+          .createSignedUrl(record.attachment_path, 60 * 60)
+
+        if (signedError) {
+          console.warn('Failed to create signed URL for announcement attachment', signedError)
+          setAttachmentUrl(null)
+        } else {
+          setAttachmentUrl(signedData.signedUrl)
+        }
+      } else {
+        setAttachmentUrl(null)
+      }
 
       if (profile) {
         const readPayload: AnnouncementRead = {
@@ -104,11 +129,33 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
 
     try {
       const scopePayload = toRoleScopePayload(roleScope)
-      const payload = {
+      const payload: Record<string, any> = {
         title,
         body,
         role_scope: scopePayload.roleScope,
         ...(scopePayload.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
+      }
+
+      const currentAttachmentPath = announcement.attachment_path
+      let uploadedAttachmentPath: string | null = null
+
+      if (attachmentFile) {
+        uploadedAttachmentPath = `${announcement.id}/${Date.now()}-${sanitizeFileName(attachmentFile.name)}`
+        const { error: uploadError } = await supabase.storage
+          .from('announcement-attachments')
+          .upload(uploadedAttachmentPath, attachmentFile, {
+            contentType: attachmentFile.type || undefined,
+            upsert: false,
+          })
+        if (uploadError) throw uploadError
+
+        payload.attachment_path = uploadedAttachmentPath
+        payload.attachment_name = attachmentFile.name
+        payload.attachment_mime_type = attachmentFile.type || null
+      } else if (removeAttachment) {
+        payload.attachment_path = null
+        payload.attachment_name = null
+        payload.attachment_mime_type = null
       }
 
       const { error } = await supabase
@@ -116,7 +163,25 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
         .update(payload)
         .eq('id', announcement.id)
 
-      if (error) throw error
+      if (error) {
+        if (uploadedAttachmentPath) {
+          await supabase.storage.from('announcement-attachments').remove([uploadedAttachmentPath])
+        }
+        throw error
+      }
+
+      const shouldDeleteOldAttachment =
+        !!currentAttachmentPath &&
+        (removeAttachment || (uploadedAttachmentPath !== null && uploadedAttachmentPath !== currentAttachmentPath))
+
+      if (shouldDeleteOldAttachment) {
+        const { error: removeError } = await supabase.storage
+          .from('announcement-attachments')
+          .remove([currentAttachmentPath])
+        if (removeError) {
+          console.warn('Failed to remove old attachment after update', removeError)
+        }
+      }
 
       await fetchAnnouncement()
       setEditing(false)
@@ -137,6 +202,15 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
     setError(null)
 
     try {
+      if (announcement.attachment_path) {
+        const { error: removeError } = await supabase.storage
+          .from('announcement-attachments')
+          .remove([announcement.attachment_path])
+        if (removeError) {
+          console.warn('Failed to remove announcement attachment before delete', removeError)
+        }
+      }
+
       const { error } = await supabase
         .from('announcements')
         .delete()
@@ -207,7 +281,11 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setEditing(true)}
+              onClick={() => {
+                setEditing(true)
+                setAttachmentFile(null)
+                setRemoveAttachment(false)
+              }}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-primary/40 text-sm text-primary hover:bg-primary/10"
             >
               <Pencil className="w-4 h-4" /> Edit
@@ -249,6 +327,28 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
           <p className="text-sm text-muted-foreground whitespace-pre-line">
             {announcement.body}
           </p>
+
+          {announcement.attachment_name && attachmentUrl && (
+            <div className="pt-2 border-t border-primary/10 space-y-3">
+              <a
+                href={attachmentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+              >
+                <Paperclip className="w-4 h-4" />
+                Open attachment: {announcement.attachment_name}
+              </a>
+
+              {announcement.attachment_mime_type?.startsWith('image/') && (
+                <img
+                  src={attachmentUrl}
+                  alt={announcement.attachment_name}
+                  className="max-w-full max-h-[420px] rounded-md border border-primary/20 object-contain"
+                />
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <form onSubmit={handleUpdate} className="card-glow p-6 space-y-4">
@@ -290,12 +390,49 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
             </select>
           </div>
 
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Attachment</label>
+            {announcement.attachment_name && !removeAttachment && (
+              <div className="rounded-md border border-primary/20 bg-dark-100 p-3 text-xs text-muted-foreground">
+                Current file: {announcement.attachment_name}
+              </div>
+            )}
+            {announcement.attachment_name && (
+              <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={removeAttachment}
+                  onChange={(e) => setRemoveAttachment(e.target.checked)}
+                />
+                Remove current attachment
+              </label>
+            )}
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => {
+                setAttachmentFile(e.target.files?.[0] ?? null)
+                if (e.target.files?.[0]) {
+                  setRemoveAttachment(false)
+                }
+              }}
+              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-dark-300 hover:file:opacity-90"
+            />
+            <p className="text-xs text-muted-foreground">
+              Upload a new PDF/image to replace the current file, or leave empty to keep existing.
+            </p>
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                setEditing(false)
+                setAttachmentFile(null)
+                setRemoveAttachment(false)
+              }}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-primary/30 text-muted-foreground hover:bg-dark-100"
             >
               <X className="w-4 h-4" /> Cancel

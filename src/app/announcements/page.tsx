@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
-import { Megaphone, PlusCircle, Trash2, Pencil, Mail } from 'lucide-react'
+import { Megaphone, PlusCircle, Trash2, Mail, Paperclip } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
 import {
   canAccessRoleScope,
@@ -20,6 +20,7 @@ const supabase = createClient()
 type AnnouncementWithAuthor = Announcement & {
   author?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
   unread?: boolean
+  attachment_url?: string | null
 }
 
 export default function AnnouncementsPage() {
@@ -30,6 +31,8 @@ export default function AnnouncementsPage() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const canPost = hasMinimumRole('project_manager')
@@ -38,6 +41,8 @@ export default function AnnouncementsPage() {
   const canSeeAnnouncement = (item: Announcement) => {
     return canAccessRoleScope(profile?.role, item.role_scope, item.role_scope_mode)
   }
+
+  const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_')
 
   const fetchAnnouncements = async () => {
     setLoading(true)
@@ -61,6 +66,9 @@ export default function AnnouncementsPage() {
           created_by,
           role_scope,
           role_scope_mode,
+          attachment_path,
+          attachment_name,
+          attachment_mime_type,
           author:profiles!announcements_created_by_fkey(id, full_name, role)
         `
         )
@@ -72,11 +80,30 @@ export default function AnnouncementsPage() {
 
       const readIds = new Set((readsResult.data as any[]).map((r) => r.announcement_id))
       const rows = (data as any as AnnouncementWithAuthor[]) ?? []
-      const filtered = rows
+      const filteredRows = rows
         .filter(canSeeAnnouncement)
         .map((row) => ({ ...row, unread: !readIds.has(row.id) }))
 
-      setAnnouncements(filtered)
+      const withAttachmentUrls = await Promise.all(
+        filteredRows.map(async (row) => {
+          if (!row.attachment_path) return row
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from('announcement-attachments')
+            .createSignedUrl(row.attachment_path, 60 * 60)
+
+          if (signedError) {
+            console.warn('Failed to create signed URL for attachment', signedError)
+            return row
+          }
+
+          return {
+            ...row,
+            attachment_url: signedData.signedUrl,
+          }
+        })
+      )
+
+      setAnnouncements(withAttachmentUrls)
     } catch (err: any) {
       console.error('Error fetching announcements:', err)
       setError('Failed to load announcements.')
@@ -106,15 +133,49 @@ export default function AnnouncementsPage() {
         ...(scopePayload.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
       }
 
-      const { error } = await supabase
+      const { data: createdAnnouncement, error } = await supabase
         .from('announcements')
         .insert(payload)
+        .select('id')
+        .single()
 
       if (error) throw error
+
+      if (attachmentFile && createdAnnouncement?.id) {
+        const attachmentPath = `${createdAnnouncement.id}/${Date.now()}-${sanitizeFileName(attachmentFile.name)}`
+        const { error: uploadError } = await supabase.storage
+          .from('announcement-attachments')
+          .upload(attachmentPath, attachmentFile, {
+            contentType: attachmentFile.type || undefined,
+            upsert: false,
+          })
+
+        if (uploadError) {
+          throw uploadError
+        }
+
+        const { error: attachmentUpdateError } = await supabase
+          .from('announcements')
+          .update({
+            attachment_path: attachmentPath,
+            attachment_name: attachmentFile.name,
+            attachment_mime_type: attachmentFile.type || null,
+          })
+          .eq('id', createdAnnouncement.id)
+
+        if (attachmentUpdateError) {
+          await supabase.storage.from('announcement-attachments').remove([attachmentPath])
+          throw attachmentUpdateError
+        }
+      }
 
       setTitle('')
       setBody('')
       setRoleScope('all')
+      setAttachmentFile(null)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
       setFormOpen(false)
       await fetchAnnouncements()
     } catch (err: any) {
@@ -123,7 +184,7 @@ export default function AnnouncementsPage() {
     }
   }
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (announcement: AnnouncementWithAuthor, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
 
@@ -131,10 +192,19 @@ export default function AnnouncementsPage() {
     if (!confirmDelete) return
 
     try {
+      if (announcement.attachment_path) {
+        const { error: removeError } = await supabase.storage
+          .from('announcement-attachments')
+          .remove([announcement.attachment_path])
+        if (removeError) {
+          console.warn('Failed to remove attachment during delete', removeError)
+        }
+      }
+
       const { error } = await supabase
         .from('announcements')
         .delete()
-        .eq('id', id)
+        .eq('id', announcement.id)
 
       if (error) throw error
       await fetchAnnouncements()
@@ -268,6 +338,22 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
             </select>
           </div>
 
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              Attachment (optional)
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
+              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-dark-300 hover:file:opacity-90"
+            />
+            <p className="text-xs text-muted-foreground">
+              Upload a PDF or image to include with this announcement.
+            </p>
+          </div>
+
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
@@ -332,6 +418,12 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
                     Target: {getRoleScopeLabel(a.role_scope, a.role_scope_mode)}
                   </span>
                 )}
+                {a.attachment_name && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px]">
+                    <Paperclip className="w-3 h-3" />
+                    {a.attachment_name}
+                  </span>
+                )}
               </div>
             </Link>
 
@@ -349,7 +441,7 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
                   <Mail className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={(e) => handleDelete(a.id, e)}
+                  onClick={(e) => handleDelete(a, e)}
                   className="p-1.5 rounded-md bg-dark-200 hover:bg-red-500/10 text-red-400 hover:text-red-300 transition"
                   title="Delete announcement"
                 >

@@ -325,6 +325,9 @@ export interface Announcement {
   created_by: string
   role_scope: UserRole | null
   role_scope_mode?: RoleScopeMode | null
+  attachment_path?: string | null
+  attachment_name?: string | null
+  attachment_mime_type?: string | null
   // Optional related author profile when joined in queries
   author?: Profile
 }
