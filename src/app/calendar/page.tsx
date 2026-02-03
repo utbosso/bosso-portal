@@ -427,6 +427,7 @@ export default function CalendarPage() {
   const addToGoogleCalendar = (event: Event) => {
     const startDate = new Date(event.start_at)
     const endDate = new Date(event.end_at)
+    const googleCalendarTitle = /^bosso\b/i.test(event.title) ? event.title : `BOSSO ${event.title}`
 
     // Format dates for Google Calendar (YYYYMMDDTHHmmssZ)
     const formatGoogleDate = (date: Date) => {
@@ -440,7 +441,7 @@ export default function CalendarPage() {
 
     const params = new URLSearchParams({
       action: 'TEMPLATE',
-      text: event.title,
+      text: googleCalendarTitle,
       dates: `${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}`,
       details: descriptionWithNote,
       location: event.location || '',
@@ -477,12 +478,13 @@ export default function CalendarPage() {
       // Format dates for Google Calendar link
       const startDate = new Date(event.start_at)
       const endDate = new Date(event.end_at)
+      const googleCalendarTitle = /^bosso\b/i.test(event.title) ? event.title : `BOSSO ${event.title}`
 
       const formatGoogleDate = (date: Date) => {
         return date.toISOString().replace(/-|:|\.\d+/g, '')
       }
 
-      const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}&details=${encodeURIComponent(event.description || '')}&location=${encodeURIComponent(event.location || '')}`
+      const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(googleCalendarTitle)}&dates=${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}&details=${encodeURIComponent(event.description || '')}&location=${encodeURIComponent(event.location || '')}`
 
       // Create email subject and body
       const subject = encodeURIComponent(`BOSSO Event: ${event.title}`)

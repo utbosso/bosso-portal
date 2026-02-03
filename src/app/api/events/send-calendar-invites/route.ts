@@ -42,6 +42,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
+    const calendarSummary = /^bosso\b/i.test(event.title) ? event.title : `BOSSO ${event.title}`
+
     // Verify user is either admin or event creator
     const isAdmin = profile.role === 'admin'
     const isCreator = event.created_by === user.id
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest) {
         eligibleUsers.map(async (user) => {
           try {
             await createCalendarEvent({
-              summary: event.title,
+              summary: calendarSummary,
               description: event.description || `Event for ${getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}`,
               location: event.location || '',
               startDateTime: event.start_at,
@@ -125,7 +127,7 @@ export async function POST(request: NextRequest) {
         (allUsers || []).map(async (user) => {
           try {
             await createCalendarEvent({
-              summary: event.title,
+              summary: calendarSummary,
               description: event.description || 'BOSSO event for all members',
               location: event.location || '',
               startDateTime: event.start_at,
