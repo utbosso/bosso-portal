@@ -9,7 +9,10 @@ import type { AssigneeStatus, EventCategory, PersonalTask, Profile, ReviewStatus
 import { EVENT_CATEGORIES } from '@/lib/bosso-points'
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
+  Copy,
   Clock,
   FileText,
   Link as LinkIcon,
@@ -79,6 +82,8 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCompleted, setShowCompleted] = useState(false)
+  const [showAssignedByMe, setShowAssignedByMe] = useState(true)
+  const [expandedAssignedGroups, setExpandedAssignedGroups] = useState<Record<string, boolean>>({})
 
   const [personalTasks, setPersonalTasks] = useState<PersonalTask[]>([])
   const [personalLoading, setPersonalLoading] = useState(true)
@@ -147,6 +152,8 @@ export default function TasksPage() {
           due_at,
           assigned_to,
           assigned_by,
+          group_task_id,
+          assigned_to_role,
           created_at,
           point_value,
           points_category,
@@ -279,6 +286,36 @@ export default function TasksPage() {
       assignToRole: '',
       allowDuplicates: false,
       status: task.status,
+      pointValue: task.point_value?.toString() ?? '',
+      pointsCategory: task.points_category ?? 'membership',
+      autoApprove: task.auto_approve ?? false,
+    })
+  }
+
+  const openReassign = (task: Task, groupedTasks?: Task[]) => {
+    const sourceTasks = groupedTasks && groupedTasks.length > 0 ? groupedTasks : [task]
+    const roleAssignment = sourceTasks.every((t) => t.assigned_to_role && t.assigned_to_role === sourceTasks[0].assigned_to_role)
+      ? sourceTasks[0].assigned_to_role ?? ''
+      : ''
+
+    const assignmentType: AssignmentType =
+      sourceTasks.length <= 1
+        ? 'individual'
+        : roleAssignment
+          ? 'role'
+          : 'everyone'
+
+    setFormOpen(true)
+    setEditingId(null)
+    setForm({
+      title: task.title,
+      description: task.description ?? '',
+      dueDate: task.due_at ? task.due_at.slice(0, 10) : '',
+      assignedTo: assignmentType === 'individual' ? task.assigned_to : '',
+      assignmentType,
+      assignToRole: assignmentType === 'role' ? roleAssignment : '',
+      allowDuplicates: false,
+      status: 'not_started',
       pointValue: task.point_value?.toString() ?? '',
       pointsCategory: task.points_category ?? 'membership',
       autoApprove: task.auto_approve ?? false,
@@ -773,6 +810,25 @@ export default function TasksPage() {
                 (t.assigned_to === profile?.id || t.assigned_by === profile?.id) &&
                 t.status === 'completed'
               )
+              const assignedByMeGroups = Array.from(
+                assignedByMe.reduce((map, task) => {
+                  const key = task.group_task_id ?? task.id
+                  const existing = map.get(key)
+                  if (existing) {
+                    existing.tasks.push(task)
+                    return map
+                  }
+                  map.set(key, { key, tasks: [task] })
+                  return map
+                }, new Map<string, { key: string; tasks: Task[] }>())
+                .values()
+              )
+              const toggleGroupExpansion = (groupKey: string) => {
+                setExpandedAssignedGroups((prev) => ({
+                  ...prev,
+                  [groupKey]: !prev[groupKey],
+                }))
+              }
 
               const renderTask = (task: Task, section: 'assigned' | 'created') => {
                 const updates = taskUpdatesById.get(task.id) ?? []
@@ -893,6 +949,14 @@ export default function TasksPage() {
                         <>
                           <button
                             type="button"
+                            onClick={() => openReassign(task)}
+                            className="p-2 rounded-md text-primary hover:bg-primary/10"
+                            title="Reassign from this task"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => openEdit(task)}
                             className="p-2 rounded-md text-primary hover:bg-primary/10"
                           >
@@ -1001,11 +1065,90 @@ export default function TasksPage() {
                 {/* Section 2: Tasks I Assigned */}
                 {assignedByMe.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignedByMe((prev) => !prev)}
+                      className="text-lg font-semibold text-foreground flex items-center gap-2 hover:text-primary transition-colors"
+                    >
                       <ClipboardCheck className="w-5 h-5 text-primary" />
                       Tasks I Assigned ({assignedByMe.length})
-                    </h3>
-                    {assignedByMe.map(task => renderTask(task, 'created'))}
+                      {showAssignedByMe ? (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </button>
+                    {showAssignedByMe && assignedByMeGroups.map((group) => {
+                      const groupTasks = [...group.tasks].sort((a, b) => {
+                        const aName = a.assignee?.full_name ?? ''
+                        const bName = b.assignee?.full_name ?? ''
+                        return aName.localeCompare(bName)
+                      })
+                      const representative = groupTasks[0]
+                      const doneCount = groupTasks.filter((t) => t.status === 'completed').length
+                      const inProgressCount = groupTasks.filter((t) => t.assignee_status === 'in_progress').length
+                      const pendingReviewCount = groupTasks.filter((t) => t.assignee_status === 'completed' && t.status !== 'completed').length
+                      const previewAssignees = groupTasks.slice(0, 6).map((t) => t.assignee?.full_name ?? 'Unassigned')
+                      const hasMoreAssignees = groupTasks.length > 6
+                      const isExpanded = expandedAssignedGroups[group.key] ?? false
+
+                      return (
+                        <div key={group.key} className="card-glow p-4 space-y-4">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h2 className="text-lg font-semibold text-foreground">{representative.title}</h2>
+                                <span className="px-2 py-0.5 rounded-md text-xs uppercase tracking-wide bg-primary/15 text-primary">
+                                  {groupTasks.length} assignees
+                                </span>
+                              </div>
+                              {representative.description && (
+                                <p className="text-sm text-muted-foreground">{representative.description}</p>
+                              )}
+                              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                <span>{doneCount}/{groupTasks.length} completed</span>
+                                <span>{inProgressCount} in progress</span>
+                                <span>{pendingReviewCount} pending review</span>
+                                {representative.due_at && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    Due {new Date(representative.due_at).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Assigned to: {previewAssignees.join(', ')}{hasMoreAssignees ? ` +${groupTasks.length - previewAssignees.length} more` : ''}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openReassign(representative, groupTasks)}
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-primary/30 text-primary text-xs hover:bg-primary/10"
+                              >
+                                <Copy className="w-3 h-3" />
+                                Reassign
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleGroupExpansion(group.key)}
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-md border border-primary/20 text-xs text-foreground hover:bg-primary/10"
+                              >
+                                {isExpanded ? 'Hide people' : 'View people'}
+                                {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="border-t border-primary/10 pt-4 space-y-3">
+                              {groupTasks.map((task) => renderTask(task, 'created'))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
 
