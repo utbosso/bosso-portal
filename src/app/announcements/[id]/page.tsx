@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
+import RichTextContent from '@/components/RichTextContent'
+import RichTextEditor from '@/components/RichTextEditor'
+import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
 import { ArrowLeft, Pencil, Save, Trash2, X, Paperclip } from 'lucide-react'
 import {
@@ -128,6 +131,12 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
     setError(null)
 
     try {
+      if (!announcementBodyToPlainText(body).trim()) {
+        setError('Message cannot be empty.')
+        setSaving(false)
+        return
+      }
+
       const scopePayload = toRoleScopePayload(roleScope)
       const payload: Record<string, any> = {
         title,
@@ -324,9 +333,10 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
             </div>
           </div>
 
-          <p className="text-sm text-muted-foreground whitespace-pre-line">
-            {announcement.body}
-          </p>
+          <RichTextContent
+            content={announcement.body}
+            className="text-sm text-muted-foreground leading-relaxed space-y-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1"
+          />
 
           {announcement.attachment_name && attachmentUrl && (
             <div className="pt-2 border-t border-primary/10 space-y-3">
@@ -363,16 +373,14 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Message</label>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              required
-              rows={6}
-              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+          <RichTextEditor
+            id="announcement-edit-message"
+            label="Message"
+            value={body}
+            onChange={setBody}
+            required
+            minHeightClassName="min-h-[220px]"
+          />
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Visible to</label>

@@ -8,6 +8,7 @@ import { isAdmin } from '@/lib/admin'
 import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
 import type { Event, Task, Announcement, Opportunity } from '@/types/database.types'
 import { canAccessRoleScope } from '@/lib/role-scope'
+import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
 import {
   Calendar,
@@ -437,7 +438,7 @@ export default function DashboardPage() {
                     {announcement.title}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                    {announcement.body}
+                    {announcementBodyToPlainText(announcement.body)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     {new Date(announcement.created_at!).toLocaleDateString()}

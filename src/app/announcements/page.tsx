@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/client'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
 import { Megaphone, PlusCircle, Trash2, Mail, Paperclip } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
+import RichTextEditor from '@/components/RichTextEditor'
+import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import {
   canAccessRoleScope,
   filterUsersByRoleScope,
@@ -122,6 +124,11 @@ export default function AnnouncementsPage() {
     if (!profile) return
 
     setError(null)
+
+    if (!announcementBodyToPlainText(body).trim()) {
+      setError('Message cannot be empty.')
+      return
+    }
 
     try {
       const scopePayload = toRoleScopePayload(roleScope)
@@ -245,7 +252,7 @@ export default function AnnouncementsPage() {
 
       // Create email subject and body
       const subject = encodeURIComponent(`BOSSO Announcement: ${announcement.title}`)
-      const emailBody = encodeURIComponent(`${announcement.body}
+      const emailBody = encodeURIComponent(`${announcementBodyToPlainText(announcement.body)}
 
 ---
 Posted by: ${announcement.author?.full_name || 'BOSSO Team'}
@@ -306,19 +313,15 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Message
-            </label>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              required
-              rows={4}
-              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              placeholder="Share details, location, expectations, or links."
-            />
-          </div>
+          <RichTextEditor
+            id="announcement-message"
+            label="Message"
+            value={body}
+            onChange={setBody}
+            required
+            minHeightClassName="min-h-[180px]"
+            placeholder="Share details, location, expectations, or links."
+          />
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
