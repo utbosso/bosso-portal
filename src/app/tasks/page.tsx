@@ -18,6 +18,7 @@ import {
   Link as LinkIcon,
   Pencil,
   PlusCircle,
+  Search,
   Trash2,
   Users,
   X,
@@ -84,6 +85,7 @@ export default function TasksPage() {
   const [showCompleted, setShowCompleted] = useState(false)
   const [showAssignedByMe, setShowAssignedByMe] = useState(true)
   const [expandedAssignedGroups, setExpandedAssignedGroups] = useState<Record<string, boolean>>({})
+  const [taskPeopleSearch, setTaskPeopleSearch] = useState('')
 
   const [personalTasks, setPersonalTasks] = useState<PersonalTask[]>([])
   const [personalLoading, setPersonalLoading] = useState(true)
@@ -810,8 +812,18 @@ export default function TasksPage() {
                 (t.assigned_to === profile?.id || t.assigned_by === profile?.id) &&
                 t.status === 'completed'
               )
+              const normalizedPeopleSearch = taskPeopleSearch.trim().toLowerCase()
+              const matchesPeopleSearch = (task: Task) => {
+                if (!normalizedPeopleSearch) return true
+                const assigneeName = task.assignee?.full_name?.toLowerCase() ?? ''
+                const assignerName = task.assigner?.full_name?.toLowerCase() ?? ''
+                return assigneeName.includes(normalizedPeopleSearch) || assignerName.includes(normalizedPeopleSearch)
+              }
+              const filteredAssignedToMe = assignedToMe.filter(matchesPeopleSearch)
+              const filteredAssignedByMe = assignedByMe.filter(matchesPeopleSearch)
+              const filteredCompletedTasks = completedTasks.filter(matchesPeopleSearch)
               const assignedByMeGroups = Array.from(
-                assignedByMe.reduce((map, task) => {
+                filteredAssignedByMe.reduce((map, task) => {
                   const key = task.group_task_id ?? task.id
                   const existing = map.get(key)
                   if (existing) {
@@ -1051,19 +1063,32 @@ export default function TasksPage() {
 
             return (
               <>
+                <div className="card-glow p-3">
+                  <label className="relative block">
+                    <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={taskPeopleSearch}
+                      onChange={(e) => setTaskPeopleSearch(e.target.value)}
+                      placeholder="Search by assignee or assigner name..."
+                      className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                    />
+                  </label>
+                </div>
+
                 {/* Section 1: Tasks Assigned to Me */}
-                {assignedToMe.length > 0 && (
+                {filteredAssignedToMe.length > 0 && (
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                       <Users className="w-5 h-5 text-primary" />
-                      Tasks Assigned to Me ({assignedToMe.length})
+                      Tasks Assigned to Me ({filteredAssignedToMe.length})
                     </h3>
-                    {assignedToMe.map(task => renderTask(task, 'assigned'))}
+                    {filteredAssignedToMe.map(task => renderTask(task, 'assigned'))}
                   </div>
                 )}
 
                 {/* Section 2: Tasks I Assigned */}
-                {assignedByMe.length > 0 && (
+                {filteredAssignedByMe.length > 0 && (
                   <div className="space-y-3">
                     <button
                       type="button"
@@ -1071,7 +1096,7 @@ export default function TasksPage() {
                       className="text-lg font-semibold text-foreground flex items-center gap-2 hover:text-primary transition-colors"
                     >
                       <ClipboardCheck className="w-5 h-5 text-primary" />
-                      Tasks I Assigned ({assignedByMe.length})
+                      Tasks I Assigned ({filteredAssignedByMe.length})
                       {showAssignedByMe ? (
                         <ChevronDown className="w-4 h-4 text-muted-foreground" />
                       ) : (
@@ -1153,7 +1178,7 @@ export default function TasksPage() {
                 )}
 
                 {/* Section 3: Completed Tasks */}
-                {completedTasks.length > 0 && (
+                {filteredCompletedTasks.length > 0 && (
                   <div className="space-y-3 mt-6">
                     <button
                       type="button"
@@ -1161,18 +1186,27 @@ export default function TasksPage() {
                       className="flex items-center gap-2 text-lg font-semibold text-foreground hover:text-primary transition-colors"
                     >
                       <CheckCircle2 className="w-5 h-5 text-green-400" />
-                      Completed Tasks ({completedTasks.length})
+                      Completed Tasks ({filteredCompletedTasks.length})
                       <span className="text-xs text-muted-foreground ml-2">
                         {showCompleted ? '(Click to hide)' : '(Click to show)'}
                       </span>
                     </button>
                     {showCompleted && (
                       <div className="space-y-3">
-                        {completedTasks.map(task => renderTask(task, task.assigned_by === profile?.id ? 'created' : 'assigned'))}
+                        {filteredCompletedTasks.map(task => renderTask(task, task.assigned_by === profile?.id ? 'created' : 'assigned'))}
                       </div>
                     )}
                   </div>
                 )}
+
+                {normalizedPeopleSearch &&
+                  filteredAssignedToMe.length === 0 &&
+                  filteredAssignedByMe.length === 0 &&
+                  filteredCompletedTasks.length === 0 && (
+                    <div className="card-glow p-4 text-sm text-muted-foreground">
+                      No tasks found for "{taskPeopleSearch}".
+                    </div>
+                  )}
               </>
             )
           })()}
