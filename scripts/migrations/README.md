@@ -37,6 +37,7 @@ Adds detailed member profile fields to the profiles table:
 - `add-bosso-points-system.sql` - BOSSO points tracking system
 - `add-event-categories-and-types.sql` - Event categorization
 - `add-role-requirements-enforcement.sql` - Role-based point requirements
+- `fix-points-total-calculation.sql` - Patch for older installs with incorrect total calculation
 
 ## Migration Order
 
@@ -45,6 +46,9 @@ Run migrations in this order if starting fresh:
 2. `add-event-categories-and-types.sql`
 3. `add-role-requirements-enforcement.sql`
 4. `add-profile-fields.sql`
+
+If your database already ran older versions of the points/role migrations,
+run `fix-points-total-calculation.sql` once to correct totals.
 
 ## Important Notes
 

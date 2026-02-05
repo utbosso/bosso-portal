@@ -31,6 +31,11 @@ DECLARE
     v_required_points INTEGER := 0;
     v_requires_minimums BOOLEAN := false;
     v_reason TEXT := '';
+    v_adjustments INTEGER := 0;
+    v_adj_membership INTEGER := 0;
+    v_adj_professional INTEGER := 0;
+    v_adj_social INTEGER := 0;
+    v_adj_philanthropy INTEGER := 0;
 BEGIN
     -- Get points by category
     SELECT
@@ -43,11 +48,22 @@ BEGIN
     FROM attendance_records
     WHERE user_id = user_uuid;
 
-    -- Add points from manual adjustments if any
-    SELECT COALESCE(SUM(points), 0)
-    INTO v_total
+    -- Add points from manual adjustments if any (category tagged via reason)
+    SELECT
+        COALESCE(SUM(points), 0),
+        COALESCE(SUM(CASE WHEN reason ILIKE '%(membership)%' THEN points ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN reason ILIKE '%(professional_education)%' THEN points ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN reason ILIKE '%(social)%' THEN points ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN reason ILIKE '%(philanthropy)%' THEN points ELSE 0 END), 0)
+    INTO v_adjustments, v_adj_membership, v_adj_professional, v_adj_social, v_adj_philanthropy
     FROM points_adjustments
     WHERE user_id = user_uuid;
+
+    v_total := v_total + v_adjustments;
+    v_membership := v_membership + v_adj_membership;
+    v_professional := v_professional + v_adj_professional;
+    v_social := v_social + v_adj_social;
+    v_philanthropy := v_philanthropy + v_adj_philanthropy;
 
     -- Define requirements based on role
     CASE target_role

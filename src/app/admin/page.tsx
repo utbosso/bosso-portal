@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
-import { isAdmin } from '@/lib/admin'
+import { isAdmin, getRoleDisplayName as getAdminRoleDisplayName } from '@/lib/admin'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -588,8 +588,12 @@ export default function AdminDashboard() {
   )
 }
 
+// All available roles for the role change dropdown
+const ALL_ROLES: UserRole[] = ['general_member', 'analyst', 'project_manager', 'board_member', 'admin']
+
 // User Management Tab Component
 function UserManagementTab() {
+  const { profile: adminProfile } = useAuth()
   const [users, setUsers] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'active' | 'rejected'>('pending')
@@ -650,6 +654,46 @@ function UserManagementTab() {
     } catch (error) {
       console.error('Error updating user status:', error)
       alert('Failed to update user status')
+    } finally {
+      setProcessingUserId(null)
+    }
+  }
+
+  const updateUserRole = async (userId: string, newRole: UserRole) => {
+    const user = users.find(u => u.id === userId)
+    if (!user) return
+
+    // Prevent admin from changing their own role
+    if (userId === adminProfile?.id) {
+      alert('You cannot change your own role.')
+      return
+    }
+
+    const oldRoleName = getAdminRoleDisplayName(user.role)
+    const newRoleName = getAdminRoleDisplayName(newRole)
+
+    const confirmed = window.confirm(
+      `Change ${user.full_name}'s role from "${oldRoleName}" to "${newRoleName}"?\n\nThis will immediately update their permissions.`
+    )
+    if (!confirmed) return
+
+    setProcessingUserId(userId)
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: newRole })
+        .eq('id', userId)
+
+      if (error) throw error
+
+      // Assign any pending role-based tasks for the new role
+      const updatedUser = { ...user, role: newRole }
+      await assignPendingRoleTasks(updatedUser)
+
+      await fetchUsers()
+    } catch (error) {
+      console.error('Error updating user role:', error)
+      alert('Failed to update user role')
     } finally {
       setProcessingUserId(null)
     }
@@ -1043,10 +1087,29 @@ BOSSO@UTAustin`)
                   </div>
                   <p className="text-sm text-muted-foreground mb-1">{user.email}</p>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Shield className="w-3 h-3" />
-                      {getRoleDisplayName(user.role)}
-                    </span>
+                    {user.account_status !== 'pending_approval' && user.account_status !== 'rejected' ? (
+                      <span className="flex items-center gap-1">
+                        <Shield className="w-3 h-3" />
+                        <select
+                          value={user.role}
+                          onChange={(e) => updateUserRole(user.id, e.target.value as UserRole)}
+                          disabled={processingUserId === user.id || user.id === adminProfile?.id}
+                          className="bg-dark-300 border border-primary/20 text-foreground rounded px-1.5 py-0.5 text-xs cursor-pointer hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={user.id === adminProfile?.id ? 'You cannot change your own role' : 'Change role'}
+                        >
+                          {ALL_ROLES.map((role) => (
+                            <option key={role} value={role}>
+                              {getAdminRoleDisplayName(role)}
+                            </option>
+                          ))}
+                        </select>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <Shield className="w-3 h-3" />
+                        {getRoleDisplayName(user.role)}
+                      </span>
+                    )}
                     {user.email_verified !== null && (
                       <span className="flex items-center gap-1">
                         {user.email_verified ? (
