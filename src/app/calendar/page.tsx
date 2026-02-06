@@ -48,6 +48,11 @@ type EventFormState = {
   eventType: EventType | ''
   customEventType: string
   pointValue: string
+  repeatEnabled: boolean
+  repeatInterval: string
+  repeatUnit: 'week' | 'month'
+  repeatWeekdays: number[]
+  repeatCount: string
 }
 
 const emptyForm: EventFormState = {
@@ -64,6 +69,11 @@ const emptyForm: EventFormState = {
   eventType: '',
   customEventType: '',
   pointValue: '',
+  repeatEnabled: false,
+  repeatInterval: '1',
+  repeatUnit: 'week',
+  repeatWeekdays: [],
+  repeatCount: '4',
 }
 
 export default function CalendarPage() {
@@ -121,6 +131,12 @@ export default function CalendarPage() {
     const month = `${value.getMonth() + 1}`.padStart(2, '0')
     const day = `${value.getDate()}`.padStart(2, '0')
     return `${year}-${month}-${day}`
+  }
+
+  const toTimeInput = (value: Date) => {
+    const hours = `${value.getHours()}`.padStart(2, '0')
+    const minutes = `${value.getMinutes()}`.padStart(2, '0')
+    return `${hours}:${minutes}`
   }
 
   const formatMonthYear = (value: Date) =>
@@ -286,8 +302,8 @@ export default function CalendarPage() {
       description: event.description ?? '',
       location: event.location ?? '',
       date: toDateKey(start),
-      startTime: start.toTimeString().slice(0, 5),
-      endTime: end.toTimeString().slice(0, 5),
+      startTime: toTimeInput(start),
+      endTime: toTimeInput(end),
       audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
       trackAttendance: event.track_attendance ?? false,
       codeHasExpiry: Boolean(event.code_expires_at),
@@ -295,6 +311,11 @@ export default function CalendarPage() {
       eventType: event.event_type ?? '',
       customEventType: event.custom_event_type ?? '',
       pointValue: event.point_value?.toString() ?? '',
+      repeatEnabled: false,
+      repeatInterval: '1',
+      repeatUnit: 'week',
+      repeatWeekdays: [],
+      repeatCount: '4',
     })
     setFormOpen(true)
   }
@@ -313,6 +334,96 @@ export default function CalendarPage() {
       code += chars.charAt(Math.floor(Math.random() * chars.length))
     }
     return code
+  }
+
+  const addMonthsClamped = (value: Date, months: number) => {
+    const date = new Date(value)
+    const targetMonth = date.getMonth() + months
+    const year = date.getFullYear() + Math.floor(targetMonth / 12)
+    const month = ((targetMonth % 12) + 12) % 12
+    const day = date.getDate()
+    const lastDay = new Date(year, month + 1, 0).getDate()
+    return new Date(
+      year,
+      month,
+      Math.min(day, lastDay),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds(),
+      date.getMilliseconds()
+    )
+  }
+
+  const buildRecurringDates = (
+    start: Date,
+    end: Date,
+    count: number,
+    rule: { interval: number; unit: 'week' | 'month'; weekdays: number[] }
+  ) => {
+    const occurrences: Array<{ start: Date; end: Date }> = []
+    if (count <= 0) return occurrences
+
+    const durationMs = end.getTime() - start.getTime()
+
+    if (rule.unit === 'month') {
+      for (let i = 0; i < count; i++) {
+        const occStart = addMonthsClamped(start, i * rule.interval)
+        const occEnd = new Date(occStart.getTime() + durationMs)
+        occurrences.push({ start: occStart, end: occEnd })
+      }
+      return occurrences
+    }
+
+    const weekdays = rule.weekdays.length > 0 ? rule.weekdays : [start.getDay()]
+    let cursor = new Date(start)
+    let safeguard = 0
+    while (occurrences.length < count && safeguard < 2000) {
+      const diffDays = Math.floor((cursor.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+      const weeksSinceStart = Math.floor(diffDays / 7)
+      if (weeksSinceStart % rule.interval === 0 && weekdays.includes(cursor.getDay())) {
+        const occStart = new Date(
+          cursor.getFullYear(),
+          cursor.getMonth(),
+          cursor.getDate(),
+          start.getHours(),
+          start.getMinutes(),
+          start.getSeconds(),
+          start.getMilliseconds()
+        )
+        const occEnd = new Date(occStart.getTime() + durationMs)
+        occurrences.push({ start: occStart, end: occEnd })
+      }
+      cursor.setDate(cursor.getDate() + 1)
+      safeguard += 1
+    }
+    return occurrences
+  }
+
+  const openDuplicate = (event: Event) => {
+    const start = new Date(event.start_at)
+    const end = new Date(event.end_at)
+    setEditingId(null)
+    setFormOpen(true)
+    setForm({
+      title: event.title ?? '',
+      description: event.description ?? '',
+      location: event.location ?? '',
+      date: toDateKey(start),
+      startTime: toTimeInput(start),
+      endTime: toTimeInput(end),
+      audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
+      trackAttendance: Boolean(event.track_attendance),
+      codeHasExpiry: Boolean(event.code_expires_at),
+      eventCategory: event.event_category ?? '',
+      eventType: event.event_type ?? '',
+      customEventType: event.custom_event_type ?? '',
+      pointValue: event.point_value?.toString() ?? '',
+      repeatEnabled: false,
+      repeatInterval: '1',
+      repeatUnit: 'week',
+      repeatWeekdays: [],
+      repeatCount: '4',
+    })
   }
 
   // Handle category change
@@ -354,45 +465,73 @@ export default function CalendarPage() {
       : new Date(start.getTime() + 60 * 60 * 1000)
 
     const existingEvent = editingId ? events.find((event) => event.id === editingId) : null
-    const minimumExpiryFromNow = new Date(Date.now() + 5 * 60 * 1000)
-    const codeExpiryFromEnd = new Date(end.getTime() + 5 * 60 * 1000)
-    const codeExpiresAt = codeExpiryFromEnd > minimumExpiryFromNow ? codeExpiryFromEnd : minimumExpiryFromNow
 
     const scopePayload = toRoleScopePayload(form.audience)
 
-    const payload: any = {
+    const basePayload: any = {
       title: form.title,
       description: form.description || null,
       location: form.location || null,
-      start_at: start.toISOString(),
-      end_at: end.toISOString(),
       created_by: profile.id,
       audience_scope: scopePayload.roleScope,
       ...(scopePayload.roleScopeMode ? { audience_scope_mode: scopePayload.roleScopeMode } : {}),
       track_attendance: form.trackAttendance,
       point_value: form.trackAttendance ? Number(form.pointValue) : 0,
-      attendance_code: form.trackAttendance
-        ? (existingEvent?.attendance_code ?? generateAttendanceCode())
-        : null,
-      code_expires_at: form.trackAttendance
-        ? (form.codeHasExpiry ? codeExpiresAt.toISOString() : null)
-        : null,
       event_category: form.eventCategory || null,
       event_type: form.eventType || null,
       custom_event_type: (form.eventType === 'other' && form.customEventType) ? form.customEventType : null,
+      is_recurring: !editingId && form.repeatEnabled,
+      max_occurrences: !editingId && form.repeatEnabled ? Number(form.repeatCount || 1) : null,
     }
 
     try {
       if (editingId) {
+        const minimumExpiryFromNow = new Date(Date.now() + 5 * 60 * 1000)
+        const codeExpiryFromEnd = new Date(end.getTime() + 5 * 60 * 1000)
+        const codeExpiresAt = codeExpiryFromEnd > minimumExpiryFromNow ? codeExpiryFromEnd : minimumExpiryFromNow
+        const payload = {
+          ...basePayload,
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          attendance_code: form.trackAttendance
+            ? (existingEvent?.attendance_code ?? generateAttendanceCode())
+            : null,
+          code_expires_at: form.trackAttendance
+            ? (form.codeHasExpiry ? codeExpiresAt.toISOString() : null)
+            : null,
+        }
         const { error } = await supabase
           .from('events')
           .update(payload)
           .eq('id', editingId)
         if (error) throw error
       } else {
+        const repeatCount = Math.max(1, Math.min(52, Number(form.repeatCount || 1)))
+        const repeatInterval = Math.max(1, Math.min(12, Number(form.repeatInterval || 1)))
+        const occurrences = form.repeatEnabled
+          ? buildRecurringDates(start, end, repeatCount, {
+              interval: repeatInterval,
+              unit: form.repeatUnit,
+              weekdays: form.repeatWeekdays,
+            })
+          : [{ start, end }]
+        const payloads = occurrences.map(({ start: occStart, end: occEnd }) => {
+          const minimumExpiryFromNow = new Date(Date.now() + 5 * 60 * 1000)
+          const codeExpiryFromEnd = new Date(occEnd.getTime() + 5 * 60 * 1000)
+          const codeExpiresAt = codeExpiryFromEnd > minimumExpiryFromNow ? codeExpiryFromEnd : minimumExpiryFromNow
+          return {
+            ...basePayload,
+            start_at: occStart.toISOString(),
+            end_at: occEnd.toISOString(),
+            attendance_code: form.trackAttendance ? generateAttendanceCode() : null,
+            code_expires_at: form.trackAttendance
+              ? (form.codeHasExpiry ? codeExpiresAt.toISOString() : null)
+              : null,
+          }
+        })
         const { error } = await supabase
           .from('events')
-          .insert(payload)
+          .insert(payloads)
         if (error) throw error
       }
 
@@ -712,6 +851,14 @@ View on portal: ${window.location.origin}/calendar`)
                         </button>
                         <button
                           type="button"
+                          onClick={() => openDuplicate(event)}
+                          className="p-2 rounded-md text-sky-400 hover:bg-sky-500/10"
+                          title="Duplicate Event"
+                        >
+                          <CheckSquare className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleDelete(event.id)}
                           className="p-2 rounded-md text-destructive hover:bg-destructive/10"
                           title="Delete Event"
@@ -991,6 +1138,104 @@ View on portal: ${window.location.origin}/calendar`)
                     </div>
                   )}
                 </div>
+
+                {!editingId && (
+                  <div className="space-y-3 pt-2 border-t border-primary/10">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="repeatEnabled"
+                        checked={form.repeatEnabled}
+                        onChange={(e) => setForm((prev) => ({ ...prev, repeatEnabled: e.target.checked }))}
+                        className="w-4 h-4 rounded border-primary/20 bg-dark-100 text-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                      <label htmlFor="repeatEnabled" className="text-sm text-foreground font-medium cursor-pointer">
+                        Repeat this event
+                      </label>
+                    </div>
+
+                    {form.repeatEnabled && (
+                      <div className="space-y-3 ml-7">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide">Repeat every</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                max="12"
+                                value={form.repeatInterval}
+                                onChange={(e) => setForm((prev) => ({ ...prev, repeatInterval: e.target.value }))}
+                                className="w-20 px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                              />
+                              <select
+                                value={form.repeatUnit}
+                                onChange={(e) =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    repeatUnit: e.target.value as EventFormState['repeatUnit'],
+                                  }))
+                                }
+                                className="flex-1 px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                              >
+                                <option value="week">Week(s)</option>
+                                <option value="month">Month(s)</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide">Occurrences</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="52"
+                              value={form.repeatCount}
+                              onChange={(e) => setForm((prev) => ({ ...prev, repeatCount: e.target.value }))}
+                              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                            />
+                          </div>
+                        </div>
+
+                        {form.repeatUnit === 'week' && (
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide">Repeat on</label>
+                            <div className="flex flex-wrap gap-2">
+                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label, index) => (
+                                <button
+                                  type="button"
+                                  key={label}
+                                  onClick={() =>
+                                    setForm((prev) => {
+                                      const exists = prev.repeatWeekdays.includes(index)
+                                      const next = exists
+                                        ? prev.repeatWeekdays.filter((day) => day !== index)
+                                        : [...prev.repeatWeekdays, index]
+                                      return { ...prev, repeatWeekdays: next }
+                                    })
+                                  }
+                                  className={`px-2 py-1 rounded-md text-xs border ${
+                                    form.repeatWeekdays.includes(index)
+                                      ? 'bg-primary/20 text-primary border-primary/40'
+                                      : 'bg-dark-100 text-muted-foreground border-primary/20'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              If none selected, the event repeats on the start day.
+                            </p>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-muted-foreground">
+                          Each occurrence will generate a unique attendance code.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <button
                   type="submit"
