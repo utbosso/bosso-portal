@@ -720,13 +720,13 @@ export default function AttendancePage() {
         </div>
 
         {error && (
-          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          <div className="hidden sm:block p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
             {error}
           </div>
         )}
 
         {checkInSuccess && (
-          <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-center gap-2">
+          <div className="hidden sm:flex p-4 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm items-center gap-2">
             <CheckCircle2 className="w-5 h-5" />
             Successfully checked in! Points added to your account.
           </div>
@@ -781,6 +781,21 @@ export default function AttendancePage() {
               <p className="text-sm text-muted-foreground">Check In Event</p>
             </div>
             <form onSubmit={handleCheckIn} className="space-y-2">
+              {(error || checkInSuccess) && (
+                <div className="sm:hidden space-y-2">
+                  {error && (
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                      {error}
+                    </div>
+                  )}
+                  {checkInSuccess && (
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Successfully checked in! Points added to your account.
+                    </div>
+                  )}
+                </div>
+              )}
               <input
                 type="text"
                 value={checkInCode}

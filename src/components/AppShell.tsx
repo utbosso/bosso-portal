@@ -141,7 +141,7 @@ const quickLinks = [
   { name: 'HornsLink', url: 'https://utexas.campuslabs.com/engage/organization/txsportsanalytics', icon: ExternalLink },
   { name: 'Instagram', url: 'https://www.instagram.com/txbosso/', icon: Instagram },
   { name: 'Spotify', url: 'https://open.spotify.com/show/16Nnwts9OfKgd134xZtdMu', icon: SpotifyIcon },
-  { name: 'Slack', url: 'https://join.slack.com/t/txsportsanalytics/shared_invite/zt-35k0niv81-FW1kud7SUEvCDNgtZF6Ocw', icon: Slack },
+  { name: 'Slack', url: 'https://shorturl.at/He3aV', icon: Slack },
 ]
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

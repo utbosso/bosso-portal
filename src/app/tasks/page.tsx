@@ -75,7 +75,6 @@ const emptyPersonalForm: PersonalTaskFormState = {
 export default function TasksPage() {
   const { profile, hasMinimumRole } = useAuth()
   const canManage = hasMinimumRole('project_manager') // PM, Board Member, or Admin can assign tasks
-  const isGeneralMember = profile?.role === 'general_member'
 
   const [viewMode, setViewMode] = useState<'team' | 'personal'>('team')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -133,12 +132,6 @@ export default function TasksPage() {
   }
 
   const fetchTasks = async () => {
-    if (isGeneralMember) {
-      setTasks([])
-      setTaskUpdates([])
-      setLoading(false)
-      return
-    }
     setLoading(true)
     setError(null)
     try {
@@ -249,11 +242,6 @@ export default function TasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id, profile?.role])
 
-  useEffect(() => {
-    if (isGeneralMember) {
-      setViewMode('personal')
-    }
-  }, [isGeneralMember])
 
   const resetTaskForm = () => {
     setEditingId(null)
@@ -764,37 +752,35 @@ export default function TasksPage() {
         )}
       </div>
 
-      {!isGeneralMember && (
-        <div className="flex items-center gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => setViewMode('team')}
-            className={`px-3 py-1 rounded-md border ${
-              viewMode === 'team' ? 'border-primary text-primary bg-primary/10' : 'border-primary/20 text-muted-foreground'
-            }`}
-          >
-            Team tasks
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('personal')}
-            className={`px-3 py-1 rounded-md border ${
-              viewMode === 'personal' ? 'border-primary text-primary bg-primary/10' : 'border-primary/20 text-muted-foreground'
-            }`}
-          >
-            My tasks
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          type="button"
+          onClick={() => setViewMode('team')}
+          className={`px-3 py-1 rounded-md border ${
+            viewMode === 'team' ? 'border-primary text-primary bg-primary/10' : 'border-primary/20 text-muted-foreground'
+          }`}
+        >
+          Team tasks
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('personal')}
+          className={`px-3 py-1 rounded-md border ${
+            viewMode === 'personal' ? 'border-primary text-primary bg-primary/10' : 'border-primary/20 text-muted-foreground'
+          }`}
+        >
+          My tasks
+        </button>
+      </div>
 
-      {viewMode === 'team' && !isGeneralMember && error && (
+      {viewMode === 'team' && error && (
         <p className="text-sm text-destructive">{error}</p>
       )}
       {viewMode === 'personal' && personalError && (
         <p className="text-sm text-destructive">{personalError}</p>
       )}
 
-      {viewMode === 'team' && !isGeneralMember ? (
+      {viewMode === 'team' ? (
         <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
           <div className="space-y-6">
             {loading && <p className="text-sm text-muted-foreground">Loading tasks...</p>}
