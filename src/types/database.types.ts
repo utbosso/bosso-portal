@@ -325,6 +325,7 @@ export interface Announcement {
   created_by: string
   role_scope: UserRole | null
   role_scope_mode?: RoleScopeMode | null
+  target_user_ids?: string[] | null
   attachment_path?: string | null
   attachment_name?: string | null
   attachment_mime_type?: string | null
@@ -380,6 +381,7 @@ export interface Event {
   created_by: string
   audience_scope: UserRole | null
   audience_scope_mode?: RoleScopeMode | null
+  target_user_ids?: string[] | null
   attendance_code?: string | null
   code_expires_at?: string | null
   point_value?: number | null

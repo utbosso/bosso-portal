@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { isAdmin } from '@/lib/admin'
 import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
 import type { Event, Task, Announcement, Opportunity } from '@/types/database.types'
-import { canAccessRoleScope } from '@/lib/role-scope'
+import { canAccessAudience } from '@/lib/role-scope'
 import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
 import {
@@ -81,7 +81,13 @@ export default function DashboardPage() {
     if (!error && data) {
       // Filter events based on audience_scope
       const filtered = data.filter(event => {
-        return canAccessRoleScope(profile.role, event.audience_scope, event.audience_scope_mode)
+        return canAccessAudience(
+          profile.id,
+          profile.role,
+          event.audience_scope,
+          event.audience_scope_mode,
+          event.target_user_ids
+        )
       })
       setUpcomingEvents(filtered as Event[])
     }
@@ -115,7 +121,13 @@ export default function DashboardPage() {
     if (!error && data) {
       // Filter announcements based on role_scope
       const filtered = data.filter(announcement => {
-        return canAccessRoleScope(profile.role, announcement.role_scope, announcement.role_scope_mode)
+        return canAccessAudience(
+          profile.id,
+          profile.role,
+          announcement.role_scope,
+          announcement.role_scope_mode,
+          announcement.target_user_ids
+        )
       })
       setRecentAnnouncements(filtered as Announcement[])
     }

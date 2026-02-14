@@ -76,3 +76,34 @@ export function filterUsersByRoleScope<T extends { role: UserRole }>(
   if (!roleScope) return users
   return users.filter((user) => canAccessRoleScope(user.role, roleScope, roleScopeMode))
 }
+
+export function canAccessAudience(
+  userId: string | null | undefined,
+  userRole: UserRole | null | undefined,
+  roleScope: UserRole | null | undefined,
+  roleScopeMode: RoleScopeMode | null | undefined,
+  targetUserIds: string[] | null | undefined
+): boolean {
+  const selectedUserIds = targetUserIds ?? []
+  if (selectedUserIds.length > 0) {
+    if (!userId) return false
+    return selectedUserIds.includes(userId)
+  }
+
+  return canAccessRoleScope(userRole, roleScope, roleScopeMode)
+}
+
+export function filterUsersByAudience<T extends { id: string; role: UserRole }>(
+  users: T[],
+  roleScope: UserRole | null | undefined,
+  roleScopeMode: RoleScopeMode | null | undefined,
+  targetUserIds: string[] | null | undefined
+): T[] {
+  const selectedUserIds = targetUserIds ?? []
+  if (selectedUserIds.length > 0) {
+    const selectedSet = new Set(selectedUserIds)
+    return users.filter((user) => selectedSet.has(user.id))
+  }
+
+  return filterUsersByRoleScope(users, roleScope, roleScopeMode)
+}

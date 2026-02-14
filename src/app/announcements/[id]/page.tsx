@@ -8,11 +8,12 @@ import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/admin'
 import RichTextContent from '@/components/RichTextContent'
 import RichTextEditor from '@/components/RichTextEditor'
+import UserSearch, { type UserOption } from '@/components/UserSearch'
 import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
 import { ArrowLeft, Pencil, Save, Trash2, X, Paperclip } from 'lucide-react'
 import {
-  canAccessRoleScope,
+  canAccessAudience,
   fromRoleScopePayload,
   getRoleScopeLabel,
   toRoleScopePayload,
@@ -24,6 +25,8 @@ const supabase = createClient()
 type AnnouncementWithAuthor = Announcement & {
   author?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
 }
+
+type AudienceMode = 'role' | 'people'
 
 export default function AnnouncementDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -39,7 +42,10 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>('role')
   const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
+  const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
   const [removeAttachment, setRemoveAttachment] = useState(false)
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null)
@@ -48,7 +54,13 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
   const canManage = isUserAdmin || announcement?.created_by === profile?.id || hasMinimumRole('board_member')
   const canView = (item: Announcement | null) => {
     if (!item) return false
-    return canAccessRoleScope(profile?.role, item.role_scope, item.role_scope_mode)
+    return canAccessAudience(
+      profile?.id,
+      profile?.role,
+      item.role_scope,
+      item.role_scope_mode,
+      item.target_user_ids
+    )
   }
 
   const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -68,6 +80,7 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
           created_by,
           role_scope,
           role_scope_mode,
+          target_user_ids,
           attachment_path,
           attachment_name,
           attachment_mime_type,
@@ -83,7 +96,9 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
       setAnnouncement(record)
       setTitle(record?.title ?? '')
       setBody(record?.body ?? '')
+      setAudienceMode((record?.target_user_ids?.length ?? 0) > 0 ? 'people' : 'role')
       setRoleScope(fromRoleScopePayload(record?.role_scope, record?.role_scope_mode))
+      setSelectedUserIds(record?.target_user_ids ?? [])
       setAttachmentFile(null)
       setRemoveAttachment(false)
 
@@ -121,7 +136,27 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
   useEffect(() => {
     fetchAnnouncement()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id, profile?.role])
+  }, [params.id, profile?.id, profile?.role])
+
+  useEffect(() => {
+    const fetchPeopleOptions = async () => {
+      if (!canManage) return
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('account_status', 'active')
+        .order('full_name', { ascending: true })
+
+      if (error) {
+        console.error('Error loading members for targeting', error)
+        return
+      }
+
+      setPeopleOptions((data ?? []) as UserOption[])
+    }
+
+    fetchPeopleOptions()
+  }, [canManage])
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -136,13 +171,19 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
         setSaving(false)
         return
       }
+      if (audienceMode === 'people' && selectedUserIds.length === 0) {
+        setError('Please select at least one member.')
+        setSaving(false)
+        return
+      }
 
       const scopePayload = toRoleScopePayload(roleScope)
       const payload: Record<string, any> = {
         title,
         body,
-        role_scope: scopePayload.roleScope,
-        ...(scopePayload.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
+        role_scope: audienceMode === 'role' ? scopePayload.roleScope : null,
+        role_scope_mode: audienceMode === 'role' ? scopePayload.roleScopeMode : null,
+        target_user_ids: audienceMode === 'people' ? selectedUserIds : null,
       }
 
       const currentAttachmentPath = announcement.attachment_path
@@ -325,9 +366,11 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
                   {announcement.author.role.replace('_', ' ')}
                 </span>
               )}
-              {announcement.role_scope && (
+              {(announcement.role_scope || (announcement.target_user_ids?.length ?? 0) > 0) && (
                 <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
-                  Target: {getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
+                  Target: {announcement.target_user_ids?.length
+                    ? `${announcement.target_user_ids.length} selected member(s)`
+                    : getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
                 </span>
               )}
             </div>
@@ -384,18 +427,57 @@ export default function AnnouncementDetailPage({ params }: { params: { id: strin
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Visible to</label>
-            <select
-              value={roleScope}
-              onChange={(e) => setRoleScope(e.target.value as any)}
-              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-            >
-              <option value="all">All BOSSO members</option>
-              <option value="general_member">General Members only</option>
-              <option value="analyst">Analysts and above</option>
-              <option value="analyst_only">Analysts only</option>
-              <option value="project_manager">PMs and Board</option>
-              <option value="board_member">Board only</option>
-            </select>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAudienceMode('role')}
+                className={`px-3 py-1.5 rounded-md text-xs border ${
+                  audienceMode === 'role'
+                    ? 'bg-primary/20 text-primary border-primary/40'
+                    : 'bg-dark-100 text-muted-foreground border-primary/20'
+                }`}
+              >
+                Role Group
+              </button>
+              <button
+                type="button"
+                onClick={() => setAudienceMode('people')}
+                className={`px-3 py-1.5 rounded-md text-xs border ${
+                  audienceMode === 'people'
+                    ? 'bg-primary/20 text-primary border-primary/40'
+                    : 'bg-dark-100 text-muted-foreground border-primary/20'
+                }`}
+              >
+                Specific People
+              </button>
+            </div>
+            {audienceMode === 'role' ? (
+              <select
+                value={roleScope}
+                onChange={(e) => setRoleScope(e.target.value as any)}
+                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="all">All BOSSO members</option>
+                <option value="general_member">General Members only</option>
+                <option value="analyst">Analysts and above</option>
+                <option value="analyst_only">Analysts only</option>
+                <option value="project_manager">PMs and Board</option>
+                <option value="board_member">Board only</option>
+              </select>
+            ) : (
+              <div className="space-y-2">
+                <UserSearch
+                  users={peopleOptions}
+                  value={selectedUserIds}
+                  onChange={(value) => setSelectedUserIds(value as string[])}
+                  placeholder="Search and select members..."
+                  multiple
+                />
+                <p className="text-xs text-muted-foreground">
+                  {selectedUserIds.length} member(s) selected
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">

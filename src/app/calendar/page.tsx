@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import type { Event, EventCategory, EventType, Task } from '@/types/database.types'
+import UserSearch, { type UserOption } from '@/components/UserSearch'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
@@ -24,8 +25,8 @@ import {
 } from 'lucide-react'
 import { isAdmin } from '@/lib/admin'
 import {
-  canAccessRoleScope,
-  filterUsersByRoleScope,
+  canAccessAudience,
+  filterUsersByAudience,
   fromRoleScopePayload,
   getRoleScopeLabel,
   toRoleScopePayload,
@@ -41,7 +42,9 @@ type EventFormState = {
   date: string
   startTime: string
   endTime: string
+  audienceMode: 'role' | 'people'
   audience: RoleScopeOption
+  selectedUserIds: string[]
   trackAttendance: boolean
   codeHasExpiry: boolean
   eventCategory: EventCategory | ''
@@ -62,7 +65,9 @@ const emptyForm: EventFormState = {
   date: '',
   startTime: '',
   endTime: '',
+  audienceMode: 'role',
   audience: 'all',
+  selectedUserIds: [],
   trackAttendance: false,
   codeHasExpiry: true,
   eventCategory: '',
@@ -80,6 +85,7 @@ export default function CalendarPage() {
   const { profile, hasMinimumRole } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -105,7 +111,7 @@ export default function CalendarPage() {
       const saved = sessionStorage.getItem('calendarForm')
       if (saved) {
         try {
-          return JSON.parse(saved)
+          return { ...emptyForm, ...JSON.parse(saved) }
         } catch {
           return emptyForm
         }
@@ -118,7 +124,13 @@ export default function CalendarPage() {
   const isUserAdmin = isAdmin(profile?.role)
 
   const canSeeEvent = (item: Event) => {
-    return canAccessRoleScope(profile?.role, item.audience_scope, item.audience_scope_mode)
+    return canAccessAudience(
+      profile?.id,
+      profile?.role,
+      item.audience_scope,
+      item.audience_scope_mode,
+      item.target_user_ids
+    )
   }
 
   const canAccessAttendanceCode = (event: Event) => {
@@ -214,7 +226,27 @@ export default function CalendarPage() {
   useEffect(() => {
     fetchEvents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.role])
+  }, [profile?.id, profile?.role])
+
+  useEffect(() => {
+    const fetchPeopleOptions = async () => {
+      if (!canManage) return
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('account_status', 'active')
+        .order('full_name', { ascending: true })
+
+      if (error) {
+        console.error('Error loading members for targeting', error)
+        return
+      }
+
+      setPeopleOptions((data ?? []) as UserOption[])
+    }
+
+    fetchPeopleOptions()
+  }, [canManage])
 
   // Persist form state to sessionStorage
   useEffect(() => {
@@ -304,7 +336,9 @@ export default function CalendarPage() {
       date: toDateKey(start),
       startTime: toTimeInput(start),
       endTime: toTimeInput(end),
+      audienceMode: (event.target_user_ids?.length ?? 0) > 0 ? 'people' : 'role',
       audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
+      selectedUserIds: event.target_user_ids ?? [],
       trackAttendance: event.track_attendance ?? false,
       codeHasExpiry: Boolean(event.code_expires_at),
       eventCategory: event.event_category ?? '',
@@ -411,7 +445,9 @@ export default function CalendarPage() {
       date: toDateKey(start),
       startTime: toTimeInput(start),
       endTime: toTimeInput(end),
+      audienceMode: (event.target_user_ids?.length ?? 0) > 0 ? 'people' : 'role',
       audience: fromRoleScopePayload(event.audience_scope, event.audience_scope_mode),
+      selectedUserIds: event.target_user_ids ?? [],
       trackAttendance: Boolean(event.track_attendance),
       codeHasExpiry: Boolean(event.code_expires_at),
       eventCategory: event.event_category ?? '',
@@ -452,6 +488,10 @@ export default function CalendarPage() {
     e.preventDefault()
     if (!profile) return
     if (!form.date || !form.startTime) return
+    if (form.audienceMode === 'people' && form.selectedUserIds.length === 0) {
+      setError('Please select at least one member.')
+      return
+    }
 
     // Validate point value if attendance tracking is enabled
     if (form.trackAttendance && (!form.pointValue || isNaN(Number(form.pointValue)) || Number(form.pointValue) < 0)) {
@@ -473,8 +513,9 @@ export default function CalendarPage() {
       description: form.description || null,
       location: form.location || null,
       created_by: profile.id,
-      audience_scope: scopePayload.roleScope,
-      ...(scopePayload.roleScopeMode ? { audience_scope_mode: scopePayload.roleScopeMode } : {}),
+      audience_scope: form.audienceMode === 'role' ? scopePayload.roleScope : null,
+      audience_scope_mode: form.audienceMode === 'role' ? scopePayload.roleScopeMode : null,
+      target_user_ids: form.audienceMode === 'people' ? form.selectedUserIds : null,
       track_attendance: form.trackAttendance,
       point_value: form.trackAttendance ? Number(form.pointValue) : 0,
       event_category: form.eventCategory || null,
@@ -598,17 +639,18 @@ export default function CalendarPage() {
       // Fetch all eligible users based on audience_scope
       let query = supabase
         .from('profiles')
-        .select('email, full_name, role')
+        .select('id, email, full_name, role')
         .eq('account_status', 'active')
 
       const { data: users, error } = await query
 
       if (error) throw error
 
-      const eligibleUsers = filterUsersByRoleScope(
+      const eligibleUsers = filterUsersByAudience(
         users || [],
         event.audience_scope,
-        event.audience_scope_mode
+        event.audience_scope_mode,
+        event.target_user_ids
       )
 
       // Get list of email addresses for BCC
@@ -876,7 +918,9 @@ View on portal: ${window.location.origin}/calendar`)
 
                 <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide">
                   <span className="text-primary">
-                    Visible to {getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
+                    Visible to {event.target_user_ids?.length
+                      ? `${event.target_user_ids.length} selected member(s)`
+                      : getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
                   </span>
                   {event.track_attendance && (
                     <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
@@ -994,18 +1038,57 @@ View on portal: ${window.location.origin}/calendar`)
 
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground uppercase tracking-wide">Audience</label>
-                  <select
-                    value={form.audience}
-                    onChange={(e) => setForm((prev) => ({ ...prev, audience: e.target.value as any }))}
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
-                  >
-                    <option value="all">All BOSSO members</option>
-                    <option value="general_member">General Members only</option>
-                    <option value="analyst">Analysts and above</option>
-                    <option value="analyst_only">Analysts only</option>
-                    <option value="project_manager">PMs and Board</option>
-                    <option value="board_member">Board only</option>
-                  </select>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, audienceMode: 'role' }))}
+                      className={`px-3 py-1.5 rounded-md text-xs border ${
+                        form.audienceMode === 'role'
+                          ? 'bg-primary/20 text-primary border-primary/40'
+                          : 'bg-dark-100 text-muted-foreground border-primary/20'
+                      }`}
+                    >
+                      Role Group
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, audienceMode: 'people' }))}
+                      className={`px-3 py-1.5 rounded-md text-xs border ${
+                        form.audienceMode === 'people'
+                          ? 'bg-primary/20 text-primary border-primary/40'
+                          : 'bg-dark-100 text-muted-foreground border-primary/20'
+                      }`}
+                    >
+                      Specific People
+                    </button>
+                  </div>
+                  {form.audienceMode === 'role' ? (
+                    <select
+                      value={form.audience}
+                      onChange={(e) => setForm((prev) => ({ ...prev, audience: e.target.value as any }))}
+                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                    >
+                      <option value="all">All BOSSO members</option>
+                      <option value="general_member">General Members only</option>
+                      <option value="analyst">Analysts and above</option>
+                      <option value="analyst_only">Analysts only</option>
+                      <option value="project_manager">PMs and Board</option>
+                      <option value="board_member">Board only</option>
+                    </select>
+                  ) : (
+                    <div className="space-y-2">
+                      <UserSearch
+                        users={peopleOptions}
+                        value={form.selectedUserIds}
+                        onChange={(value) => setForm((prev) => ({ ...prev, selectedUserIds: value as string[] }))}
+                        placeholder="Search and select members..."
+                        multiple
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {form.selectedUserIds.length} member(s) selected
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">
