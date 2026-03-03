@@ -26,6 +26,7 @@ import {
   Download,
   RefreshCw,
   Briefcase,
+  KeyRound,
   Plus,
   X
 } from 'lucide-react'
@@ -599,6 +600,9 @@ function UserManagementTab() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'active' | 'rejected'>('pending')
   const [processingUserId, setProcessingUserId] = useState<string | null>(null)
   const [recentlyApproved, setRecentlyApproved] = useState<Set<string>>(new Set())
+  const [tempResetUserId, setTempResetUserId] = useState('')
+  const [tempPassword, setTempPassword] = useState('')
+  const [settingTempPassword, setSettingTempPassword] = useState(false)
 
   useEffect(() => {
     fetchUsers()
@@ -973,6 +977,85 @@ BOSSO@UTAustin`)
     window.open(gmailUrl, '_blank')
   }
 
+  const generateTempPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
+    const passwordLength = 12
+    let generated = ''
+    for (let i = 0; i < passwordLength; i++) {
+      generated += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    setTempPassword(generated)
+  }
+
+  const selectedResetUser = users.find((user) => user.id === tempResetUserId) || null
+
+  const openTempPasswordEmailDraft = (user: Profile, password: string) => {
+    const subject = encodeURIComponent('BOSSO Portal - Temporary Password')
+    const body = encodeURIComponent(`Hi ${user.full_name},
+
+We reset your BOSSO Portal password.
+
+Temporary Password:
+${password}
+
+Please do the following:
+1. Go to https://bosso-portal.vercel.app/login
+2. Sign in with your email and the temporary password above
+3. Go to Settings -> Security
+4. Set your own new password immediately
+
+If you have trouble logging in, reply to this email and we will help.
+
+Best regards,
+BOSSO Team`)
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
+    window.open(gmailUrl, '_blank')
+  }
+
+  const setTemporaryPassword = async () => {
+    if (!tempResetUserId) {
+      alert('Please select a user first.')
+      return
+    }
+
+    if (!tempPassword || tempPassword.length < 8) {
+      alert('Temporary password must be at least 8 characters.')
+      return
+    }
+
+    if (!selectedResetUser) {
+      alert('Selected user was not found. Please refresh and try again.')
+      return
+    }
+
+    setSettingTempPassword(true)
+    try {
+      const response = await fetch('/api/admin/set-temp-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: tempResetUserId,
+          tempPassword,
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to set temporary password')
+      }
+
+      alert(`Temporary password updated for ${selectedResetUser.full_name}.`)
+    } catch (error: any) {
+      console.error('Error setting temporary password:', error)
+      alert(error.message || 'Failed to set temporary password')
+    } finally {
+      setSettingTempPassword(false)
+    }
+  }
+
   const downloadMembersSpreadsheet = async () => {
     try {
       const response = await fetch('/api/admin/export-members')
@@ -1001,6 +1084,8 @@ BOSSO@UTAustin`)
     return true
   })
 
+  const tempPasswordUsers = users.filter((user) => user.id !== adminProfile?.id)
+
   return (
     <div className="space-y-6">
       {/* Cleanup Section */}
@@ -1017,6 +1102,86 @@ BOSSO@UTAustin`)
             className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm whitespace-nowrap"
           >
             Cleanup Orphaned Auth
+          </button>
+        </div>
+      </div>
+
+      {/* Temporary Password Reset Section */}
+      <div className="card-glow p-4 bg-blue-500/10 border border-blue-500/30 space-y-3">
+        <div className="flex items-start gap-3">
+          <KeyRound className="w-5 h-5 text-blue-400 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-blue-400 mb-1">Temporary Password Reset</h3>
+            <p className="text-xs text-blue-300/80">
+              Select a user, set a temporary password, then open a prefilled Gmail draft so you only need to hit send.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <label htmlFor="temp-reset-user" className="text-xs text-muted-foreground">User</label>
+            <select
+              id="temp-reset-user"
+              value={tempResetUserId}
+              onChange={(e) => setTempResetUserId(e.target.value)}
+              className="w-full px-3 py-2 bg-dark-300 border border-primary/20 text-foreground rounded-lg text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">Select a user</option>
+              {tempPasswordUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.full_name} ({user.email})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="temp-password" className="text-xs text-muted-foreground">Temporary Password</label>
+            <div className="flex gap-2">
+              <input
+                id="temp-password"
+                type="text"
+                value={tempPassword}
+                onChange={(e) => setTempPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="flex-1 px-3 py-2 bg-dark-300 border border-primary/20 text-foreground rounded-lg text-sm focus:outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={generateTempPassword}
+                className="px-3 py-2 bg-dark-200 border border-primary/20 text-foreground rounded-lg text-sm hover:border-primary/50 transition-all whitespace-nowrap"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={setTemporaryPassword}
+            disabled={settingTempPassword}
+            className="px-4 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {settingTempPassword ? 'Setting...' : 'Set Temporary Password'}
+          </button>
+          <button
+            onClick={() => {
+              if (!selectedResetUser) {
+                alert('Please select a user first.')
+                return
+              }
+              if (!tempPassword) {
+                alert('Please enter or generate a temporary password first.')
+                return
+              }
+              openTempPasswordEmailDraft(selectedResetUser, tempPassword)
+            }}
+            className="px-4 py-2 bg-primary/20 border border-primary/30 text-primary rounded-lg hover:bg-primary/30 transition-all font-medium text-sm flex items-center gap-2"
+          >
+            <Mail className="w-4 h-4" />
+            Open Email Draft
           </button>
         </div>
       </div>

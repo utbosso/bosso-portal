@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { Moon, Sun, User, Mail, Briefcase, Settings as SettingsIcon, Phone, Edit2 } from 'lucide-react'
+import { Moon, Sun, User, Mail, Briefcase, Settings as SettingsIcon, Phone, Edit2, Shield } from 'lucide-react'
 import ProfileEditForm from '@/components/ProfileEditForm'
 import { Profile } from '@/types/database.types'
+import { createClient } from '@/lib/supabase/client'
+
+const supabase = createClient()
 
 export default function SettingsPage() {
   const { profile: authProfile } = useAuth()
@@ -12,6 +15,11 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(authProfile)
   const [isEditing, setIsEditing] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSuccess, setPasswordSuccess] = useState('')
 
   // Update local profile when authProfile changes
   useEffect(() => {
@@ -45,6 +53,36 @@ export default function SettingsPage() {
   const handleProfileUpdate = (updatedProfile: Profile) => {
     setProfile(updatedProfile)
     setIsEditing(false)
+  }
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPasswordError('')
+    setPasswordSuccess('')
+
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.')
+      return
+    }
+
+    setPasswordLoading(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+
+      setPasswordSuccess('Password updated successfully.')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err: any) {
+      setPasswordError(err?.message || 'Failed to update password. Please try again.')
+    } finally {
+      setPasswordLoading(false)
+    }
   }
 
 
@@ -219,6 +257,72 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Security */}
+      <div className="card-glow p-6 space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Shield className="w-5 h-5 text-primary" />
+          Security
+        </h2>
+
+        <form onSubmit={handlePasswordChange} className="space-y-4 max-w-xl">
+          <p className="text-sm text-muted-foreground">
+            Logged in with a temporary password? Set a new password here.
+          </p>
+
+          {passwordError && (
+            <div className="bg-destructive/20 border border-destructive/50 text-destructive px-4 py-3 rounded-lg text-sm">
+              {passwordError}
+            </div>
+          )}
+
+          {passwordSuccess && (
+            <div className="bg-green-500/20 border border-green-500/30 text-green-400 px-4 py-3 rounded-lg text-sm">
+              {passwordSuccess}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label htmlFor="newPassword" className="text-sm font-medium text-foreground">
+              New Password
+            </label>
+            <input
+              id="newPassword"
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+              className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
+              placeholder="At least 8 characters"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="confirmPassword" className="text-sm font-medium text-foreground">
+              Confirm New Password
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={8}
+              className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
+              placeholder="Re-enter your new password"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={passwordLoading}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {passwordLoading ? 'Updating...' : 'Update Password'}
+          </button>
+        </form>
       </div>
 
 

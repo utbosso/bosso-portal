@@ -170,7 +170,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const roleLabel = profile?.role.replace('_', ' ')
   const isAuthPage = useMemo(
-    () => pathname === '/login' || pathname === '/signup' || pathname?.startsWith('/auth/') || pathname === '/pending-approval' || pathname === '/verify-email',
+    () =>
+      pathname === '/login' ||
+      pathname === '/signup' ||
+      pathname?.startsWith('/auth/') ||
+      pathname === '/pending-approval' ||
+      pathname === '/verify-email',
     [pathname]
   )
 
