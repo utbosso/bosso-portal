@@ -28,12 +28,12 @@ import {
   Briefcase,
   KeyRound,
   Plus,
-  X
+  X,
 } from 'lucide-react'
 import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
 import { meetsRoleRequirements } from '@/lib/membership-tiers'
-import { buildCategoryTotals } from '@/lib/points-calculations'
+import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import UserSearch, { UserOption } from '@/components/UserSearch'
 
 const supabase = createClient()
@@ -53,6 +53,20 @@ type UserPointsBreakdown = {
   uncategorized_points: number
   is_active: boolean
   meets_role_requirements: boolean
+  source_breakdown: {
+    membership: PointsSourceItem[]
+    professional_education: PointsSourceItem[]
+    social: PointsSourceItem[]
+    philanthropy: PointsSourceItem[]
+    uncategorized: PointsSourceItem[]
+  }
+}
+
+type PointsSourceItem = {
+  id: string
+  title: string
+  points: number
+  timestamp: string
 }
 
 export default function AdminDashboard() {
@@ -1464,6 +1478,7 @@ function PointsBreakdownTab() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'total' | 'active'>('total')
+  const [selectedDetailsUser, setSelectedDetailsUser] = useState<UserPointsBreakdown | null>(null)
 
   // Modal state for manual points entry
   const [showAddPointsModal, setShowAddPointsModal] = useState(false)
@@ -1477,6 +1492,39 @@ function PointsBreakdownTab() {
   const [addPointsError, setAddPointsError] = useState<string | null>(null)
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
+
+  const getAttendanceCategory = (row: any): EventCategory | null => {
+    if (row.event_category) return row.event_category as EventCategory
+    const joinedEvent = row.event
+    if (Array.isArray(joinedEvent)) {
+      return (joinedEvent[0]?.event_category as EventCategory | null | undefined) ?? null
+    }
+    return (joinedEvent?.event_category as EventCategory | null | undefined) ?? null
+  }
+
+  const getAdjustmentTitle = (reason: string | null): string => {
+    if (!reason) return 'Manual adjustment'
+    const cleanReason = reason
+      .replace(/\s*\((membership|professional_education|social|philanthropy)\)\s*$/i, '')
+      .trim()
+    return cleanReason || 'Manual adjustment'
+  }
+
+  const getAttendanceEventTitle = (row: any): string => {
+    const joinedEvent = row.event
+    if (Array.isArray(joinedEvent)) {
+      return joinedEvent[0]?.title || 'Event attendance'
+    }
+    return joinedEvent?.title || 'Event attendance'
+  }
+
+  const getAttendanceTimestamp = (row: any): string => {
+    const joinedEvent = row.event
+    if (Array.isArray(joinedEvent)) {
+      return row.checked_in_at || joinedEvent[0]?.start_at || new Date().toISOString()
+    }
+    return row.checked_in_at || joinedEvent?.start_at || new Date().toISOString()
+  }
 
   useEffect(() => {
     fetchPointsData()
@@ -1511,10 +1559,10 @@ function PointsBreakdownTab() {
       const [attendanceResult, adjustmentsResult] = await Promise.all([
         supabase
           .from('attendance_records')
-          .select('user_id, points_earned, event_category, event:events(event_category)'),
+          .select('id, user_id, points_earned, event_category, checked_in_at, event:events(event_category, title, start_at)'),
         supabase
           .from('points_adjustments')
-          .select('user_id, points, reason'),
+          .select('id, user_id, points, reason, created_at'),
       ])
 
       if (attendanceResult.error) throw attendanceResult.error
@@ -1532,6 +1580,59 @@ function PointsBreakdownTab() {
         const existing = adjustmentsByUser.get(row.user_id) || []
         existing.push(row)
         adjustmentsByUser.set(row.user_id, existing)
+      }
+
+      const sourceBreakdownByUser = new Map<string, UserPointsBreakdown['source_breakdown']>()
+      for (const row of attendanceResult.data || []) {
+        const userSources = sourceBreakdownByUser.get(row.user_id) || {
+          membership: [],
+          professional_education: [],
+          social: [],
+          philanthropy: [],
+          uncategorized: [],
+        }
+
+        const category = getAttendanceCategory(row)
+        const sourceItem: PointsSourceItem = {
+          id: `att-${row.id}`,
+          title: getAttendanceEventTitle(row),
+          points: Number(row.points_earned || 0),
+          timestamp: getAttendanceTimestamp(row),
+        }
+
+        if (category) {
+          userSources[category].push(sourceItem)
+        } else {
+          userSources.uncategorized.push(sourceItem)
+        }
+
+        sourceBreakdownByUser.set(row.user_id, userSources)
+      }
+
+      for (const row of adjustmentsResult.data || []) {
+        const userSources = sourceBreakdownByUser.get(row.user_id) || {
+          membership: [],
+          professional_education: [],
+          social: [],
+          philanthropy: [],
+          uncategorized: [],
+        }
+
+        const category = getCategoryFromAdjustmentReason(row.reason)
+        const sourceItem: PointsSourceItem = {
+          id: `adj-${row.id}`,
+          title: getAdjustmentTitle(row.reason),
+          points: Number(row.points || 0),
+          timestamp: row.created_at || new Date().toISOString(),
+        }
+
+        if (category) {
+          userSources[category].push(sourceItem)
+        } else {
+          userSources.uncategorized.push(sourceItem)
+        }
+
+        sourceBreakdownByUser.set(row.user_id, userSources)
       }
 
       const breakdown = (users || []).map((user) => {
@@ -1562,6 +1663,13 @@ function PointsBreakdownTab() {
           uncategorized_points: uncategorizedPoints,
           is_active: isActive,
           meets_role_requirements: roleRequirement.meets,
+          source_breakdown: sourceBreakdownByUser.get(user.id) || {
+            membership: [],
+            professional_education: [],
+            social: [],
+            philanthropy: [],
+            uncategorized: [],
+          },
         }
       })
 
@@ -1588,6 +1696,14 @@ function PointsBreakdownTab() {
       return 0
     })
   }, [pointsData, searchQuery, sortBy])
+
+  const categorySections: Array<{ key: EventCategory | 'uncategorized'; label: string }> = [
+    { key: 'membership', label: 'Membership' },
+    { key: 'professional_education', label: 'Prof/Edu' },
+    { key: 'social', label: 'Social' },
+    { key: 'philanthropy', label: 'Philanthropy' },
+    { key: 'uncategorized', label: 'Other' },
+  ]
 
   const exportToCSV = () => {
     const headers = [
@@ -1835,92 +1951,165 @@ function PointsBreakdownTab() {
                   <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     Status
                   </th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Details
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-primary/10">
-                {filteredAndSortedData.map((user) => (
-                  <tr key={user.user_id} className="hover:bg-dark-200/30 transition">
-                    <td className="px-2 py-2">
-                      <div>
-                        <p className="text-xs font-medium text-foreground whitespace-nowrap">{user.full_name}</p>
-                        <p className="text-xs text-muted-foreground truncate max-w-[200px]">{user.email}</p>
-                      </div>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 whitespace-nowrap">
-                        {user.role.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span className="text-xs font-bold text-foreground">{user.total_points}</span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span
-                        className={`text-xs font-medium ${
-                          user.membership_points >= 25 ? 'text-green-400' : 'text-orange-400'
-                        }`}
-                      >
-                        {user.membership_points}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span
-                        className={`text-xs font-medium ${
-                          user.professional_points >= 25 ? 'text-green-400' : 'text-orange-400'
-                        }`}
-                      >
-                        {user.professional_points}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span
-                        className={`text-xs font-medium ${
-                          user.social_points >= 25 ? 'text-green-400' : 'text-orange-400'
-                        }`}
-                      >
-                        {user.social_points}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span
-                        className={`text-xs font-medium ${
-                          user.philanthropy_points >= 25 ? 'text-green-400' : 'text-orange-400'
-                        }`}
-                      >
-                        {user.philanthropy_points}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span
-                        className={`text-xs font-medium ${
-                          user.uncategorized_points === 0 ? 'text-muted-foreground' : 'text-yellow-400'
-                        }`}
-                      >
-                        {user.uncategorized_points}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <div className="flex flex-col items-center gap-0.5">
+                {filteredAndSortedData.map((user) => {
+                  return (
+                    <tr key={user.user_id} className="hover:bg-dark-200/30 transition">
+                      <td className="px-2 py-2">
+                        <div>
+                          <p className="text-xs font-medium text-foreground whitespace-nowrap">{user.full_name}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{user.email}</p>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2">
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 whitespace-nowrap">
+                          {user.role.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span className="text-xs font-bold text-foreground">{user.total_points}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
                         <span
-                          className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap ${
-                            user.is_active
-                              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                              : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                          className={`text-xs font-medium ${
+                            user.membership_points >= 25 ? 'text-green-400' : 'text-orange-400'
                           }`}
                         >
-                          {user.is_active ? 'Active' : 'Inactive'}
+                          {user.membership_points}
                         </span>
-                        {!user.meets_role_requirements && (
-                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
-                            Below req.
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span
+                          className={`text-xs font-medium ${
+                            user.professional_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                          }`}
+                        >
+                          {user.professional_points}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span
+                          className={`text-xs font-medium ${
+                            user.social_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                          }`}
+                        >
+                          {user.social_points}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span
+                          className={`text-xs font-medium ${
+                            user.philanthropy_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                          }`}
+                        >
+                          {user.philanthropy_points}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span
+                          className={`text-xs font-medium ${
+                            user.uncategorized_points === 0 ? 'text-muted-foreground' : 'text-yellow-400'
+                          }`}
+                        >
+                          {user.uncategorized_points}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                              user.is_active
+                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                            }`}
+                          >
+                            {user.is_active ? 'Active' : 'Inactive'}
                           </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {!user.meets_role_requirements && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
+                              Below req.
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          onClick={() => setSelectedDetailsUser(user)}
+                          className="px-2 py-1 rounded-md border border-primary/20 text-primary hover:bg-primary/10 transition text-xs"
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {selectedDetailsUser && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-200 border border-primary/20 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-primary/20">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Points Source Details</h2>
+                <p className="text-xs text-muted-foreground">{selectedDetailsUser.full_name}</p>
+              </div>
+              <button
+                onClick={() => setSelectedDetailsUser(null)}
+                className="p-1 text-muted-foreground hover:text-foreground transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-3">
+              {categorySections.map((section) => {
+                const entries = [...selectedDetailsUser.source_breakdown[section.key]].sort(
+                  (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                )
+                const sectionTotal = entries.reduce((sum, entry) => sum + entry.points, 0)
+
+                return (
+                  <div key={section.key} className="rounded-md border border-primary/15 bg-dark-100/70 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-foreground">{section.label}</p>
+                      <span className={`text-xs font-medium ${sectionTotal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {sectionTotal >= 0 ? '+' : ''}
+                        {sectionTotal}
+                      </span>
+                    </div>
+                    {entries.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No entries</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {entries.map((entry) => (
+                          <div key={entry.id} className="flex items-start justify-between gap-3 text-xs">
+                            <div className="min-w-0">
+                              <p className="text-foreground truncate">{entry.title}</p>
+                              <p className="text-muted-foreground">
+                                {new Date(entry.timestamp).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <span className={`font-medium ${entry.points >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {entry.points >= 0 ? '+' : ''}
+                              {entry.points}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
