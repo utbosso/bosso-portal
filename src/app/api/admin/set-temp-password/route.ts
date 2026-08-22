@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { isPortalAdminUser } from '@/lib/supabase/admin'
 
 export async function POST(request: Request) {
   try {
@@ -25,13 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile || profile.role !== 'admin') {
+    if (!isPortalAdminUser(user)) {
       return NextResponse.json({ error: 'Unauthorized - Admin access required' }, { status: 403 })
     }
 
@@ -45,7 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Temporary password must be at least 8 characters' }, { status: 400 })
     }
 
-    if (userId === profile.id) {
+    if (userId === user.id) {
       return NextResponse.json({ error: 'You cannot set a temporary password for your own account' }, { status: 400 })
     }
 

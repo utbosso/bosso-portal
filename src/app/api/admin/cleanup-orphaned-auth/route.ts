@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { isPortalAdminUser } from '@/lib/supabase/admin'
 
 export async function POST(request: Request) {
   try {
@@ -24,13 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile || profile.role !== 'admin') {
+    if (!isPortalAdminUser(user)) {
       return NextResponse.json({ error: 'Unauthorized - Admin access required' }, { status: 403 })
     }
 

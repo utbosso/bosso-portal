@@ -2,6 +2,12 @@
 
 This directory contains SQL migration scripts for the BOSSO Portal database.
 
+> **Legacy scripts only:** these files describe the first portal installation and
+> are not the Fall 2026 semester rollout. The canonical, ordered migrations now
+> live in `supabase/migrations/`. Follow `docs/SUPABASE-MIGRATION-CHECKLIST.md`
+> for rehearsal, backup, verification, activation, and recovery. Do not combine
+> the old cleanup scripts with the semester rollover.
+
 ## How to Run Migrations
 
 ### Option 1: Using Supabase Dashboard (Recommended)

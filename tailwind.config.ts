@@ -17,32 +17,32 @@ module.exports = {
     },
     extend: {
       colors: {
-        // TSAG Brand Colors
+        // BOSSO portal design tokens
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         
-        // Primary: Burnt Orange (TSAG Orange)
+        // Primary: UT Austin burnt orange
         primary: {
-          DEFAULT: "#F57D1F",
-          50: "#FEF3E7",
-          100: "#FDE5CC",
-          200: "#FBD199",
-          300: "#F9BD66",
-          400: "#F7A333",
-          500: "#F57D1F",
-          600: "#C46318",
-          700: "#934A12",
-          800: "#62310C",
-          900: "#311806",
-          foreground: "#FFFFFF",
+          DEFAULT: "hsl(var(--primary))",
+          50: "#FFF6EE",
+          100: "#FEE8D4",
+          200: "#FBCDA7",
+          300: "#F5A86F",
+          400: "#E87C32",
+          500: "#BF5700",
+          600: "#A54900",
+          700: "#843B05",
+          800: "#69310A",
+          900: "#562A0B",
+          foreground: "hsl(var(--primary-foreground))",
         },
         
         // Secondary: Deep Black (TSAG Black)
         secondary: {
-          DEFAULT: "#111111",
+          DEFAULT: "hsl(var(--secondary))",
           50: "#3D3D3D",
           100: "#333333",
           200: "#292929",
@@ -53,44 +53,45 @@ module.exports = {
           700: "#090909",
           800: "#050505",
           900: "#000000",
-          foreground: "#FFFFFF",
+          foreground: "hsl(var(--secondary-foreground))",
         },
         
-        // Accent: Lighter Orange
+        // Accent: restrained warm orange
         accent: {
-          DEFAULT: "#FF9147",
+          DEFAULT: "hsl(var(--accent))",
           50: "#FFE8D9",
           100: "#FFD6BF",
           200: "#FFB38A",
           300: "#FF9147",
           400: "#FF7F2E",
-          500: "#F57D1F",
+          500: "#BF5700",
           600: "#CC5E0F",
           700: "#A34600",
           800: "#7A3300",
           900: "#512000",
-          foreground: "#000000",
+          foreground: "hsl(var(--accent-foreground))",
         },
         
-        // Dark backgrounds
+        // Legacy surface names. Keeping these token-backed lets older screens
+        // participate in both themes, including hover and opacity variants.
         dark: {
-          DEFAULT: "#0A0A0A",
-          50: "#2B2B2B",
-          100: "#222222",
-          200: "#1A1A1A",
-          300: "#111111",
-          400: "#0D0D0D",
-          500: "#0A0A0A",
-          600: "#080808",
-          700: "#050505",
-          800: "#030303",
+          DEFAULT: "hsl(var(--background) / <alpha-value>)",
+          50: "hsl(var(--muted) / <alpha-value>)",
+          100: "hsl(var(--secondary) / <alpha-value>)",
+          200: "hsl(var(--card) / <alpha-value>)",
+          300: "hsl(var(--background) / <alpha-value>)",
+          400: "hsl(var(--background) / <alpha-value>)",
+          500: "hsl(var(--background) / <alpha-value>)",
+          600: "hsl(var(--background) / <alpha-value>)",
+          700: "hsl(var(--background) / <alpha-value>)",
+          800: "hsl(var(--background) / <alpha-value>)",
           900: "#000000",
         },
         
         // Destructive (Error/Warning)
         destructive: {
-          DEFAULT: "#FF3864",
-          foreground: "#FFFFFF",
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
         },
         
         // Muted elements

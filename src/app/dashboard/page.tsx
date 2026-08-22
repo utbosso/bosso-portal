@@ -4,12 +4,11 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
-import { isAdmin } from '@/lib/admin'
 import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
 import type { Event, Task, Announcement, Opportunity } from '@/types/database.types'
 import { canAccessAudience } from '@/lib/role-scope'
 import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
-import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
+import { usePortalAccess } from '@/hooks/usePortalAccess'
 import {
   Calendar,
   CheckSquare,
@@ -21,15 +20,16 @@ import {
   Users,
   PlusCircle,
   ArrowRight,
-  Target,
   Award,
   FileText,
+  QrCode,
 } from 'lucide-react'
 
 const supabase = createClient()
 
 export default function DashboardPage() {
-  const { profile, hasMinimumRole } = useAuth()
+  const { user, profile, hasMinimumRole } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
 
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([])
   const [myTasks, setMyTasks] = useState<Task[]>([])
@@ -37,19 +37,90 @@ export default function DashboardPage() {
   const [recentOpportunities, setRecentOpportunities] = useState<Opportunity[]>([])
   const [totalPoints, setTotalPoints] = useState(0)
   const [eventsAttended, setEventsAttended] = useState(0)
+  const [termRequiredPoints, setTermRequiredPoints] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  const [checkInCode, setCheckInCode] = useState('')
+  const [checkingIn, setCheckingIn] = useState(false)
+  const [checkInSuccess, setCheckInSuccess] = useState(false)
+  const [checkInError, setCheckInError] = useState<string | null>(null)
 
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
   const canManageContent = hasMinimumRole('project_manager')
+
+  const handleCheckIn = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profile || !checkInCode.trim()) return
+
+    setCheckingIn(true)
+    setCheckInError(null)
+    setCheckInSuccess(false)
+
+    try {
+      const code = checkInCode.trim().toUpperCase()
+
+      const { data: event, error: eventError } = await supabase
+        .from('events')
+        .select('id, point_value, attendance_code, code_expires_at, event_category')
+        .eq('attendance_code', code)
+        .eq('track_attendance', true)
+        .single()
+
+      if (eventError || !event) {
+        setCheckInError('Invalid check-in code. Please try again.')
+        return
+      }
+
+      if (event.code_expires_at) {
+        const expiresAt = new Date(event.code_expires_at)
+        if (!Number.isNaN(expiresAt.getTime()) && new Date() > expiresAt) {
+          setCheckInError('This check-in code has expired.')
+          return
+        }
+      }
+
+      const { data: existing } = await supabase
+        .from('attendance_records')
+        .select('id')
+        .eq('event_id', event.id)
+        .eq('user_id', profile.id)
+        .single()
+
+      if (existing) {
+        setCheckInError('You have already checked in to this event.')
+        return
+      }
+
+      const { error: insertError } = await supabase
+        .from('attendance_records')
+        .insert({
+          event_id: event.id,
+          user_id: profile.id,
+          points_earned: event.point_value || 0,
+          event_category: event.event_category,
+        })
+
+      if (insertError) throw insertError
+
+      setCheckInSuccess(true)
+      setCheckInCode('')
+      await fetchAttendanceStats()
+      setTimeout(() => setCheckInSuccess(false), 3000)
+    } catch (err) {
+      console.error('Error checking in:', err)
+      setCheckInError('Failed to check in. Please try again.')
+    } finally {
+      setCheckingIn(false)
+    }
+  }
 
   useEffect(() => {
     if (profile) {
       fetchDashboardData()
     }
-  }, [profile])
+  }, [profile, access?.term_id, schemaReady, accessLoading])
 
   const fetchDashboardData = async () => {
-    if (!profile) return
+    if (!profile || accessLoading) return
 
     setLoading(true)
     try {
@@ -71,16 +142,16 @@ export default function DashboardPage() {
     if (!profile) return
 
     const now = new Date().toISOString()
-    const { data, error } = await supabase
+    let eventsQuery: any = supabase
       .from('events')
       .select('*')
       .gte('start_at', now)
-      .order('start_at', { ascending: true })
-      .limit(5)
+    if (schemaReady && access?.term_id) eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
+    const { data, error } = await eventsQuery.order('start_at', { ascending: true }).limit(5)
 
     if (!error && data) {
       // Filter events based on audience_scope
-      const filtered = data.filter(event => {
+      const filtered = data.filter((event: Event) => {
         return canAccessAudience(
           profile.id,
           profile.role,
@@ -96,13 +167,13 @@ export default function DashboardPage() {
   const fetchMyTasks = async () => {
     if (!profile) return
 
-    const { data, error } = await supabase
+    let tasksQuery: any = supabase
       .from('tasks')
       .select('*')
       .eq('assigned_to', profile.id)
-      .eq('completed', false)
-      .order('due_date', { ascending: true })
-      .limit(5)
+      .neq('status', 'completed')
+    if (schemaReady && access?.term_id) tasksQuery = tasksQuery.eq('term_id', access.term_id).is('archived_at', null)
+    const { data, error } = await tasksQuery.order('due_at', { ascending: true }).limit(5)
 
     if (!error && data) {
       setMyTasks(data as Task[])
@@ -112,15 +183,15 @@ export default function DashboardPage() {
   const fetchRecentAnnouncements = async () => {
     if (!profile) return
 
-    const { data, error } = await supabase
+    let announcementQuery: any = supabase
       .from('announcements')
       .select('*')
-      .order('created_at', { ascending: false })
-      .limit(3)
+    if (schemaReady && access?.term_id) announcementQuery = announcementQuery.eq('term_id', access.term_id).is('archived_at', null)
+    const { data, error } = await announcementQuery.order('created_at', { ascending: false }).limit(3)
 
     if (!error && data) {
       // Filter announcements based on role_scope
-      const filtered = data.filter(announcement => {
+      const filtered = data.filter((announcement: Announcement) => {
         return canAccessAudience(
           profile.id,
           profile.role,
@@ -148,7 +219,35 @@ export default function DashboardPage() {
   const fetchAttendanceStats = async () => {
     if (!profile) return
 
-    // Get total points
+    if (schemaReady && access?.term_id) {
+      const [summaryResult, ledgerResult, rulesResult, termResult] = await Promise.all([
+        supabase
+          .from('member_term_point_summary')
+          .select('total_points')
+          .eq('term_id', access.term_id)
+          .eq('user_id', profile.id)
+          .maybeSingle(),
+        supabase
+          .from('point_ledger')
+          .select('id', { count: 'exact', head: true })
+          .eq('term_id', access.term_id)
+          .eq('user_id', profile.id)
+          .eq('source_type', 'attendance')
+          .is('voided_at', null),
+        supabase.from('term_point_rules').select('minimum_points').eq('term_id', access.term_id),
+        supabase.from('academic_terms').select('points_rules_status').eq('id', access.term_id).maybeSingle(),
+      ])
+
+      if (!summaryResult.error && !ledgerResult.error && !rulesResult.error && !termResult.error) {
+        setTotalPoints(Number(summaryResult.data?.total_points || 0))
+        setEventsAttended(ledgerResult.count || 0)
+        const minimum = (rulesResult.data || []).reduce((sum, rule) => sum + Number(rule.minimum_points || 0), 0)
+        setTermRequiredPoints(termResult.data?.points_rules_status === 'published' ? minimum : 0)
+        return
+      }
+    }
+
+    // Compatibility fallback while the local semester migration is pending.
     const { data: pointsData, error: pointsError } = await supabase
       .rpc('get_user_total_points', { user_uuid: profile.id })
 
@@ -170,14 +269,14 @@ export default function DashboardPage() {
   const firstName = profile.full_name.split(' ')[0]
 
   // Get role-based point requirements from membership tiers system
-  const requiredPoints = ROLE_REQUIREMENTS[profile.role].minPoints
+  const requiredPoints = termRequiredPoints ?? ROLE_REQUIREMENTS[profile.role].minPoints
   const pointsProgress = requiredPoints > 0 ? Math.min((totalPoints / requiredPoints) * 100, 100) : 100
 
   return (
-    <div className="space-y-6">
+    <div className="portal-page space-y-7">
       {/* Welcome header */}
       <div className="space-y-2">
-        <h1 className="text-4xl font-bold text-gradient">
+        <h1 className="text-3xl font-bold text-gradient sm:text-4xl">
           Welcome back, {firstName}!
         </h1>
         <p className="text-muted-foreground">
@@ -191,16 +290,16 @@ export default function DashboardPage() {
 
       {/* Admin-only section */}
       {isUserAdmin && (
-        <div className="card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4">
           <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
             <Award className="w-5 h-5 text-primary" />
             Admin Overview
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Link href="/attendance" className="p-4 rounded-lg bg-dark-100 hover:bg-dark-200 transition-colors group">
+            <Link href="/points" className="p-4 rounded-lg bg-dark-100 hover:bg-dark-200 transition-colors group">
               <Users className="w-8 h-8 text-green-400 mb-2" />
-              <p className="text-sm font-semibold text-foreground group-hover:text-primary">Attendance Reports</p>
-              <p className="text-xs text-muted-foreground mt-1">View all member stats</p>
+              <p className="text-sm font-semibold text-foreground group-hover:text-primary">Points Review</p>
+              <p className="text-xs text-muted-foreground mt-1">Review requests and totals</p>
             </Link>
             <Link href="/feedback" className="p-4 rounded-lg bg-dark-100 hover:bg-dark-200 transition-colors group">
               <FileText className="w-8 h-8 text-blue-400 mb-2" />
@@ -224,13 +323,13 @@ export default function DashboardPage() {
       {/* Points & Attendance Stats (for non-admins) */}
       {!isUserAdmin && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="card-glow p-6 space-y-3">
+          <div className="portal-panel space-y-3">
             <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-cyan-400 flex items-center justify-center">
-                <Trophy className="w-6 h-6 text-white" />
+              <div className="w-12 h-12 rounded-lg bg-primary flex items-center justify-center">
+                <Trophy className="w-6 h-6 text-primary-foreground" />
               </div>
               <span className="text-xs text-primary font-medium">
-                {requiredPoints > 0 && `${requiredPoints} required`}
+                {requiredPoints > 0 ? `${requiredPoints} required` : 'Requirements being finalized'}
               </span>
             </div>
             <div>
@@ -241,7 +340,7 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <div className="w-full h-2 bg-dark-200 rounded-full border border-primary/30">
                   <div
-                    className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all"
+                    className="h-full bg-primary rounded-full transition-all"
                     style={{ width: `${pointsProgress}%` }}
                   />
                 </div>
@@ -252,9 +351,9 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="card-glow p-6 space-y-3">
+          <div className="portal-panel space-y-3">
             <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-secondary to-purple-400 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-lg bg-blue-600 flex items-center justify-center">
                 <Calendar className="w-6 h-6 text-white" />
               </div>
             </div>
@@ -264,30 +363,40 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <Link href="/attendance" className="card-glow p-6 space-y-3 hover:scale-105 transition-transform group">
-            <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-accent to-pink-400 flex items-center justify-center">
-                <Target className="w-6 h-6 text-white" />
+          <div className="portal-panel space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center">
+                <QrCode className="w-6 h-6 text-accent-foreground" />
               </div>
-              <ArrowRight className="w-5 h-5 text-primary group-hover:translate-x-1 transition-transform" />
+              <p className="text-sm font-semibold text-foreground">Check in to an event</p>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">View Full Attendance</p>
-              <p className="text-xs text-muted-foreground">See your detailed stats & history</p>
-            </div>
-          </Link>
+            <form onSubmit={handleCheckIn} className="space-y-2">
+              <input
+                type="text"
+                value={checkInCode}
+                onChange={(e) => setCheckInCode(e.target.value.toUpperCase())}
+                placeholder="Enter code (e.g. ABC123)"
+                maxLength={6}
+                className="portal-input w-full font-mono uppercase tracking-wider"
+              />
+              <button
+                type="submit"
+                disabled={checkingIn || !checkInCode.trim()}
+                className="portal-button w-full justify-center"
+              >
+                {checkingIn ? 'Checking in...' : 'Check In'}
+              </button>
+            </form>
+            {checkInSuccess && <p className="text-xs font-medium text-emerald-600">Checked in successfully!</p>}
+            {checkInError && <p className="text-xs font-medium text-red-600">{checkInError}</p>}
+          </div>
         </div>
-      )}
-
-      {/* Category Points Breakdown (for non-admins) */}
-      {!isUserAdmin && profile && (
-        <CategoryPointsBreakdown userId={profile.id} />
       )}
 
       {/* Main content grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Upcoming Events */}
-        <div className="lg:col-span-2 card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4 lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Calendar className="w-5 h-5 text-primary" />
@@ -307,7 +416,7 @@ export default function DashboardPage() {
                 <Link
                   key={event.id}
                   href="/calendar"
-                  className="flex gap-4 p-4 rounded-lg bg-dark-100 border border-primary/10 hover:border-primary/30 transition-all hover-glow group"
+                  className="group flex gap-3 rounded-xl border border-border bg-muted/40 p-3 transition-colors hover:border-primary/40 hover-glow sm:gap-4 sm:p-4"
                 >
                   <div className="flex-shrink-0">
                     <div className="w-12 h-12 rounded-lg bg-primary/20 flex flex-col items-center justify-center">
@@ -342,14 +451,14 @@ export default function DashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <div className="card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4">
           <h2 className="text-xl font-bold text-foreground">Quick Actions</h2>
           <div className="space-y-3">
             {canManageContent && (
               <>
                 <Link
                   href="/announcements"
-                  className="w-full px-4 py-3 bg-gradient-to-r from-primary to-secondary rounded-lg text-dark-300 font-semibold hover:shadow-neon-cyan transition-all flex items-center justify-center gap-2"
+                  className="w-full px-4 py-3 bg-primary rounded-lg text-primary-foreground font-semibold hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
                 >
                   <Megaphone className="w-4 h-4" />
                   Post Announcement
@@ -370,20 +479,13 @@ export default function DashboardPage() {
               <Briefcase className="w-4 h-4" />
               Browse Opportunities
             </Link>
-            <Link
-              href="/attendance"
-              className="w-full px-4 py-3 border-2 border-green-500/30 rounded-lg text-green-400 hover:bg-green-500/10 transition-all flex items-center justify-center gap-2"
-            >
-              <Trophy className="w-4 h-4" />
-              Check In to Event
-            </Link>
           </div>
         </div>
       </div>
 
       {/* My Tasks */}
       {myTasks.length > 0 && (
-        <div className="card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <CheckSquare className="w-5 h-5 text-primary" />
@@ -424,7 +526,7 @@ export default function DashboardPage() {
       {/* Recent Announcements & Opportunities */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Announcements */}
-        <div className="card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Megaphone className="w-5 h-5 text-primary" />
@@ -462,7 +564,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Recent Opportunities */}
-        <div className="card-glow p-6 space-y-4">
+        <div className="portal-panel space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Briefcase className="w-5 h-5 text-primary" />

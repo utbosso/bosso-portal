@@ -1,6 +1,10 @@
 export type UserRole = 'general_member' | 'analyst' | 'project_manager' | 'board_member' | 'admin'
 export type RoleScopeMode = 'minimum_role' | 'exact_role'
 export type AccountStatus = 'pending_approval' | 'approved' | 'active' | 'rejected'
+export type TermStatus = 'draft' | 'upcoming' | 'current' | 'archived'
+export type MembershipStatus = 'pending_dues' | 'pending_approval' | 'active' | 'declined' | 'exempt'
+export type DuesStatus = 'unpaid' | 'paid' | 'exempt'
+export type PointRequestStatus = 'pending' | 'needs_info' | 'approved' | 'declined'
 
 export type Database = {
   public: {
@@ -279,9 +283,127 @@ export type Database = {
           },
         ]
       }
+      academic_terms: {
+        Row: AcademicTerm
+        Insert: Omit<AcademicTerm, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<AcademicTerm>
+        Relationships: []
+      }
+      member_term_memberships: {
+        Row: MemberTermMembership
+        Insert: Omit<MemberTermMembership, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<MemberTermMembership>
+        Relationships: []
+      }
+      term_member_groups: {
+        Row: TermMemberGroup
+        Insert: Omit<TermMemberGroup, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<TermMemberGroup>
+        Relationships: []
+      }
+      term_member_group_members: {
+        Row: TermMemberGroupMember
+        Insert: Omit<TermMemberGroupMember, 'added_at'> & { added_at?: string }
+        Update: Partial<TermMemberGroupMember>
+        Relationships: []
+      }
+      dues_payments: {
+        Row: DuesPayment
+        Insert: Omit<DuesPayment, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<DuesPayment>
+        Relationships: []
+      }
+      dues_payment_terms: {
+        Row: DuesPaymentTerm
+        Insert: Omit<DuesPaymentTerm, 'created_at'> & { created_at?: string }
+        Update: Partial<DuesPaymentTerm>
+        Relationships: []
+      }
+      position_codes: {
+        Row: PositionCode
+        Insert: Omit<PositionCode, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<PositionCode>
+        Relationships: []
+      }
+      position_code_claims: {
+        Row: PositionCodeClaim
+        Insert: Omit<PositionCodeClaim, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<PositionCodeClaim>
+        Relationships: []
+      }
+      term_point_rules: {
+        Row: TermPointRule
+        Insert: Omit<TermPointRule, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<TermPointRule>
+        Relationships: []
+      }
+      point_ledger: {
+        Row: PointLedgerEntry
+        Insert: Omit<PointLedgerEntry, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<PointLedgerEntry>
+        Relationships: []
+      }
+      point_requests: {
+        Row: PointRequest
+        Insert: Omit<PointRequest, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<PointRequest>
+        Relationships: []
+      }
+      point_request_attachments: {
+        Row: PointRequestAttachment
+        Insert: Omit<PointRequestAttachment, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<PointRequestAttachment>
+        Relationships: []
+      }
+      task_status_history: {
+        Row: TaskStatusHistory
+        Insert: Omit<TaskStatusHistory, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<TaskStatusHistory>
+        Relationships: []
+      }
+      semester_rollovers: {
+        Row: SemesterRollover
+        Insert: Omit<SemesterRollover, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<SemesterRollover>
+        Relationships: []
+      }
     }
-    Views: Record<string, never>
-    Functions: Record<string, never>
+    Views: {
+      member_term_point_summary: {
+        Row: MemberTermPointSummary
+        Relationships: []
+      }
+    }
+    Functions: {
+      get_portal_access_status: {
+        Args: Record<PropertyKey, never>
+        Returns: PortalAccessStatus[]
+      }
+      [key: string]: {
+        Args: Record<string, unknown>
+        Returns: unknown
+      }
+    }
     Enums: {
       user_role: UserRole
     }
@@ -329,6 +451,13 @@ export interface Announcement {
   attachment_path?: string | null
   attachment_name?: string | null
   attachment_mime_type?: string | null
+  reference_links?: Array<{
+    label: string
+    url: string
+  }>
+  term_id?: string | null
+  archived_at?: string | null
+  updated_at?: string
   // Optional related author profile when joined in queries
   author?: Profile
 }
@@ -389,6 +518,9 @@ export interface Event {
   event_category?: EventCategory | null
   event_type?: EventType | null
   custom_event_type?: string | null
+  term_id?: string | null
+  archived_at?: string | null
+  updated_at?: string
 }
 
 export interface DocumentItem {
@@ -402,6 +534,9 @@ export interface DocumentItem {
   is_restricted: boolean
   created_by: string
   created_at?: string
+  term_id?: string | null
+  archived_at?: string | null
+  updated_at?: string
 }
 
 export interface DocumentAccess {
@@ -449,6 +584,13 @@ export interface Task {
   // Role-based assignment fields
   group_task_id?: string | null  // Links tasks created from same role assignment
   assigned_to_role?: UserRole | null  // The role this task was assigned to
+  reference_links?: Array<{
+    label: string
+    url: string
+  }>
+  term_id?: string | null
+  archived_at?: string | null
+  updated_at?: string
 }
 
 export interface TaskUpdate {
@@ -518,6 +660,7 @@ export interface AttendanceRecord {
   points_earned: number
   event_category?: EventCategory | null
   created_at?: string
+  term_id?: string | null
 }
 
 export interface CustomEventType {
@@ -590,4 +733,203 @@ export interface FeedbackSubmission {
   admin_notes: string | null
   created_at?: string
   submitter?: Pick<Profile, 'id' | 'full_name' | 'email'> | null
+  term_id?: string | null
+  archived_at?: string | null
+  updated_at?: string
+}
+
+export interface AcademicTerm {
+  id: string
+  name: string
+  slug: string
+  academic_year: string
+  semester: 'fall' | 'spring' | 'summer'
+  starts_on: string
+  ends_on: string
+  renewal_opens_at: string | null
+  status: TermStatus
+  points_rules_status: 'draft' | 'published'
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MemberTermMembership {
+  id: string
+  term_id: string
+  user_id: string
+  status: MembershipStatus
+  dues_status: DuesStatus
+  position_role: UserRole
+  is_returning: boolean
+  claimed_at: string | null
+  approved_at: string | null
+  approved_by: string | null
+  admin_note: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TermMemberGroup {
+  id: string
+  term_id: string
+  name: string
+  description: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TermMemberGroupMember {
+  group_id: string
+  user_id: string
+  added_at: string
+}
+
+export interface DuesPayment {
+  id: string
+  user_id: string
+  amount_cents: number | null
+  payment_reference: string | null
+  paid_at: string
+  recorded_by: string | null
+  note: string | null
+  created_at: string
+}
+
+export interface DuesPaymentTerm {
+  payment_id: string
+  term_id: string
+  created_at: string
+}
+
+export interface PositionCode {
+  id: string
+  term_id: string
+  label: string
+  code_hash: string
+  intended_role: UserRole
+  max_uses: number | null
+  expires_at: string | null
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+}
+
+export interface PositionCodeClaim {
+  id: string
+  term_id: string
+  membership_id: string
+  code_id: string
+  user_id: string
+  requested_role: UserRole
+  status: 'pending' | 'approved' | 'declined'
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_note: string | null
+  created_at: string
+}
+
+export interface TermPointRule {
+  id: string
+  term_id: string
+  category: EventCategory
+  label: string
+  minimum_points: number
+  target_points: number | null
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type PointSourceType = 'attendance' | 'adjustment' | 'task' | 'request' | 'rollover' | 'admin'
+
+export interface PointLedgerEntry {
+  id: string
+  term_id: string
+  user_id: string
+  category: EventCategory
+  points: number
+  source_type: PointSourceType
+  source_id: string | null
+  note: string | null
+  awarded_by: string | null
+  occurred_at: string
+  created_at: string
+  voided_at: string | null
+  voided_by: string | null
+}
+
+export interface PointRequest {
+  id: string
+  term_id: string
+  user_id: string
+  submitted_by: string | null
+  event_id: string | null
+  requested_points: number
+  suggested_category: EventCategory
+  note: string
+  status: PointRequestStatus
+  final_points: number | null
+  final_category: EventCategory | null
+  reviewer_note: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PointRequestAttachment {
+  id: string
+  request_id: string
+  user_id: string
+  storage_path: string
+  file_name: string
+  mime_type: string
+  file_size_bytes: number
+  created_at: string
+}
+
+export interface TaskStatusHistory {
+  id: string
+  task_id: string
+  from_status: string | null
+  to_status: string
+  changed_by: string | null
+  note: string | null
+  created_at: string
+}
+
+export interface SemesterRollover {
+  id: string
+  from_term_id: string | null
+  to_term_id: string
+  status: 'started' | 'completed' | 'failed'
+  configuration: Record<string, unknown>
+  result_summary: Record<string, unknown>
+  run_by: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface MemberTermPointSummary {
+  term_id: string
+  user_id: string
+  total_points: number
+  membership_points: number
+  professional_education_points: number
+  social_points: number
+  philanthropy_points: number
+  entry_count: number
+}
+
+export interface PortalAccessStatus {
+  term_id: string | null
+  term_name: string | null
+  term_status: TermStatus | null
+  membership_status: MembershipStatus | null
+  dues_status: DuesStatus | null
+  position_role: UserRole | null
+  access_granted: boolean
+  reason: 'setup_required' | 'admin_exempt' | 'renewal_required' | 'dues_required' | 'pending_approval' | 'declined' | 'active'
 }

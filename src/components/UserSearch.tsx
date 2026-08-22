@@ -18,6 +18,7 @@ interface UserSearchProps {
   multiple?: boolean
   disabled?: boolean
   excludeRoles?: string[]
+  selectionDisplayLimit?: number
 }
 
 export default function UserSearch({
@@ -28,6 +29,7 @@ export default function UserSearch({
   multiple = false,
   disabled = false,
   excludeRoles = [],
+  selectionDisplayLimit = 8,
 }: UserSearchProps) {
   const [search, setSearch] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -49,6 +51,12 @@ export default function UserSearch({
   const selectedUsers = multiple
     ? users.filter((u) => (value as string[]).includes(u.id))
     : users.find((u) => u.id === value)
+  const visibleSelectedUsers = multiple
+    ? (selectedUsers as UserOption[]).slice(0, selectionDisplayLimit)
+    : []
+  const hiddenSelectionCount = multiple
+    ? Math.max(0, (selectedUsers as UserOption[]).length - visibleSelectedUsers.length)
+    : 0
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -93,7 +101,7 @@ export default function UserSearch({
       {/* Selected users display (for multiple) */}
       {multiple && (selectedUsers as UserOption[]).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
-          {(selectedUsers as UserOption[]).map((user) => (
+          {visibleSelectedUsers.map((user) => (
             <span
               key={user.id}
               className="inline-flex items-center gap-1 px-2 py-1 bg-primary/20 text-primary text-xs rounded-md"
@@ -108,6 +116,11 @@ export default function UserSearch({
               </button>
             </span>
           ))}
+          {hiddenSelectionCount > 0 && (
+            <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              +{hiddenSelectionCount} more
+            </span>
+          )}
         </div>
       )}
 
@@ -130,13 +143,13 @@ export default function UserSearch({
           }}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full pl-9 pr-8 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="portal-input w-full bg-dark-100 pl-9 pr-10"
         />
         {((multiple && (value as string[]).length > 0) || (!multiple && value)) && (
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            className="absolute right-1 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground"
           >
             <X className="w-4 h-4" />
           </button>
@@ -145,7 +158,7 @@ export default function UserSearch({
 
       {/* Dropdown */}
       {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-dark-200 border border-primary/20 rounded-md shadow-lg max-h-48 overflow-y-auto">
+        <div className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-primary/20 bg-dark-200 shadow-lg">
           {filteredUsers.length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted-foreground">
               No users found
@@ -160,15 +173,15 @@ export default function UserSearch({
                   key={user.id}
                   type="button"
                   onClick={() => handleSelect(user.id)}
-                  className={`w-full px-3 py-2 text-left text-sm hover:bg-primary/10 flex items-center justify-between ${
+                  className={`flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-primary/10 ${
                     isSelected ? 'bg-primary/5' : ''
                   }`}
                 >
-                  <div>
-                    <span className="text-foreground">{user.full_name}</span>
+                  <div className="min-w-0">
+                    <span className="break-words text-foreground">{user.full_name}</span>
                     {user.role && (
                       <span className="ml-2 text-xs text-muted-foreground">
-                        ({user.role.replace('_', ' ')})
+                        ({user.role.replaceAll('_', ' ')})
                       </span>
                     )}
                   </div>

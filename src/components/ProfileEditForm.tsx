@@ -187,7 +187,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
           <button
             type="button"
             onClick={addWorkExperience}
-            className="px-3 py-1.5 text-xs bg-primary/20 text-primary rounded-md hover:bg-primary/30 transition-colors flex items-center gap-1"
+            className="portal-button-secondary small"
           >
             <Plus className="w-3 h-3" />
             Add Experience
@@ -210,7 +210,8 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                   <button
                     type="button"
                     onClick={() => removeWorkExperience(exp.id)}
-                    className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                    className="portal-icon-button border-0 text-destructive hover:text-destructive"
+                    aria-label={`Remove experience ${index + 1}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -223,7 +224,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                       type="text"
                       value={exp.company}
                       onChange={(e) => updateWorkExperience(exp.id, 'company', e.target.value)}
-                      className="w-full px-3 py-2 bg-muted rounded-md text-foreground border border-primary/20 focus:border-primary focus:outline-none transition-colors text-sm"
+                      className="portal-input w-full bg-muted"
                       placeholder="Company name"
                     />
                   </div>
@@ -233,7 +234,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                       type="text"
                       value={exp.title}
                       onChange={(e) => updateWorkExperience(exp.id, 'title', e.target.value)}
-                      className="w-full px-3 py-2 bg-muted rounded-md text-foreground border border-primary/20 focus:border-primary focus:outline-none transition-colors text-sm"
+                      className="portal-input w-full bg-muted"
                       placeholder="Your role"
                     />
                   </div>
@@ -243,7 +244,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                       type="month"
                       value={exp.start_date}
                       onChange={(e) => updateWorkExperience(exp.id, 'start_date', e.target.value)}
-                      className="w-full px-3 py-2 bg-muted rounded-md text-foreground border border-primary/20 focus:border-primary focus:outline-none transition-colors text-sm"
+                      className="portal-input w-full bg-muted"
                     />
                   </div>
                   <div className="space-y-1">
@@ -253,7 +254,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                       value={exp.end_date || ''}
                       onChange={(e) => updateWorkExperience(exp.id, 'end_date', e.target.value || null)}
                       disabled={exp.is_current}
-                      className="w-full px-3 py-2 bg-muted rounded-md text-foreground border border-primary/20 focus:border-primary focus:outline-none transition-colors text-sm disabled:opacity-50"
+                      className="portal-input w-full bg-muted disabled:opacity-50"
                     />
                   </div>
                 </div>
@@ -282,7 +283,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
                     value={exp.description || ''}
                     onChange={(e) => updateWorkExperience(exp.id, 'description', e.target.value || null)}
                     rows={2}
-                    className="w-full px-3 py-2 bg-muted rounded-md text-foreground border border-primary/20 focus:border-primary focus:outline-none transition-colors text-sm resize-none"
+                    className="portal-input w-full resize-none bg-muted"
                     placeholder="Brief description of your role..."
                   />
                 </div>
@@ -293,11 +294,11 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3 pt-2">
+      <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
         <button
           type="submit"
           disabled={loading}
-          className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="portal-button justify-center sm:order-2"
         >
           {loading ? (
             <>
@@ -315,7 +316,7 @@ export default function ProfileEditForm({ profile, onSuccess, onCancel }: Profil
           type="button"
           onClick={onCancel}
           disabled={loading}
-          className="px-4 py-3 bg-muted text-foreground rounded-lg font-medium hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="portal-button-secondary justify-center"
         >
           <X className="w-4 h-4" />
           Cancel

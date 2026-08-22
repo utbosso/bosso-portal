@@ -1,22 +1,36 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
+import { usePortalAccess } from '@/hooks/usePortalAccess'
 import { createClient } from '@/lib/supabase/client'
 import type { Announcement, AnnouncementRead, Profile } from '@/types/database.types'
-import { Megaphone, PlusCircle, Trash2, Mail, Paperclip } from 'lucide-react'
-import { isAdmin } from '@/lib/admin'
+import { Megaphone, PlusCircle, Trash2, Mail, Paperclip, Search, X } from 'lucide-react'
 import RichTextEditor from '@/components/RichTextEditor'
-import UserSearch, { type UserOption } from '@/components/UserSearch'
+import type { UserOption } from '@/components/UserSearch'
+import MemberGroupPicker from '@/components/MemberGroupPicker'
+import SectionPageHeader from '@/components/SectionPageHeader'
+import ReferenceLinksEditor from '@/components/ReferenceLinksEditor'
+import {
+  appendAnnouncementFallbackLinks,
+  extractAnnouncementFallbackLinks,
+  isMissingReferenceLinksColumn,
+  normalizeReferenceLinks,
+  type ReferenceLink,
+} from '@/lib/reference-links'
 import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
 import {
   canAccessAudience,
-  filterUsersByAudience,
   getRoleScopeLabel,
   toRoleScopePayload,
   type RoleScopeOption,
 } from '@/lib/role-scope'
+import {
+  fetchCurrentMemberDirectory,
+  resolveCommunicationRecipients,
+  type CommunicationMemberGroup,
+} from '@/lib/communication-recipients'
 
 const supabase = createClient()
 
@@ -29,7 +43,8 @@ type AnnouncementWithAuthor = Announcement & {
 type AudienceMode = 'role' | 'people'
 
 export default function AnnouncementsPage() {
-  const { profile, hasMinimumRole } = useAuth()
+  const { user, profile, hasMinimumRole } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
   const [announcements, setAnnouncements] = useState<AnnouncementWithAuthor[]>([])
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
@@ -39,12 +54,29 @@ export default function AnnouncementsPage() {
   const [roleScope, setRoleScope] = useState<RoleScopeOption>('all')
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])
+  const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const [referenceLinks, setReferenceLinks] = useState<ReferenceLink[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
   const canPost = hasMinimumRole('project_manager')
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
+
+  const visibleAnnouncements = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return announcements
+    return announcements.filter((announcement) =>
+      [
+        announcement.title,
+        announcementBodyToPlainText(announcement.body),
+        announcement.author?.full_name,
+        announcement.attachment_name,
+        ...(announcement.reference_links || []).flatMap((link) => [link.label, link.url]),
+      ].some((value) => value?.toLowerCase().includes(normalized))
+    )
+  }, [announcements, query])
 
   const canSeeAnnouncement = (item: Announcement) => {
     return canAccessAudience(
@@ -59,6 +91,7 @@ export default function AnnouncementsPage() {
   const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_')
 
   const fetchAnnouncements = async () => {
+    if (accessLoading) return
     setLoading(true)
     setError(null)
     try {
@@ -69,10 +102,7 @@ export default function AnnouncementsPage() {
             .eq('user_id', profile.id)
         : Promise.resolve({ data: [] as AnnouncementRead[], error: null })
 
-      const { data, error } = await supabase
-        .from('announcements')
-        .select(
-          `
+      const baseSelect = `
           id,
           title,
           body,
@@ -85,16 +115,35 @@ export default function AnnouncementsPage() {
           attachment_name,
           attachment_mime_type,
           author:profiles!announcements_created_by_fkey(id, full_name, role)
-        `
-        )
-        .order('created_at', { ascending: false })
+      `
+      let announcementsQuery: any = supabase
+        .from('announcements')
+        .select(`${baseSelect}, reference_links`)
+      if (schemaReady && access?.term_id) {
+        announcementsQuery = announcementsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      }
+      let announcementsResult = await announcementsQuery.order('created_at', { ascending: false })
+
+      if (isMissingReferenceLinksColumn(announcementsResult.error)) {
+        let fallbackQuery: any = supabase.from('announcements').select(baseSelect)
+        if (schemaReady && access?.term_id) {
+          fallbackQuery = fallbackQuery.eq('term_id', access.term_id).is('archived_at', null)
+        }
+        announcementsResult = await fallbackQuery.order('created_at', { ascending: false })
+      }
+
+      const { data, error } = announcementsResult
 
       if (error) throw error
       const readsResult = await readsPromise
       if (readsResult.error) throw readsResult.error
 
       const readIds = new Set((readsResult.data as any[]).map((r) => r.announcement_id))
-      const rows = (data as any as AnnouncementWithAuthor[]) ?? []
+      const rows = ((data as any as AnnouncementWithAuthor[]) ?? []).map((row) => {
+        const fallbackLinks = extractAnnouncementFallbackLinks(row.body)
+        const structuredLinks = Array.isArray(row.reference_links) ? row.reference_links : []
+        return { ...row, body: fallbackLinks.body, reference_links: structuredLinks.length ? structuredLinks : fallbackLinks.links }
+      })
       const filteredRows = rows
         .filter(canSeeAnnouncement)
         .map((row) => ({ ...row, unread: !readIds.has(row.id) }))
@@ -130,27 +179,24 @@ export default function AnnouncementsPage() {
   useEffect(() => {
     fetchAnnouncements()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.id, profile?.role])
+  }, [profile?.id, profile?.role, access?.term_id, schemaReady, accessLoading])
 
   useEffect(() => {
     const fetchPeopleOptions = async () => {
       if (!canPost) return
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('account_status', 'active')
-        .order('full_name', { ascending: true })
-
-      if (error) {
-        console.error('Error loading members for targeting', error)
-        return
+      try {
+        const { members, groups } = await fetchCurrentMemberDirectory()
+        setPeopleOptions(members)
+        setMemberGroups(groups)
+      } catch (directoryError) {
+        console.error('Error loading current-semester members for targeting', directoryError)
+        setPeopleOptions([])
+        setMemberGroups([])
       }
-
-      setPeopleOptions((data ?? []) as UserOption[])
     }
 
-    fetchPeopleOptions()
-  }, [canPost])
+    void fetchPeopleOptions()
+  }, [access?.term_id, canPost])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -168,6 +214,7 @@ export default function AnnouncementsPage() {
     }
 
     try {
+      const normalizedLinks = normalizeReferenceLinks(referenceLinks)
       const scopePayload = toRoleScopePayload(roleScope)
       const payload = {
         title,
@@ -176,13 +223,26 @@ export default function AnnouncementsPage() {
         role_scope: audienceMode === 'role' ? scopePayload.roleScope : null,
         role_scope_mode: audienceMode === 'role' ? scopePayload.roleScopeMode : null,
         target_user_ids: audienceMode === 'people' ? selectedUserIds : null,
+        reference_links: normalizedLinks,
+        ...(schemaReady && access?.term_id ? { term_id: access.term_id, archived_at: null } : {}),
       }
 
-      const { data: createdAnnouncement, error } = await supabase
+      let createResult = await (supabase as any)
         .from('announcements')
         .insert(payload)
         .select('id')
         .single()
+
+      if (isMissingReferenceLinksColumn(createResult.error)) {
+        const { reference_links: _referenceLinks, ...fallbackPayload } = payload
+        createResult = await (supabase as any)
+          .from('announcements')
+          .insert({ ...fallbackPayload, body: appendAnnouncementFallbackLinks(body, normalizedLinks) })
+          .select('id')
+          .single()
+      }
+
+      const { data: createdAnnouncement, error } = createResult
 
       if (error) throw error
 
@@ -220,6 +280,7 @@ export default function AnnouncementsPage() {
       setRoleScope('all')
       setSelectedUserIds([])
       setAttachmentFile(null)
+      setReferenceLinks([])
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -227,7 +288,7 @@ export default function AnnouncementsPage() {
       await fetchAnnouncements()
     } catch (err: any) {
       console.error('Error creating announcement:', err)
-      setError('Failed to create announcement. You may not have permission.')
+      setError(err instanceof Error && /link|https?:\/\//i.test(err.message) ? err.message : 'Failed to create announcement. You may not have permission.')
     }
   }
 
@@ -239,19 +300,9 @@ export default function AnnouncementsPage() {
     if (!confirmDelete) return
 
     try {
-      if (announcement.attachment_path) {
-        const { error: removeError } = await supabase.storage
-          .from('announcement-attachments')
-          .remove([announcement.attachment_path])
-        if (removeError) {
-          console.warn('Failed to remove attachment during delete', removeError)
-        }
-      }
-
-      const { error } = await supabase
-        .from('announcements')
-        .delete()
-        .eq('id', announcement.id)
+      const { error } = schemaReady
+        ? await (supabase as any).from('announcements').update({ archived_at: new Date().toISOString() }).eq('id', announcement.id)
+        : await supabase.from('announcements').delete().eq('id', announcement.id)
 
       if (error) throw error
       await fetchAnnouncements()
@@ -271,35 +322,31 @@ export default function AnnouncementsPage() {
 
   const sendAnnouncementEmail = async (announcement: AnnouncementWithAuthor) => {
     try {
-      // Fetch all eligible users based on role_scope
-      let query = supabase
-        .from('profiles')
-        .select('id, email, full_name, role')
-        .eq('account_status', 'active')
-
-      const { data: users, error } = await query
-
-      if (error) throw error
-
-      const eligibleUsers = filterUsersByAudience(
-        users || [],
-        announcement.role_scope,
-        announcement.role_scope_mode,
-        announcement.target_user_ids
-      )
+      const { recipients, termName } = await resolveCommunicationRecipients({
+        roleScope: announcement.role_scope,
+        roleScopeMode: announcement.role_scope_mode,
+        targetUserIds: announcement.target_user_ids,
+      })
+      if (recipients.length === 0) {
+        alert('No approved members in the current semester match this audience.')
+        return
+      }
 
       // Get list of email addresses for BCC
-      const bccEmails = eligibleUsers.map(u => u.email).join(',')
+      const bccEmails = recipients.map((recipient) => recipient.email).join(',')
 
       // Create email subject and body
       const subject = encodeURIComponent(`BOSSO Announcement: ${announcement.title}`)
-      const emailBody = encodeURIComponent(`${announcementBodyToPlainText(announcement.body)}
+      const emailLinks = (announcement.reference_links || []).map((link) => `${link.label}: ${link.url}`).join('\n')
+      const emailBody = encodeURIComponent(`${announcementBodyToPlainText(announcement.body)}${emailLinks ? `\n\nLinks:\n${emailLinks}` : ''}
 
 ---
 Posted by: ${announcement.author?.full_name || 'BOSSO Team'}
 Target Audience: ${announcement.target_user_ids?.length
   ? `${announcement.target_user_ids.length} selected member(s)`
   : getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
+Semester: ${termName}
+Recipients: ${recipients.length} current portal member(s)
 Date: ${new Date(announcement.created_at).toLocaleString()}
 
 View on portal: ${window.location.origin}/announcements/${announcement.id}`)
@@ -310,186 +357,105 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
       window.open(gmailUrl, '_blank')
     } catch (error) {
       console.error('Error preparing announcement email:', error)
-      alert('Failed to prepare email. Please try again.')
+      alert(error instanceof Error ? error.message : 'Failed to prepare email. Please try again.')
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <Megaphone className="w-7 h-7 text-primary" />
-            Announcements
-          </h1>
-        </div>
-
-        {canPost && (
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Organization"
+        title="Announcements"
+        description="A focused semester feed for decisions, deadlines, and member updates."
+        icon={Megaphone}
+        actions={canPost ? (
           <button
             type="button"
-            onClick={() => setFormOpen((v) => !v)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition whitespace-nowrap"
+            onClick={() => setFormOpen(true)}
+            className="portal-button"
           >
             <PlusCircle className="w-4 h-4" />
-            <span className="hidden sm:inline">{formOpen ? 'Close form' : 'New announcement'}</span>
-            <span className="sm:hidden">{formOpen ? 'Close' : 'New'}</span>
+            New announcement
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
+
+      {error && <div className="portal-alert-error">{error}</div>}
 
       {canPost && formOpen && (
-        <form
-          onSubmit={handleCreate}
-          className="card-glow p-5 space-y-4"
-        >
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Title
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              placeholder="Example: BOSSO kickoff meeting this Thursday"
-            />
-          </div>
-
-          <RichTextEditor
-            id="announcement-message"
-            label="Message"
-            value={body}
-            onChange={setBody}
-            required
-            minHeightClassName="min-h-[180px]"
-            placeholder="Share details, location, expectations, or links."
-          />
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Visible to
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setAudienceMode('role')}
-                className={`px-3 py-1.5 rounded-md text-xs border ${
-                  audienceMode === 'role'
-                    ? 'bg-primary/20 text-primary border-primary/40'
-                    : 'bg-dark-100 text-muted-foreground border-primary/20'
-                }`}
-              >
-                Role Group
-              </button>
-              <button
-                type="button"
-                onClick={() => setAudienceMode('people')}
-                className={`px-3 py-1.5 rounded-md text-xs border ${
-                  audienceMode === 'people'
-                    ? 'bg-primary/20 text-primary border-primary/40'
-                    : 'bg-dark-100 text-muted-foreground border-primary/20'
-                }`}
-              >
-                Specific People
-              </button>
+        <div className="portal-modal-backdrop" onMouseDown={() => setFormOpen(false)}>
+          <form onSubmit={handleCreate} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-3xl">
+            <div className="portal-form-header">
+              <div><p className="portal-eyebrow">New announcement</p><h2>Publish a member update</h2><p>Write the update first, then choose exactly who should receive it.</p></div>
+              <button type="button" onClick={() => setFormOpen(false)} className="portal-icon-button"><X className="h-5 w-5" /></button>
             </div>
-            {audienceMode === 'role' ? (
-              <select
-                value={roleScope}
-                onChange={(e) => setRoleScope(e.target.value as any)}
-                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              >
-                <option value="all">All BOSSO members</option>
-                <option value="general_member">General Members only</option>
-                <option value="analyst">Analysts and above</option>
-                <option value="analyst_only">Analysts only</option>
-                <option value="project_manager">PMs and Board</option>
-                <option value="board_member">Board only</option>
-              </select>
-            ) : (
-              <div className="space-y-2">
-                <UserSearch
-                  users={peopleOptions}
-                  value={selectedUserIds}
-                  onChange={(value) => setSelectedUserIds(value as string[])}
-                  placeholder="Search and select members..."
-                  multiple
-                />
-                <p className="text-xs text-muted-foreground">
-                  {selectedUserIds.length} member(s) selected
-                </p>
-              </div>
-            )}
-          </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Attachment (optional)
-            </label>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf,image/*"
-              onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
-              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-dark-300 hover:file:opacity-90"
-            />
-            <p className="text-xs text-muted-foreground">
-              Upload a PDF or image to include with this announcement.
-            </p>
-          </div>
+            <div className="space-y-5">
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>1</span><div><h3>Announcement</h3><p>Use a clear title and put the action or deadline near the top.</p></div></div>
+                <div className="space-y-4">
+                  <label><span className="portal-label">Title</span><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required className="portal-input w-full" placeholder="Example: Fall kickoff meeting — RSVP by Thursday" /></label>
+                  <RichTextEditor id="announcement-message" label="Message" value={body} onChange={setBody} required minHeightClassName="min-h-[210px]" placeholder="Share the key update, what members need to do, and when." />
+                </div>
+              </section>
 
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>2</span><div><h3>Audience</h3><p>Send only to approved members in the current semester.</p></div></div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button type="button" onClick={() => setAudienceMode('role')} className={`portal-choice-card ${audienceMode === 'role' ? 'selected' : ''}`}><span className="mt-1 h-3 w-3 rounded-full border-2 border-primary p-0.5">{audienceMode === 'role' && <span className="block h-full w-full rounded-full bg-primary" />}</span><span><strong className="block text-sm">Position group</strong><span className="mt-1 block text-xs text-muted-foreground">Choose a role-based audience.</span></span></button>
+                  <button type="button" onClick={() => setAudienceMode('people')} className={`portal-choice-card ${audienceMode === 'people' ? 'selected' : ''}`}><span className="mt-1 h-3 w-3 rounded-full border-2 border-primary p-0.5">{audienceMode === 'people' && <span className="block h-full w-full rounded-full bg-primary" />}</span><span><strong className="block text-sm">People or custom group</strong><span className="mt-1 block text-xs text-muted-foreground">Search names or reuse a semester team.</span></span></button>
+                </div>
+                <div className="mt-4">
+                  {audienceMode === 'role' ? <label><span className="portal-label">Position group</span><select value={roleScope} onChange={(e) => setRoleScope(e.target.value as any)} className="portal-input w-full"><option value="all">All BOSSO members</option><option value="general_member">General Members only</option><option value="analyst">Analysts and above</option><option value="analyst_only">Analysts only</option><option value="project_manager">PMs and Board</option><option value="board_member">Board only</option></select></label> : <MemberGroupPicker users={peopleOptions} groups={memberGroups} value={selectedUserIds} onChange={setSelectedUserIds} placeholder="Search approved current-semester members..." />}
+                </div>
+              </section>
 
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setFormOpen(false)}
-              className="px-4 py-2 text-sm rounded-md border border-primary/30 text-muted-foreground hover:bg-dark-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm rounded-md bg-primary text-dark-300 font-medium hover:opacity-90"
-            >
-              Post announcement
-            </button>
-          </div>
-        </form>
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>3</span><div><h3>Resources <span className="font-normal text-muted-foreground">(optional)</span></h3><p>Add useful destinations or one supporting PDF/image.</p></div></div>
+                <ReferenceLinksEditor value={referenceLinks} onChange={setReferenceLinks} description="Add registration forms, meeting links, shared documents, or relevant pages." />
+                <div className="mt-5 border-t border-border pt-5"><p className="portal-label">File attachment <span className="font-normal text-muted-foreground">(optional)</span></p><input ref={fileInputRef} type="file" accept="application/pdf,image/*" onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)} className="portal-input w-full file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-primary-foreground" /></div>
+              </section>
+            </div>
+
+            <div className="portal-form-actions"><button type="button" onClick={() => setFormOpen(false)} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><Megaphone className="h-4 w-4" /> Publish announcement</button></div>
+          </form>
+        </div>
       )}
 
-      <div className="space-y-3">
+      <div className="portal-panel flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full max-w-xl">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} className="portal-input w-full pl-9" placeholder="Search announcements, authors, or attachments" />
+        </div>
+        <p className="text-xs text-muted-foreground">{visibleAnnouncements.length} of {announcements.length} announcements</p>
+      </div>
+
+      <div className="portal-panel p-0 sm:p-0">
         {loading && (
-          <div className="text-sm text-muted-foreground">
+          <div className="portal-loading">
             Loading announcements...
           </div>
         )}
 
-        {!loading && announcements.length === 0 && (
-          <div className="text-sm text-muted-foreground">
-            No announcements yet.
+        {!loading && visibleAnnouncements.length === 0 && (
+          <div className="portal-empty compact">
+            <Megaphone className="h-8 w-8" />
+            <h3>{announcements.length === 0 ? 'No announcements yet' : 'No matching announcements'}</h3>
+            <p>{announcements.length === 0 ? 'Semester updates will appear here when they are published.' : 'Try a broader search term.'}</p>
           </div>
         )}
 
-        {!loading && announcements.map((a) => (
+        {!loading && visibleAnnouncements.map((a) => (
           <div
             key={a.id}
-            className="card-glow p-4 space-y-2 hover:border-primary/60 transition"
+            className="flex flex-col gap-3 border-b border-border p-5 transition-colors last:border-b-0 hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between sm:gap-5"
           >
-            <Link href={`/announcements/${a.id}`} className="block">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-foreground">
-                  {a.title}
-                </h2>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {new Date(a.created_at).toLocaleString()}
-                </span>
-              </div>
+            <Link href={`/announcements/${a.id}`} className="block min-w-0 flex-1">
+              <h2 className="min-w-0 break-words text-base font-semibold text-foreground">
+                {a.title}
+              </h2>
 
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>
                   Posted by {a.author?.full_name ?? 'Unknown'}
                 </span>
@@ -498,7 +464,7 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
                     Unread
                   </span>
                 )}
-                {(a.role_scope || (a.target_user_ids?.length ?? 0) > 0) && (
+                {canManageAnnouncement(a) && (a.role_scope || (a.target_user_ids?.length ?? 0) > 0) && (
                   <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary uppercase tracking-wide text-[11px]">
                     Target: {a.target_user_ids?.length
                       ? `${a.target_user_ids.length} selected member(s)`
@@ -511,31 +477,49 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
                     {a.attachment_name}
                   </span>
                 )}
+                {(a.reference_links?.length ?? 0) > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
+                    {a.reference_links?.length} link{a.reference_links?.length === 1 ? '' : 's'}
+                  </span>
+                )}
               </div>
             </Link>
 
-            {canManageAnnouncement(a) && (
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    sendAnnouncementEmail(a)
-                  }}
-                  className="p-1.5 rounded-md bg-dark-200 hover:bg-green-500/10 text-green-400 hover:text-green-300 transition"
-                  title="Send email to members"
-                >
-                  <Mail className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={(e) => handleDelete(a, e)}
-                  className="p-1.5 rounded-md bg-dark-200 hover:bg-red-500/10 text-red-400 hover:text-red-300 transition"
-                  title="Delete announcement"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+            <div className="flex shrink-0 items-center gap-4">
+              {canPost && (
+                <div className="flex w-[5.5rem] shrink-0 items-center justify-end gap-2">
+                  {canManageAnnouncement(a) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          sendAnnouncementEmail(a)
+                        }}
+                        className="portal-icon-button"
+                        title="Send email to members"
+                        aria-label={`Send ${a.title} by email`}
+                      >
+                        <Mail className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDelete(a, e)}
+                        className="portal-icon-button text-destructive hover:text-destructive"
+                        title="Delete announcement"
+                        aria-label={`Delete ${a.title}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <span className="ml-auto whitespace-nowrap text-xs text-muted-foreground">
+                {new Date(a.created_at).toLocaleString()}
+              </span>
+            </div>
           </div>
         ))}
       </div>

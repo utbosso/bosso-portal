@@ -8,7 +8,6 @@ import {
   BookOpen,
   PlusCircle,
   Search,
-  Filter,
   ExternalLink,
   Video,
   FileText,
@@ -23,7 +22,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react'
-import { isAdmin } from '@/lib/admin'
+import SectionPageHeader from '@/components/SectionPageHeader'
 import {
   canAccessRoleScope,
   fromRoleScopePayload,
@@ -35,8 +34,8 @@ import {
 const supabase = createClient()
 
 export default function LearningHubPage() {
-  const { profile, hasMinimumRole } = useAuth()
-  const isUserAdmin = isAdmin(profile?.role)
+  const { profile, user, hasMinimumRole } = useAuth()
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
   const [resources, setResources] = useState<LearningResource[]>([])
   const [filteredResources, setFilteredResources] = useState<LearningResource[]>([])
   const [loading, setLoading] = useState(true)
@@ -274,268 +273,86 @@ export default function LearningHubPage() {
   ]
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <BookOpen className="w-7 h-7 text-primary" />
-            Learning Hub
-          </h1>
-        </div>
-        <button
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Career"
+        title="Learning hub"
+        description="Find practical guides, tools, courses, and templates shared by BOSSO members."
+        icon={BookOpen}
+        actions={<button
           onClick={() => setShowForm(true)}
-          className="px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
+          className="portal-button"
         >
           <PlusCircle className="w-4 h-4" />
-          Add Resource
-        </button>
-      </div>
+          Add resource
+        </button>}
+      />
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg text-sm">
-          {error}
-        </div>
+        <div className="portal-alert-error">{error}</div>
       )}
 
       {/* Search and Filters */}
-      <div className="card-glow p-4 space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+      <div className="portal-panel">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px] md:items-end">
+          <div className="relative">
+            <label className="portal-label">Search the library</label>
+            <Search className="absolute bottom-3 left-3 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search resources..."
+              placeholder="Search titles, descriptions, or tags"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-neon w-full !pl-10"
-              style={{ paddingLeft: '2.75rem' }}
+              className="portal-input w-full pl-10"
             />
           </div>
+          <label><span className="portal-label">Category</span><select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value as any)} className="portal-input w-full">{categories.map(cat => <option key={cat} value={cat}>{cat === 'all' ? 'All categories' : getCategoryLabel(cat)}</option>)}</select></label>
+          <label><span className="portal-label">Format</span><select value={selectedType} onChange={(e) => setSelectedType(e.target.value as any)} className="portal-input w-full">{types.map(type => <option key={type} value={type}>{type === 'all' ? 'All formats' : getTypeLabel(type)}</option>)}</select></label>
         </div>
-
-        {/* Desktop filters */}
-        <div className="hidden md:flex flex-wrap gap-2 items-center">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Category:</span>
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition ${
-                selectedCategory === cat
-                  ? 'bg-primary text-dark-300'
-                  : 'bg-dark-200 text-muted-foreground hover:bg-dark-100'
-              }`}
-            >
-              {cat === 'all' ? 'All' : getCategoryLabel(cat)}
-            </button>
-          ))}
-        </div>
-
-        <div className="hidden md:flex flex-wrap gap-2 items-center">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Type:</span>
-          {types.map(type => (
-            <button
-              key={type}
-              onClick={() => setSelectedType(type)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1 ${
-                selectedType === type
-                  ? 'bg-primary text-dark-300'
-                  : 'bg-dark-200 text-muted-foreground hover:bg-dark-100'
-              }`}
-            >
-              {type !== 'all' && getTypeIcon(type)}
-              {type === 'all' ? 'All' : getTypeLabel(type)}
-            </button>
-          ))}
-        </div>
-
-        {/* Mobile dropdowns */}
-        <div className="md:hidden grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1.5">Category</label>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value as any)}
-              className="input-neon w-full text-sm py-2"
-            >
-              {categories.map(cat => (
-                <option key={cat} value={cat}>
-                  {cat === 'all' ? 'All' : getCategoryLabel(cat)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1.5">Type</label>
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value as any)}
-              className="input-neon w-full text-sm py-2"
-            >
-              {types.map(type => (
-                <option key={type} value={type}>
-                  {type === 'all' ? 'All' : getTypeLabel(type)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <p className="mt-3 text-xs text-muted-foreground">Showing {filteredResources.length} of {resources.length} resources</p>
       </div>
 
       {/* Add/Edit Form */}
       {showForm && (
-        <div className="card-glow p-6">
-          <h2 className="text-xl font-semibold mb-4 text-gradient">
-            {editingResource ? 'Edit Resource' : 'Add New Resource'}
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium mb-1">Title *</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="input-neon w-full"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">URL</label>
-                <input
-                  type="url"
-                  value={formData.url}
-                  onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="https://..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Category *</label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value as ResourceCategory })}
-                  className="input-neon w-full"
-                  required
-                >
-                  <option value="sports_business">Sports Business</option>
-                  <option value="analytics">Analytics</option>
-                  <option value="consulting">Consulting</option>
-                  <option value="marketing">Marketing</option>
-                  <option value="finance">Finance</option>
-                  <option value="career_development">Career Development</option>
-                  <option value="technical_skills">Technical Skills</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Type *</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as ResourceType })}
-                  className="input-neon w-full"
-                  required
-                >
-                  <option value="article">Article</option>
-                  <option value="video">Video</option>
-                  <option value="course">Course</option>
-                  <option value="tool">Tool</option>
-                  <option value="guide">Guide</option>
-                  <option value="template">Template</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Visibility</label>
-                <select
-                  value={fromRoleScopePayload(formData.role_scope, formData.role_scope_mode)}
-                  onChange={(e) => {
-                    const selection = e.target.value as RoleScopeOption
-                    const scopePayload = toRoleScopePayload(selection)
-                    setFormData({
-                      ...formData,
-                      role_scope: scopePayload.roleScope,
-                      role_scope_mode: scopePayload.roleScopeMode,
-                    })
-                  }}
-                  className="input-neon w-full"
-                >
-                  <option value="all">All Members</option>
-                  <option value="analyst">Analysts & Above</option>
-                  <option value="analyst_only">Analysts Only</option>
-                  <option value="project_manager">Project Managers & Above</option>
-                  <option value="board_member">Board Members Only</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Tags (comma separated)</label>
-                <input
-                  type="text"
-                  value={formData.tags}
-                  onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="excel, data analysis, beginner"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Description</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="input-neon w-full"
-                rows={3}
-                placeholder="Brief description of the resource..."
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
-              >
-                {editingResource ? 'Update Resource' : 'Add Resource'}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelForm}
-                className="px-4 py-2 rounded-lg bg-dark-200 text-foreground text-sm font-medium hover:bg-dark-100 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+        <div className="portal-modal-backdrop" onMouseDown={handleCancelForm}>
+          <div className="portal-modal max-w-3xl" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="portal-form-header"><div><p className="portal-eyebrow">Learning hub</p><h2>{editingResource ? 'Edit resource' : 'Share a resource'}</h2><p>Give members enough context to decide whether this resource is useful before opening it.</p></div><button type="button" onClick={handleCancelForm} className="portal-icon-button"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>1</span><div><h3>Resource</h3><p>Add the link and a short explanation of what members will get from it.</p></div></div>
+                <div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Title</span><input type="text" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="portal-input w-full" required placeholder="Example: Intro to sports analytics" /></label><label><span className="portal-label">URL <span className="font-normal text-muted-foreground">(optional)</span></span><input type="url" value={formData.url} onChange={(e) => setFormData({ ...formData, url: e.target.value })} className="portal-input w-full" placeholder="https://…" /></label></div><label><span className="portal-label">Why it is useful <span className="font-normal text-muted-foreground">(optional)</span></span><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="portal-input w-full resize-none" rows={4} placeholder="What will someone learn, and who is this best for?" /></label></div>
+              </section>
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>2</span><div><h3>Organize it</h3><p>Category, format, and tags make the library easier to search.</p></div></div>
+                <div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Category</span><select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as ResourceCategory })} className="portal-input w-full" required><option value="sports_business">Sports Business</option><option value="analytics">Analytics</option><option value="consulting">Consulting</option><option value="marketing">Marketing</option><option value="finance">Finance</option><option value="career_development">Career Development</option><option value="technical_skills">Technical Skills</option><option value="other">Other</option></select></label><label><span className="portal-label">Format</span><select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value as ResourceType })} className="portal-input w-full" required><option value="article">Article</option><option value="video">Video</option><option value="course">Course</option><option value="tool">Tool</option><option value="guide">Guide</option><option value="template">Template</option><option value="other">Other</option></select></label><label className="sm:col-span-2"><span className="portal-label">Search tags <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.tags} onChange={(e) => setFormData({ ...formData, tags: e.target.value })} className="portal-input w-full" placeholder="excel, data analysis, beginner" /><span className="mt-1.5 block text-xs text-muted-foreground">Separate tags with commas.</span></label></div>
+              </section>
+              <section className="portal-form-section"><div className="portal-form-section-heading"><span>3</span><div><h3>Visibility</h3><p>Choose the lowest position level that should see this resource.</p></div></div><label><span className="portal-label">Visible to</span><select value={fromRoleScopePayload(formData.role_scope, formData.role_scope_mode)} onChange={(e) => { const scopePayload = toRoleScopePayload(e.target.value as RoleScopeOption); setFormData({ ...formData, role_scope: scopePayload.roleScope, role_scope_mode: scopePayload.roleScopeMode }) }} className="portal-input w-full"><option value="all">All Members</option><option value="analyst">Analysts & Above</option><option value="analyst_only">Analysts Only</option><option value="project_manager">Project Managers & Above</option><option value="board_member">Board Members Only</option></select></label></section>
+              <div className="portal-form-actions"><button type="button" onClick={handleCancelForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><BookOpen className="h-4 w-4" /> {editingResource ? 'Save changes' : 'Share resource'}</button></div>
+            </form>
+          </div>
         </div>
       )}
 
       {/* Resources List */}
       {loading ? (
-        <div className="text-center py-12">
+        <div className="portal-loading flex-col">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
           <p className="mt-3 text-muted-foreground">Loading resources...</p>
         </div>
       ) : filteredResources.length === 0 ? (
-        <div className="card-glow p-12 text-center">
+        <div className="portal-empty">
           <BookOpen className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground">
+          <h3>{searchQuery || selectedCategory !== 'all' || selectedType !== 'all' ? 'No matching resources' : 'No resources yet'}</h3>
+          <p>
             {searchQuery || selectedCategory !== 'all' || selectedType !== 'all'
-              ? 'No resources match your filters'
-              : 'No resources yet. Be the first to add one!'}
+              ? 'Try a broader search or clear one of the filters.'
+              : 'Be the first to share a useful guide, tool, or template.'}
           </p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredResources.map((resource) => (
-            <div key={resource.id} className="card-glow p-4 space-y-3 hover:shadow-lg transition-shadow">
+            <article key={resource.id} className="portal-panel space-y-3 transition-colors hover:border-primary/40">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 flex-1 min-w-0">
                   <div className="mt-1 text-primary">
@@ -554,15 +371,17 @@ export default function LearningHubPage() {
                   <div className="flex gap-1">
                     <button
                       onClick={() => handleEdit(resource)}
-                      className="p-1 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-primary"
+                      className="portal-icon-button"
                       title="Edit"
+                      aria-label={`Edit ${resource.title}`}
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(resource.id)}
-                      className="p-1 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-red-400"
+                      className="portal-icon-button text-destructive hover:text-destructive"
                       title="Delete"
+                      aria-label={`Delete ${resource.title}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -581,7 +400,7 @@ export default function LearningHubPage() {
                   {resource.tags.map((tag, idx) => (
                     <span
                       key={idx}
-                      className="px-2 py-0.5 rounded-full bg-dark-200 text-xs text-muted-foreground flex items-center gap-1"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                     >
                       <Tag className="w-2.5 h-2.5" />
                       {tag}
@@ -614,7 +433,7 @@ export default function LearningHubPage() {
                   </a>
                 )}
               </div>
-            </div>
+            </article>
           ))}
         </div>
       )}

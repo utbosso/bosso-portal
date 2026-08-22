@@ -29,6 +29,7 @@ import {
   Sparkles,
   FileText
 } from 'lucide-react'
+import SectionPageHeader from '@/components/SectionPageHeader'
 
 const supabase = createClient()
 
@@ -60,14 +61,14 @@ const statusLabels: Record<ApplicationStatus, string> = {
 }
 
 const statusColors: Record<ApplicationStatus, string> = {
-  saved: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  applied: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  not_applied: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-  interviewing: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  offered: 'bg-green-500/20 text-green-400 border-green-500/30',
-  rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
-  accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  withdrawn: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  saved: 'badge-info',
+  applied: 'badge-warning',
+  not_applied: 'bg-muted text-muted-foreground border-border',
+  interviewing: 'bg-primary/10 text-primary border-primary/30',
+  offered: 'badge-success',
+  rejected: 'badge-error',
+  accepted: 'badge-success',
+  withdrawn: 'bg-muted text-muted-foreground border-border',
 }
 
 const statusIcons: Record<ApplicationStatus, any> = {
@@ -214,6 +215,12 @@ export default function ApplicationsPage() {
       status: app.status,
     })
     setFormOpen(true)
+  }
+
+  const closeApplicationForm = () => {
+    setFormOpen(false)
+    setEditingId(null)
+    setForm(emptyForm)
   }
 
   const handleOpportunitySelect = (id: string) => {
@@ -383,35 +390,30 @@ export default function ApplicationsPage() {
   if (!profile) return null
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <ClipboardCheck className="w-7 h-7 text-primary" />
-            Applications
-          </h1>
-        </div>
-        <button
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Career"
+        title="My applications"
+        description="Track every opportunity from saved lead through interview and offer, with your working documents close by."
+        icon={ClipboardCheck}
+        actions={<button
           type="button"
           onClick={openCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
+          className="portal-button"
         >
           <PlusCircle className="w-4 h-4" />
-          Add Application
-        </button>
-      </div>
+          Add application
+        </button>}
+      />
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg text-sm">
-          {error}
-        </div>
+        <div className="portal-alert-error">{error}</div>
       )}
 
       {/* Statistics */}
       {!loading && applications.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-4">
-          <div className="card-glow p-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
+          <div className="portal-stat-card min-h-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total</p>
@@ -420,39 +422,39 @@ export default function ApplicationsPage() {
               <BarChart3 className="w-8 h-8 text-primary" />
             </div>
           </div>
-          <div className="card-glow p-4">
+          <div className="portal-stat-card min-h-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Saved</p>
-                <p className="text-2xl font-bold text-blue-400">{statistics.saved}</p>
+                <p className="text-2xl font-bold text-foreground">{statistics.saved}</p>
               </div>
-              <Bookmark className="w-8 h-8 text-blue-400" />
+              <Bookmark className="w-8 h-8 text-primary" />
             </div>
           </div>
-          <div className="card-glow p-4">
+          <div className="portal-stat-card min-h-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Applied</p>
-                <p className="text-2xl font-bold text-yellow-400">{statistics.applied}</p>
+                <p className="text-2xl font-bold text-foreground">{statistics.applied}</p>
               </div>
-              <CheckCircle2 className="w-8 h-8 text-yellow-400" />
+              <CheckCircle2 className="w-8 h-8 text-primary" />
             </div>
           </div>
-          <div className="card-glow p-4">
+          <div className="portal-stat-card min-h-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Interviewing</p>
-                <p className="text-2xl font-bold text-purple-400">{statistics.interviewing}</p>
+                <p className="text-2xl font-bold text-foreground">{statistics.interviewing}</p>
               </div>
-              <TrendingUp className="w-8 h-8 text-purple-400" />
+              <TrendingUp className="w-8 h-8 text-primary" />
             </div>
           </div>
         </div>
       )}
 
-      {/* Search and Filter */}
+      {/* Search and status */}
       {!loading && applications.length > 0 && (
-        <div className="card-glow p-4 space-y-4">
+        <div className="portal-panel space-y-4">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -461,12 +463,26 @@ export default function ApplicationsPage() {
                 placeholder="Search applications..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-neon w-full pl-10"
+                className="portal-input w-full pl-10"
               />
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 items-center">
+          <label className="sm:hidden">
+            <span className="portal-label">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as ApplicationStatus | 'all')}
+              className="portal-input w-full"
+            >
+              <option value="all">All statuses</option>
+              {(['saved', 'applied', 'interviewing', 'offered', 'rejected', 'accepted', 'withdrawn'] as const).map((status) => (
+                <option key={status} value={status}>{statusLabels[status]}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="hidden flex-wrap items-center gap-2 sm:flex">
             <Filter className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Status:</span>
             {(['all', 'saved', 'applied', 'interviewing', 'offered', 'rejected', 'accepted', 'withdrawn'] as const).map(status => {
@@ -475,10 +491,10 @@ export default function ApplicationsPage() {
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1 ${
+                  className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                     statusFilter === status
-                      ? 'bg-primary text-dark-300'
-                      : 'bg-dark-200 text-muted-foreground hover:bg-dark-100'
+                      ? 'bg-foreground text-background'
+                      : 'bg-muted text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   <StatusIcon className="w-3.5 h-3.5" />
@@ -492,117 +508,28 @@ export default function ApplicationsPage() {
 
       {/* Form */}
       {formOpen && (
-        <div className="card-glow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-semibold text-gradient">
-              {editingId ? 'Edit Application' : 'New Application'}
-            </h3>
-            <button
-              type="button"
-              onClick={() => {
-                setFormOpen(false)
-                setEditingId(null)
-                setForm(emptyForm)
-              }}
-              className="p-2 text-muted-foreground hover:text-primary rounded-lg hover:bg-dark-100 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        <div className="portal-modal-backdrop" onMouseDown={closeApplicationForm}>
+          <div className="portal-modal max-w-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="portal-form-header"><div><p className="portal-eyebrow">Application pipeline</p><h2>{editingId ? 'Edit application' : 'Track an application'}</h2><p>Start from a saved opportunity or enter the role manually.</p></div><button type="button" onClick={closeApplicationForm} className="portal-icon-button"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleSave} className="space-y-5">
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>1</span><div><h3>Role</h3><p>Selecting an opportunity fills in the details for you.</p></div></div>
+                <div className="space-y-4">
+                  <label><span className="portal-label">From opportunities <span className="font-normal text-muted-foreground">(optional)</span></span><select value={form.opportunityId} onChange={(e) => handleOpportunitySelect(e.target.value)} className="portal-input w-full"><option value="">Enter a role manually</option>{opportunities.map((item) => <option key={item.id} value={item.id}>{item.title} {item.company ? `— ${item.company}` : ''}</option>)}</select></label>
+                  <div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Position title</span><input type="text" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} required className="portal-input w-full" placeholder="Business analyst intern" /></label><label><span className="portal-label">Company <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={form.company} onChange={(e) => setForm((prev) => ({ ...prev, company: e.target.value }))} className="portal-input w-full" placeholder="Company name" /></label></div>
+                  <label><span className="portal-label">Job posting <span className="font-normal text-muted-foreground">(optional)</span></span><input type="url" value={form.link} onChange={(e) => setForm((prev) => ({ ...prev, link: e.target.value }))} className="portal-input w-full" placeholder="https://…" /></label>
+                </div>
+              </section>
+              <section className="portal-form-section"><div className="portal-form-section-heading"><span>2</span><div><h3>Pipeline status</h3><p>You can update this quickly from the application card later.</p></div></div><label><span className="portal-label">Current stage</span><select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as ApplicationStatus }))} className="portal-input w-full">{Object.keys(statusLabels).map((status) => <option key={status} value={status}>{statusLabels[status as ApplicationStatus]}</option>)}</select></label></section>
+              <div className="portal-form-actions"><button type="button" onClick={closeApplicationForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><ClipboardCheck className="h-4 w-4" /> {editingId ? 'Save changes' : 'Add to pipeline'}</button></div>
+            </form>
           </div>
-
-          <form onSubmit={handleSave} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">From Opportunities (Optional)</label>
-              <select
-                value={form.opportunityId}
-                onChange={(e) => handleOpportunitySelect(e.target.value)}
-                className="input-neon w-full"
-              >
-                <option value="">Select an opportunity or add manually</option>
-                {opportunities.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title} {item.company ? `— ${item.company}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium mb-1">Title *</label>
-                <input
-                  type="text"
-                  value={form.title}
-                  onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-                  required
-                  className="input-neon w-full"
-                  placeholder="Position title"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Company</label>
-                <input
-                  type="text"
-                  value={form.company}
-                  onChange={(e) => setForm((prev) => ({ ...prev, company: e.target.value }))}
-                  className="input-neon w-full"
-                  placeholder="Company name"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Link</label>
-              <input
-                type="url"
-                value={form.link}
-                onChange={(e) => setForm((prev) => ({ ...prev, link: e.target.value }))}
-                className="input-neon w-full"
-                placeholder="https://..."
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as ApplicationStatus }))}
-                className="input-neon w-full"
-              >
-                {Object.keys(statusLabels).map((status) => (
-                  <option key={status} value={status}>
-                    {statusLabels[status as ApplicationStatus]}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
-              >
-                {editingId ? 'Save Changes' : 'Add Application'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFormOpen(false)
-                  setEditingId(null)
-                  setForm(emptyForm)
-                }}
-                className="px-4 py-2 rounded-lg bg-dark-200 text-foreground text-sm font-medium hover:bg-dark-100 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
         </div>
       )}
 
       {/* Loading State */}
       {loading && (
-        <div className="text-center py-12">
+        <div className="portal-loading flex-col">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
           <p className="mt-3 text-muted-foreground">Loading applications...</p>
         </div>
@@ -610,7 +537,7 @@ export default function ApplicationsPage() {
 
       {/* Empty State */}
       {!loading && applications.length === 0 && (
-        <div className="card-glow p-12 text-center">
+        <div className="portal-empty">
           <ClipboardCheck className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
           <h3 className="text-lg font-semibold text-foreground mb-2">No applications yet</h3>
           <p className="text-sm text-muted-foreground mb-4">
@@ -618,7 +545,7 @@ export default function ApplicationsPage() {
           </p>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
+            className="portal-button mt-5"
           >
             <PlusCircle className="w-4 h-4" />
             Add Your First Application
@@ -632,7 +559,7 @@ export default function ApplicationsPage() {
           {filteredApplications.map((app) => {
             const StatusIcon = statusIcons[app.status]
             return (
-              <div key={app.id} className="card-glow p-4 sm:p-5 space-y-4">
+              <article key={app.id} className="portal-panel space-y-4">
                 {/* Title, status, and actions */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
@@ -656,7 +583,7 @@ export default function ApplicationsPage() {
                         href={app.link}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-dark-200 hover:bg-dark-100 text-sm text-primary transition flex-1 sm:flex-none"
+                        className="portal-button-secondary small flex-1 justify-center sm:flex-none"
                       >
                         <ExternalLink className="w-4 h-4" />
                         <span>View</span>
@@ -665,7 +592,7 @@ export default function ApplicationsPage() {
                     <select
                       value={app.status}
                       onChange={(e) => handleStatusChange(app.id, e.target.value as ApplicationStatus)}
-                      className="input-neon text-sm px-3 py-2 flex-1 sm:flex-none min-w-[140px] sm:min-w-[160px]"
+                      className="portal-input min-w-[140px] flex-1 text-sm sm:min-w-[160px] sm:flex-none"
                     >
                       {Object.keys(statusLabels).map((status) => (
                         <option key={status} value={status}>
@@ -676,7 +603,7 @@ export default function ApplicationsPage() {
                     <button
                       type="button"
                       onClick={() => openEdit(app)}
-                      className="flex-1 sm:flex-none px-3 py-2 rounded-lg bg-dark-200 hover:bg-dark-100 text-primary transition inline-flex items-center justify-center gap-2 text-sm min-w-[110px]"
+                      className="portal-button-secondary small min-w-[110px] flex-1 justify-center sm:flex-none"
                     >
                       <Pencil className="w-4 h-4" />
                       <span>Edit</span>
@@ -684,7 +611,7 @@ export default function ApplicationsPage() {
                     <button
                       type="button"
                       onClick={() => handleDelete(app.id)}
-                      className="flex-1 sm:flex-none px-3 py-2 rounded-lg bg-dark-200 hover:bg-red-500/10 text-red-400 transition inline-flex items-center justify-center gap-2 text-sm min-w-[110px]"
+                      className="portal-button-secondary small min-w-[110px] flex-1 justify-center text-destructive hover:text-destructive sm:flex-none"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>Delete</span>
@@ -693,7 +620,7 @@ export default function ApplicationsPage() {
                 </div>
 
                 {/* Documents Section */}
-                <div className="rounded-lg border border-primary/10 p-4 space-y-3 bg-dark-300/50">
+                <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                       <Paperclip className="w-4 h-4 text-primary" />
@@ -705,7 +632,7 @@ export default function ApplicationsPage() {
                         setCurrentAppId(app.id)
                         setShowAddDocModal(true)
                       }}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-primary/30 text-sm text-primary hover:bg-primary/10 transition"
+                      className="portal-button-secondary small"
                     >
                       <Plus className="w-4 h-4" />
                       Add Link
@@ -719,7 +646,7 @@ export default function ApplicationsPage() {
                       {(documentsByApplication.get(app.id) ?? []).map((doc) => (
                         <div
                           key={doc.id}
-                          className="flex items-center gap-2 px-3 py-2 rounded-md bg-dark-200 text-sm group"
+                          className="group flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm"
                         >
                           <button
                             type="button"
@@ -735,8 +662,9 @@ export default function ApplicationsPage() {
                           <button
                             type="button"
                             onClick={() => handleDeleteDoc(doc)}
-                            className="p-1 hover:bg-red-500/10 rounded text-red-400 hover:text-red-300 transition flex-shrink-0"
+                            className="portal-icon-button border-0 text-destructive hover:text-destructive"
                             title="Delete document"
+                            aria-label={`Delete ${doc.document_name}`}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -749,7 +677,7 @@ export default function ApplicationsPage() {
                 <div className="text-xs text-muted-foreground">
                   Added {new Date(app.created_at || '').toLocaleDateString()}
                 </div>
-              </div>
+              </article>
             )
           })}
         </div>
@@ -757,18 +685,18 @@ export default function ApplicationsPage() {
 
       {/* No Results */}
       {!loading && applications.length > 0 && filteredApplications.length === 0 && (
-        <div className="card-glow p-12 text-center">
+        <div className="portal-empty">
           <Search className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground">No applications match your filters</p>
+          <p className="text-muted-foreground">No applications match your search or status</p>
         </div>
       )}
 
       {/* Add Document Link Modal */}
       {showAddDocModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="card-glow p-6 max-w-lg w-full space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-foreground">Add Document Link</h3>
+        <div className="portal-modal-backdrop">
+          <div className="portal-modal max-w-lg">
+            <div className="portal-form-header">
+              <div><p className="portal-eyebrow">Application materials</p><h2>Add a document link</h2><p>Keep the resume, cover letter, or portfolio used for this application close by.</p></div>
               <button
                 onClick={() => {
                   setShowAddDocModal(false)
@@ -780,7 +708,8 @@ export default function ApplicationsPage() {
                     notes: ''
                   })
                 }}
-                className="p-1 hover:bg-dark-100 rounded transition"
+                className="portal-icon-button"
+                aria-label="Close document form"
               >
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
@@ -792,7 +721,7 @@ export default function ApplicationsPage() {
                 <select
                   value={newDocument.type}
                   onChange={(e) => setNewDocument({ ...newDocument, type: e.target.value as any })}
-                  className="w-full px-4 py-2 bg-dark-100 border border-primary/20 rounded-lg text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="portal-input w-full bg-dark-100"
                 >
                   <option value="resume">Resume</option>
                   <option value="cover_letter">Cover Letter</option>
@@ -808,7 +737,7 @@ export default function ApplicationsPage() {
                   value={newDocument.name}
                   onChange={(e) => setNewDocument({ ...newDocument, name: e.target.value })}
                   placeholder="e.g., Resume - Updated Jan 2025"
-                  className="w-full px-4 py-2 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="portal-input w-full bg-dark-100"
                 />
                 <p className="text-xs text-muted-foreground">Leave blank to auto-generate</p>
               </div>
@@ -820,7 +749,7 @@ export default function ApplicationsPage() {
                   value={newDocument.url}
                   onChange={(e) => setNewDocument({ ...newDocument, url: e.target.value })}
                   placeholder="https://drive.google.com/file/d/..."
-                  className="w-full px-4 py-2 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="portal-input w-full bg-dark-100"
                   required
                 />
                 <p className="text-xs text-muted-foreground">
@@ -835,19 +764,12 @@ export default function ApplicationsPage() {
                   onChange={(e) => setNewDocument({ ...newDocument, notes: e.target.value })}
                   placeholder="Any additional notes about this document..."
                   rows={3}
-                  className="w-full px-4 py-2 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all resize-none"
+                  className="portal-input w-full resize-none bg-dark-100"
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={handleAddDocument}
-                disabled={!newDocument.url || uploadingId !== null}
-                className="flex-1 btn-neon py-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {uploadingId ? 'Adding...' : 'Add Document'}
-              </button>
+            <div className="portal-form-actions">
               <button
                 onClick={() => {
                   setShowAddDocModal(false)
@@ -859,9 +781,16 @@ export default function ApplicationsPage() {
                     notes: ''
                   })
                 }}
-                className="px-6 py-2 border-2 border-primary/30 rounded-lg text-primary hover:bg-primary/10 hover:border-primary/60 transition-all"
+                className="portal-button-secondary justify-center"
               >
                 Cancel
+              </button>
+              <button
+                onClick={handleAddDocument}
+                disabled={!newDocument.url || uploadingId !== null}
+                className="portal-button justify-center"
+              >
+                {uploadingId ? 'Adding...' : 'Add document'}
               </button>
             </div>
           </div>

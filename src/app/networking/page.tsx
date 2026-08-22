@@ -8,7 +8,6 @@ import {
   Users,
   PlusCircle,
   Search,
-  Filter,
   Mail,
   Phone,
   MapPin,
@@ -23,15 +22,16 @@ import {
   Tag,
   GraduationCap,
   TrendingUp,
-  Lightbulb
+  Lightbulb,
+  X,
 } from 'lucide-react'
-import { isAdmin } from '@/lib/admin'
+import SectionPageHeader from '@/components/SectionPageHeader'
 
 const supabase = createClient()
 
 export default function NetworkingPage() {
-  const { profile } = useAuth()
-  const isUserAdmin = isAdmin(profile?.role)
+  const { profile, user } = useAuth()
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
   const [contacts, setContacts] = useState<NetworkingContact[]>([])
   const [filteredContacts, setFilteredContacts] = useState<NetworkingContact[]>([])
   const [loading, setLoading] = useState(true)
@@ -288,319 +288,95 @@ export default function NetworkingPage() {
   ]
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <Users className="w-7 h-7 text-primary" />
-            Networking & Alumni
-          </h1>
-          <div className="flex items-start gap-2 bg-primary/10 border border-primary/30 rounded-lg p-3 text-sm">
-            <AlertCircle className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-            <p className="text-primary">
-              <strong>Important:</strong> Only add contacts who have explicitly consented to being contacted by BOSSO members.
-            </p>
-          </div>
-        </div>
-        <button
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Career"
+        title="Networking & alumni"
+        description="Build a consent-based directory of alumni, recruiters, mentors, and industry contacts."
+        icon={Users}
+        actions={<button
           onClick={() => setShowForm(true)}
-          className="px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
+          className="portal-button"
         >
           <PlusCircle className="w-4 h-4" />
-          Add Contact
-        </button>
+          Add contact
+        </button>}
+      />
+
+      <div className="portal-alert-info flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <p><strong>Consent required:</strong> only add contacts who explicitly agreed to be contacted by BOSSO members.</p>
       </div>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg text-sm">
-          {error}
-        </div>
+        <div className="portal-alert-error">{error}</div>
       )}
 
       {/* Search and Filters */}
-      <div className="card-glow p-4 space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+      <div className="portal-panel">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px] md:items-end">
+          <div className="relative">
+            <label className="portal-label">Search the directory</label>
+            <Search className="absolute bottom-3 left-3 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search by name, company, title, location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-neon w-full !pl-10"
-              style={{ paddingLeft: '2.75rem' }}
+              className="portal-input w-full pl-10"
             />
           </div>
+          <label><span className="portal-label">Industry</span><select value={selectedIndustry} onChange={(e) => setSelectedIndustry(e.target.value as any)} className="portal-input w-full">{industries.map(ind => <option key={ind} value={ind}>{ind === 'all' ? 'All industries' : getIndustryLabel(ind)}</option>)}</select></label>
+          <label><span className="portal-label">Relationship</span><select value={selectedRelationship} onChange={(e) => setSelectedRelationship(e.target.value as any)} className="portal-input w-full">{relationships.map(rel => <option key={rel} value={rel}>{rel === 'all' ? 'All relationships' : getRelationshipLabel(rel)}</option>)}</select></label>
         </div>
-
-        {/* Desktop filters */}
-        <div className="hidden md:flex flex-wrap gap-2 items-center">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Industry:</span>
-          {industries.map(ind => (
-            <button
-              key={ind}
-              onClick={() => setSelectedIndustry(ind)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition ${
-                selectedIndustry === ind
-                  ? 'bg-primary text-dark-300'
-                  : 'bg-dark-200 text-muted-foreground hover:bg-dark-100'
-              }`}
-            >
-              {ind === 'all' ? 'All' : getIndustryLabel(ind)}
-            </button>
-          ))}
-        </div>
-
-        <div className="hidden md:flex flex-wrap gap-2 items-center">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Relationship:</span>
-          {relationships.map(rel => (
-            <button
-              key={rel}
-              onClick={() => setSelectedRelationship(rel)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1 ${
-                selectedRelationship === rel
-                  ? 'bg-primary text-dark-300'
-                  : 'bg-dark-200 text-muted-foreground hover:bg-dark-100'
-              }`}
-            >
-              {rel !== 'all' && getRelationshipIcon(rel)}
-              {rel === 'all' ? 'All' : getRelationshipLabel(rel)}
-            </button>
-          ))}
-        </div>
-
-        {/* Mobile dropdowns */}
-        <div className="md:hidden grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1.5">Industry</label>
-            <select
-              value={selectedIndustry}
-              onChange={(e) => setSelectedIndustry(e.target.value as any)}
-              className="input-neon w-full text-sm py-2"
-            >
-              {industries.map(ind => (
-                <option key={ind} value={ind}>
-                  {ind === 'all' ? 'All' : getIndustryLabel(ind)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1.5">Relationship</label>
-            <select
-              value={selectedRelationship}
-              onChange={(e) => setSelectedRelationship(e.target.value as any)}
-              className="input-neon w-full text-sm py-2"
-            >
-              {relationships.map(rel => (
-                <option key={rel} value={rel}>
-                  {rel === 'all' ? 'All' : getRelationshipLabel(rel)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <p className="mt-3 text-xs text-muted-foreground">Showing {filteredContacts.length} of {contacts.length} contacts</p>
       </div>
 
       {/* Add/Edit Form */}
       {showForm && (
-        <div className="card-glow p-6">
-          <h2 className="text-xl font-semibold mb-4 text-gradient">
-            {editingContact ? 'Edit Contact' : 'Add New Contact'}
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium mb-1">Name *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="input-neon w-full"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Title</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="e.g., Director of Analytics"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Company</label>
-                <input
-                  type="text"
-                  value={formData.company}
-                  onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="e.g., Boston Red Sox"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Industry</label>
-                <select
-                  value={formData.industry}
-                  onChange={(e) => setFormData({ ...formData, industry: e.target.value as IndustryType })}
-                  className="input-neon w-full"
-                >
-                  <option value="sports_team">Sports Team</option>
-                  <option value="league">League</option>
-                  <option value="agency">Agency</option>
-                  <option value="consulting">Consulting</option>
-                  <option value="analytics">Analytics</option>
-                  <option value="media">Media</option>
-                  <option value="tech">Tech</option>
-                  <option value="finance">Finance</option>
-                  <option value="marketing">Marketing</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Relationship *</label>
-                <select
-                  value={formData.relationship}
-                  onChange={(e) => setFormData({ ...formData, relationship: e.target.value as ContactRelationship })}
-                  className="input-neon w-full"
-                  required
-                >
-                  <option value="alumni">Alumni</option>
-                  <option value="industry_professional">Industry Professional</option>
-                  <option value="recruiter">Recruiter</option>
-                  <option value="mentor">Mentor</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Location</label>
-                <input
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="e.g., Boston, MA"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="contact@example.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">LinkedIn URL</label>
-                <input
-                  type="url"
-                  value={formData.linkedin_url}
-                  onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="https://linkedin.com/in/..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Phone</label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="(123) 456-7890"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Best For (comma separated)</label>
-                <input
-                  type="text"
-                  value={formData.best_for}
-                  onChange={(e) => setFormData({ ...formData, best_for: e.target.value })}
-                  className="input-neon w-full"
-                  placeholder="analytics, career advice, internships"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Notes</label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                className="input-neon w-full"
-                rows={3}
-                placeholder="Any additional context about this contact or your experience with them..."
-              />
-            </div>
-
-            <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-lg p-4">
-              <input
-                type="checkbox"
-                id="consent"
-                checked={formData.has_consent}
-                onChange={(e) => setFormData({ ...formData, has_consent: e.target.checked })}
-                className="mt-1 w-4 h-4 rounded border-primary/30 text-primary focus:ring-primary"
-                required
-              />
-              <label htmlFor="consent" className="text-sm text-foreground">
-                <strong className="text-primary">I confirm</strong> that this person has explicitly consented to being contacted by BOSSO members and is open to networking opportunities. *
-              </label>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
-              >
-                {editingContact ? 'Update Contact' : 'Add Contact'}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelForm}
-                className="px-4 py-2 rounded-lg bg-dark-200 text-foreground text-sm font-medium hover:bg-dark-100 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+        <div className="portal-modal-backdrop" onMouseDown={handleCancelForm}>
+          <div className="portal-modal max-w-4xl" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="portal-form-header"><div><p className="portal-eyebrow">Networking directory</p><h2>{editingContact ? 'Edit contact' : 'Add a contact'}</h2><p>Capture enough context so members know who this person is and how they can help.</p></div><button type="button" onClick={handleCancelForm} className="portal-icon-button"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>1</span><div><h3>Who they are</h3><p>Basic professional information members can scan quickly.</p></div></div>
+                <div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Name</span><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="portal-input w-full" required /></label><label><span className="portal-label">Title <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="portal-input w-full" placeholder="Director of Analytics" /></label><label><span className="portal-label">Company <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.company} onChange={(e) => setFormData({ ...formData, company: e.target.value })} className="portal-input w-full" placeholder="Boston Red Sox" /></label><label><span className="portal-label">Location <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} className="portal-input w-full" placeholder="Boston, MA" /></label><label><span className="portal-label">Industry</span><select value={formData.industry} onChange={(e) => setFormData({ ...formData, industry: e.target.value as IndustryType })} className="portal-input w-full"><option value="sports_team">Sports Team</option><option value="league">League</option><option value="agency">Agency</option><option value="consulting">Consulting</option><option value="analytics">Analytics</option><option value="media">Media</option><option value="tech">Tech</option><option value="finance">Finance</option><option value="marketing">Marketing</option><option value="other">Other</option></select></label><label><span className="portal-label">Relationship</span><select value={formData.relationship} onChange={(e) => setFormData({ ...formData, relationship: e.target.value as ContactRelationship })} className="portal-input w-full" required><option value="alumni">Alumni</option><option value="industry_professional">Industry Professional</option><option value="recruiter">Recruiter</option><option value="mentor">Mentor</option><option value="other">Other</option></select></label></div>
+              </section>
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>2</span><div><h3>How to connect</h3><p>Add only the contact methods they agreed to share.</p></div></div>
+                <div className="grid gap-4 sm:grid-cols-3"><label><span className="portal-label">Email <span className="font-normal text-muted-foreground">(optional)</span></span><input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="portal-input w-full" placeholder="contact@example.com" /></label><label><span className="portal-label">LinkedIn <span className="font-normal text-muted-foreground">(optional)</span></span><input type="url" value={formData.linkedin_url} onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })} className="portal-input w-full" placeholder="https://linkedin.com/in/…" /></label><label><span className="portal-label">Phone <span className="font-normal text-muted-foreground">(optional)</span></span><input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="portal-input w-full" placeholder="(123) 456-7890" /></label></div>
+              </section>
+              <section className="portal-form-section">
+                <div className="portal-form-section-heading"><span>3</span><div><h3>Member context</h3><p>Explain what they are open to discussing and anything members should know.</p></div></div>
+                <div className="space-y-4"><label><span className="portal-label">Best for <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.best_for} onChange={(e) => setFormData({ ...formData, best_for: e.target.value })} className="portal-input w-full" placeholder="analytics, career advice, internships" /><span className="mt-1.5 block text-xs text-muted-foreground">Separate topics with commas.</span></label><label><span className="portal-label">Notes <span className="font-normal text-muted-foreground">(optional)</span></span><textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="portal-input w-full resize-none" rows={3} placeholder="How BOSSO knows them, preferred outreach, or helpful background." /></label></div>
+              </section>
+              <label className="portal-alert-info flex cursor-pointer items-start gap-3"><input type="checkbox" id="consent" checked={formData.has_consent} onChange={(e) => setFormData({ ...formData, has_consent: e.target.checked })} className="mt-1 h-4 w-4 rounded border-primary/30 text-primary focus:ring-primary" required /><span className="text-sm"><strong>Consent confirmed.</strong> This person explicitly agreed to be contacted by BOSSO members using the information above.</span></label>
+              <div className="portal-form-actions"><button type="button" onClick={handleCancelForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><Users className="h-4 w-4" /> {editingContact ? 'Save changes' : 'Add contact'}</button></div>
+            </form>
+          </div>
         </div>
       )}
 
       {/* Contacts List */}
       {loading ? (
-        <div className="text-center py-12">
+        <div className="portal-loading flex-col">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
           <p className="mt-3 text-muted-foreground">Loading contacts...</p>
         </div>
       ) : filteredContacts.length === 0 ? (
-        <div className="card-glow p-12 text-center">
+        <div className="portal-empty">
           <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground">
+          <h3>{searchQuery || selectedIndustry !== 'all' || selectedRelationship !== 'all' ? 'No matching contacts' : 'No contacts yet'}</h3>
+          <p>
             {searchQuery || selectedIndustry !== 'all' || selectedRelationship !== 'all'
-              ? 'No contacts match your filters'
-              : 'No contacts yet. Be the first to add one!'}
+              ? 'Try a broader search or clear one of the filters.'
+              : 'Add the first consented alumni or industry connection.'}
           </p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredContacts.map((contact) => (
-            <div key={contact.id} className="card-glow p-5 space-y-3 hover:shadow-lg transition-shadow">
+            <article key={contact.id} className="portal-panel space-y-3 transition-colors hover:border-primary/40">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
                   <div className="mt-1 text-primary">
@@ -625,15 +401,17 @@ export default function NetworkingPage() {
                   <div className="flex gap-1">
                     <button
                       onClick={() => handleEdit(contact)}
-                      className="p-1 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-primary"
+                      className="portal-icon-button"
                       title="Edit"
+                      aria-label={`Edit ${contact.name}`}
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(contact.id)}
-                      className="p-1 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-red-400"
+                      className="portal-icon-button text-destructive hover:text-destructive"
                       title="Delete"
+                      aria-label={`Delete ${contact.name}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -667,7 +445,7 @@ export default function NetworkingPage() {
                   {contact.best_for.map((tag, idx) => (
                     <span
                       key={idx}
-                      className="px-2 py-0.5 rounded-full bg-dark-200 text-xs text-muted-foreground flex items-center gap-1"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                     >
                       <Tag className="w-2.5 h-2.5" />
                       {tag}
@@ -676,12 +454,13 @@ export default function NetworkingPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 pt-2 border-t border-dark-200">
+              <div className="flex items-center gap-2 border-t border-border pt-2">
                 {contact.email && (
                   <a
                     href={`mailto:${contact.email}`}
-                    className="p-1.5 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-primary"
+                    className="portal-icon-button"
                     title="Email"
+                    aria-label={`Email ${contact.name}`}
                   >
                     <Mail className="w-4 h-4" />
                   </a>
@@ -691,8 +470,9 @@ export default function NetworkingPage() {
                     href={contact.linkedin_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-1.5 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-primary"
+                    className="portal-icon-button"
                     title="LinkedIn"
+                    aria-label={`Open ${contact.name}'s LinkedIn`}
                   >
                     <Linkedin className="w-4 h-4" />
                   </a>
@@ -700,8 +480,9 @@ export default function NetworkingPage() {
                 {contact.phone && (
                   <a
                     href={`tel:${contact.phone}`}
-                    className="p-1.5 rounded hover:bg-dark-100 transition text-muted-foreground hover:text-primary"
+                    className="portal-icon-button"
                     title="Phone"
+                    aria-label={`Call ${contact.name}`}
                   >
                     <Phone className="w-4 h-4" />
                   </a>
@@ -714,7 +495,7 @@ export default function NetworkingPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </article>
           ))}
         </div>
       )}

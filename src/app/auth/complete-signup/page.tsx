@@ -18,7 +18,7 @@ export default function CompleteSignupPage() {
       try {
         console.log('[complete-signup] Starting completeSignup function')
         // Get signup data from session storage
-        const signupDataStr = sessionStorage.getItem('signup_data')
+        const signupDataStr = sessionStorage.getItem('signup_data') || localStorage.getItem('signup_data')
         console.log('[complete-signup] signupDataStr:', signupDataStr ? 'exists' : 'null')
 
         if (!signupDataStr) {
@@ -74,7 +74,7 @@ export default function CompleteSignupPage() {
             console.log('[complete-signup] About to sign out')
             await supabase.auth.signOut()
             console.log('[complete-signup] Signed out, setting error state')
-            setErrorMessage('No account found. Please sign up first with a valid registration code.')
+            setErrorMessage('No account found. Please sign up first with a valid position code.')
             setStatus('error')
             console.log('[complete-signup] Error state set')
             return
@@ -115,6 +115,7 @@ export default function CompleteSignupPage() {
 
         // Clear signup data from session storage
         sessionStorage.removeItem('signup_data')
+        localStorage.removeItem('signup_data')
 
         // Get current user
         const { data: { user } } = await supabase.auth.getUser()
@@ -142,15 +143,13 @@ export default function CompleteSignupPage() {
           .maybeSingle()
 
         if (existingProfile) {
-          // Profile exists, update it
-          console.log('[complete-signup] Updating existing profile')
+          // Returning accounts are permanent. Never reset their approval, role,
+          // or verification state when they accidentally revisit sign-up.
+          console.log('[complete-signup] Preserving existing profile and starting term renewal')
           const { error: updateError } = await supabase
             .from('profiles')
             .update({
               full_name: fullName,
-              account_status: 'pending_approval',
-              role: intendedRole,
-              email_verified: true, // Google OAuth verifies email
             })
             .eq('id', user.id)
 
@@ -170,7 +169,7 @@ export default function CompleteSignupPage() {
               email: user.email,
               full_name: fullName,
               account_status: 'pending_approval',
-              role: intendedRole,
+              role: 'general_member',
               email_verified: true, // Google OAuth verifies email
             })
 
@@ -182,15 +181,16 @@ export default function CompleteSignupPage() {
           }
         }
 
-        // Increment code usage
-        try {
-          await supabase.rpc('increment_code_usage', {
-            code_text: registrationCode,
-            user_uuid: user.id
-          })
-        } catch (codeError) {
-          console.error('Error incrementing code usage:', codeError)
-          // Don't fail the signup if code increment fails
+        const renewalResponse = await fetch('/api/semester/renew', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: registrationCode }),
+        })
+        if (!renewalResponse.ok) {
+          const renewalPayload = await renewalResponse.json().catch(() => ({}))
+          setErrorMessage(renewalPayload.error || 'Your account was created, but semester renewal needs attention.')
+          setStatus('error')
+          return
         }
 
         // Success! Redirect to pending approval page

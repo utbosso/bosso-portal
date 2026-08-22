@@ -14,6 +14,7 @@ const ALLOWED_TAGS = new Set([
   'li',
   'div',
   'span',
+  'a',
 ])
 
 function escapeHtml(input: string) {
@@ -54,6 +55,16 @@ function sanitizeHtmlWithDom(html: string): string {
       tagName
 
     if (safeTag === 'br') return '<br />'
+    if (safeTag === 'a') {
+      const href = el.getAttribute('href') || ''
+      try {
+        const parsed = new URL(href)
+        if (!['http:', 'https:'].includes(parsed.protocol)) return children
+        return `<a href="${escapeHtml(parsed.toString())}" target="_blank" rel="noreferrer">${children}</a>`
+      } catch {
+        return children
+      }
+    }
     return `<${safeTag}>${children}</${safeTag}>`
   }
 
@@ -81,6 +92,12 @@ export function announcementBodyToPlainText(content: string) {
   if (typeof window !== 'undefined' && bodyHasHtml(content)) {
     const parser = new DOMParser()
     const doc = parser.parseFromString(content, 'text/html')
+    doc.querySelectorAll('a[href]').forEach((anchor) => {
+      const href = anchor.getAttribute('href')
+      if (href && !(anchor.textContent || '').includes(href)) {
+        anchor.append(` (${href})`)
+      }
+    })
     return (doc.body.textContent || '').replace(/\u00a0/g, ' ')
   }
 

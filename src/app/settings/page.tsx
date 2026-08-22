@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { Moon, Sun, User, Mail, Briefcase, Settings as SettingsIcon, Phone, Edit2, Shield } from 'lucide-react'
 import ProfileEditForm from '@/components/ProfileEditForm'
+import SectionPageHeader from '@/components/SectionPageHeader'
 import { Profile } from '@/types/database.types'
 import { createClient } from '@/lib/supabase/client'
+import { applyPortalTheme, getStoredTheme, THEME_CHANGE_EVENT, type PortalTheme } from '@/lib/theme'
 
 const supabase = createClient()
 
@@ -14,7 +16,7 @@ export default function SettingsPage() {
 
   const [profile, setProfile] = useState<Profile | null>(authProfile)
   const [isEditing, setIsEditing] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+  const [theme, setTheme] = useState<PortalTheme>('light')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
@@ -28,26 +30,20 @@ export default function SettingsPage() {
 
   // Load theme from localStorage on mount
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
-    if (savedTheme) {
-      setTheme(savedTheme)
-      applyTheme(savedTheme)
+    const savedTheme = getStoredTheme()
+    setTheme(savedTheme)
+    applyPortalTheme(savedTheme)
+
+    const syncThemeControl = (event: Event) => {
+      setTheme((event as CustomEvent<PortalTheme>).detail)
     }
+    window.addEventListener(THEME_CHANGE_EVENT, syncThemeControl)
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, syncThemeControl)
   }, [])
 
-
-  const applyTheme = (newTheme: 'light' | 'dark') => {
-    if (newTheme === 'light') {
-      document.body.classList.add('light')
-    } else {
-      document.body.classList.remove('light')
-    }
-  }
-
-  const handleThemeChange = (newTheme: 'light' | 'dark') => {
+  const handleThemeChange = (newTheme: PortalTheme) => {
     setTheme(newTheme)
-    localStorage.setItem('theme', newTheme)
-    applyTheme(newTheme)
+    applyPortalTheme(newTheme, true)
   }
 
   const handleProfileUpdate = (updatedProfile: Profile) => {
@@ -98,20 +94,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="space-y-1">
-        <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-          <SettingsIcon className="w-7 h-7 text-primary" />
-          Settings
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Manage your account preferences and portal settings
-        </p>
-      </div>
+    <div className="portal-page max-w-4xl space-y-6">
+      <SectionPageHeader eyebrow="Account" title="Settings" description="Manage your profile, appearance, and account security." icon={SettingsIcon} />
 
       {/* Profile Information */}
-      <div className="card-glow p-6 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="portal-panel space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
             <User className="w-5 h-5 text-primary" />
             Profile Information
@@ -119,7 +107,7 @@ export default function SettingsPage() {
           {!isEditing && (
             <button
               onClick={() => setIsEditing(true)}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
+              className="portal-button w-full justify-center sm:w-auto"
             >
               <Edit2 className="w-4 h-4" />
               Edit Profile
@@ -155,7 +143,7 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Email</label>
-              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+              <div className="flex items-center gap-2 break-all rounded-lg bg-muted px-4 py-3 text-foreground">
                 <Mail className="w-4 h-4 text-muted-foreground" />
                 {profile.email}
               </div>
@@ -168,7 +156,7 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">UT Email</label>
-              <div className="px-4 py-3 bg-muted rounded-lg text-foreground flex items-center gap-2">
+              <div className="flex items-center gap-2 break-all rounded-lg bg-muted px-4 py-3 text-foreground">
                 <Mail className="w-4 h-4 text-muted-foreground" />
                 {profile.ut_email || 'Not set'}
               </div>
@@ -198,7 +186,7 @@ export default function SettingsPage() {
                 <div className="space-y-3">
                   {profile.work_experiences.map((exp) => (
                     <div key={exp.id} className="px-4 py-3 bg-muted rounded-lg">
-                      <div className="flex items-start justify-between">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="font-medium text-foreground">{exp.title}</p>
                           <p className="text-sm text-muted-foreground">{exp.company}</p>
@@ -226,12 +214,14 @@ export default function SettingsPage() {
       </div>
 
       {/* Appearance */}
-      <div className="card-glow p-6 space-y-4">
+      <div className="portal-panel space-y-4">
         <h2 className="text-xl font-semibold text-foreground">Appearance</h2>
         <div className="space-y-3">
           <label className="text-sm font-medium text-muted-foreground">Theme</label>
           <div className="flex gap-3">
             <button
+              type="button"
+              aria-pressed={theme === 'dark'}
               onClick={() => handleThemeChange('dark')}
               className={`flex-1 p-4 rounded-lg border-2 transition-all ${
                 theme === 'dark'
@@ -244,6 +234,8 @@ export default function SettingsPage() {
               <p className="text-xs opacity-75 mt-1">Easy on the eyes</p>
             </button>
             <button
+              type="button"
+              aria-pressed={theme === 'light'}
               onClick={() => handleThemeChange('light')}
               className={`flex-1 p-4 rounded-lg border-2 transition-all ${
                 theme === 'light'
@@ -260,7 +252,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Security */}
-      <div className="card-glow p-6 space-y-4">
+      <div className="portal-panel space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Shield className="w-5 h-5 text-primary" />
           Security
@@ -318,7 +310,7 @@ export default function SettingsPage() {
           <button
             type="submit"
             disabled={passwordLoading}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="portal-button w-full justify-center sm:w-auto"
           >
             {passwordLoading ? 'Updating...' : 'Update Password'}
           </button>
@@ -327,7 +319,7 @@ export default function SettingsPage() {
 
 
       {/* About */}
-      <div className="card-glow p-6 space-y-2">
+      <div className="portal-panel space-y-2">
         <h2 className="text-xl font-semibold text-foreground">About</h2>
         <p className="text-sm text-muted-foreground">
           BOSSO Portal - Business of Sports Student Organization @ UT Austin

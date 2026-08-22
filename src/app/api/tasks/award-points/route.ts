@@ -36,9 +36,9 @@ export async function POST(request: Request) {
       }
     )
 
-    const { data: task, error: taskError } = await supabaseAdmin
+    const { data: task, error: taskError } = await (supabaseAdmin as any)
       .from('tasks')
-      .select('id, title, assigned_to, assigned_by, status, assignee_status, point_value, points_category, points_awarded, auto_approve')
+      .select('id, title, assigned_to, assigned_by, status, assignee_status, point_value, points_category, points_awarded, auto_approve, term_id')
       .eq('id', taskId)
       .single()
 
@@ -83,6 +83,40 @@ export async function POST(request: Request) {
     }
 
     const category = task.points_category || 'membership'
+
+    const { data: currentTerm } = task.term_id
+      ? { data: { id: task.term_id } }
+      : await supabaseAdmin.from('academic_terms').select('id').eq('status', 'current').maybeSingle()
+
+    if (currentTerm?.id) {
+      const { error: ledgerError } = await supabaseAdmin.from('point_ledger').upsert(
+        {
+          term_id: currentTerm.id,
+          user_id: task.assigned_to,
+          category,
+          points: task.point_value,
+          source_type: 'task',
+          source_id: task.id,
+          note: `Task completion: ${task.title}`,
+          awarded_by: user.id,
+          occurred_at: new Date().toISOString(),
+          voided_at: null,
+          voided_by: null,
+        },
+        { onConflict: 'term_id,user_id,source_type,source_id' }
+      )
+
+      if (!ledgerError) {
+        return NextResponse.json({ success: true, status: 'awarded' })
+      }
+
+      // Only fall through while the semester migration is not yet applied.
+      if (!['42P01', 'PGRST205'].includes(ledgerError.code || '')) {
+        await supabaseAdmin.from('tasks').update({ points_awarded: false }).eq('id', taskId)
+        return NextResponse.json({ error: ledgerError.message }, { status: 500 })
+      }
+    }
+
     const { error: insertError } = await supabaseAdmin
       .from('points_adjustments')
       .insert({

@@ -3,16 +3,14 @@
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
-import { isAdmin } from '@/lib/admin'
-import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
-import type { AttendanceRecord, Event, Profile } from '@/types/database.types'
-import CategoryPointsBreakdown from '@/components/CategoryPointsBreakdown'
+import { usePortalAccess } from '@/hooks/usePortalAccess'
+import type { AttendanceRecord, Event } from '@/types/database.types'
+import UserSearch, { type UserOption } from '@/components/UserSearch'
+import SectionPageHeader from '@/components/SectionPageHeader'
+import { fetchCurrentMemberDirectory } from '@/lib/communication-recipients'
 import {
   ClipboardCheck,
-  Trophy,
-  Calendar,
-  CheckCircle2,
-  QrCode,
+  ShieldCheck,
   Search,
   Users,
   Download,
@@ -69,19 +67,10 @@ type EventStats = {
 }
 
 export default function AttendancePage() {
-  const { profile } = useAuth()
+  const { user, profile } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [checkInCode, setCheckInCode] = useState('')
-  const [checkingIn, setCheckingIn] = useState(false)
-  const [checkInSuccess, setCheckInSuccess] = useState(false)
-
-  // Member stats
-  const [myAttendance, setMyAttendance] = useState<AttendanceWithEvent[]>([])
-  const [myAdjustments, setMyAdjustments] = useState<PointsAdjustment[]>([])
-  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([])
-  const [totalPoints, setTotalPoints] = useState(0)
-  const [eventsAttended, setEventsAttended] = useState(0)
 
   // Admin views
   const [viewMode, setViewMode] = useState<'members' | 'events'>('members')
@@ -105,115 +94,42 @@ export default function AttendancePage() {
   const [adjustmentEvent, setAdjustmentEvent] = useState('')
   const [allEvents, setAllEvents] = useState<Event[]>([])
 
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   useEffect(() => {
-    if (profile) {
-      if (isUserAdmin) {
-        fetchAdminData()
-      } else {
-        fetchMemberData()
-      }
+    if (profile && !accessLoading && isUserAdmin) {
+      fetchAdminData()
     }
-  }, [profile, isUserAdmin])
+  }, [profile, isUserAdmin, access?.term_id, schemaReady, accessLoading])
 
-  const fetchMemberData = async () => {
-    if (!profile) return
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Fetch user's attendance records
-      const { data: attendance, error: attendanceError } = await supabase
-        .from('attendance_records')
-        .select(`
-          *,
-          event:events(id, title, start_at, point_value)
-        `)
-        .eq('user_id', profile.id)
-        .order('checked_in_at', { ascending: false })
-
-      if (attendanceError) throw attendanceError
-
-      setMyAttendance((attendance as AttendanceWithEvent[]) || [])
-      setEventsAttended(attendance?.length || 0)
-
-      // Calculate total points from attendance
-      const attendancePoints = (attendance || []).reduce((sum, record) => sum + (record.points_earned || 0), 0)
-
-      // Fetch manual adjustments
-      const { data: adjustments, error: adjustError } = await supabase
-        .from('points_adjustments')
-        .select('*')
-        .eq('user_id', profile.id)
-        .order('created_at', { ascending: false })
-
-      if (adjustError) throw adjustError
-
-      setMyAdjustments((adjustments as PointsAdjustment[]) || [])
-
-      const adjustmentPoints = (adjustments || []).reduce((sum, adj) => sum + adj.points, 0)
-
-      setTotalPoints(attendancePoints + adjustmentPoints)
-
-      // Create combined attendance history
-      const history: AttendanceHistoryItem[] = [
-        // Add event attendance
-        ...(attendance || []).map(record => ({
-          id: record.id,
-          type: 'event' as const,
-          title: record.event?.title || 'Unknown Event',
-          points: record.points_earned || 0,
-          timestamp: record.checked_in_at,
-          reason: null
-        })),
-        // Add manual adjustments
-        ...(adjustments || []).map(adj => ({
-          id: adj.id,
-          type: 'adjustment' as const,
-          title: adj.reason?.startsWith('Task completion:')
-            ? 'Task Points Awarded'
-            : adj.points > 0
-            ? 'Manual Points Added'
-            : 'Manual Points Deducted',
-          points: adj.points,
-          timestamp: adj.created_at,
-          reason: adj.reason
-        }))
-      ]
-
-      // Sort by timestamp (most recent first)
-      history.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-
-      setAttendanceHistory(history)
-    } catch (err: any) {
-      console.error('Error fetching member data:', err)
-      setError('Failed to load attendance data.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const fetchAdminData = async () => {
     setLoading(true)
     setError(null)
 
     try {
-      // Fetch all users
-      const { data: users, error: usersError } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role')
-        .order('full_name')
-
-      if (usersError) {
-        console.error('Error fetching users:', usersError)
-        throw new Error(`Failed to fetch users: ${usersError.message}`)
+      const { members } = await fetchCurrentMemberDirectory()
+      const eligibleMembers = members.filter((member) => member.role !== 'admin')
+      const eligibleIds = eligibleMembers.map((member) => member.id)
+      if (eligibleIds.length === 0) {
+        setMemberStats([])
+        return
       }
 
+      const { data: profileEmails, error: usersError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', eligibleIds)
+
+      if (usersError) throw new Error(`Failed to fetch member emails: ${usersError.message}`)
+      const emailById = new Map((profileEmails || []).map((member) => [member.id, member.email]))
+
       // Fetch all attendance records
-      const { data: allAttendance, error: attendanceError } = await supabase
+      let allAttendanceQuery: any = supabase
         .from('attendance_records')
         .select('user_id, points_earned')
+      if (schemaReady && access?.term_id) allAttendanceQuery = allAttendanceQuery.eq('term_id', access.term_id)
+      const { data: allAttendance, error: attendanceError } = await allAttendanceQuery
 
       if (attendanceError) {
         console.error('Error fetching attendance:', attendanceError)
@@ -221,9 +137,11 @@ export default function AttendancePage() {
       }
 
       // Fetch all adjustments
-      const { data: allAdjustments, error: adjustError } = await supabase
+      let allAdjustmentsQuery: any = supabase
         .from('points_adjustments')
         .select('user_id, points')
+      if (schemaReady && access?.term_id) allAdjustmentsQuery = allAdjustmentsQuery.eq('term_id', access.term_id)
+      const { data: allAdjustments, error: adjustError } = await allAdjustmentsQuery
 
       if (adjustError) {
         console.error('Error fetching adjustments:', adjustError)
@@ -231,10 +149,12 @@ export default function AttendancePage() {
       }
 
       // Fetch total events with attendance tracking
-      const { data: events, error: eventsError } = await supabase
+      let trackedEventsQuery: any = supabase
         .from('events')
         .select('id')
         .eq('track_attendance', true)
+      if (schemaReady && access?.term_id) trackedEventsQuery = trackedEventsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      const { data: events, error: eventsError } = await trackedEventsQuery
 
       if (eventsError) {
         console.error('Error fetching events:', eventsError)
@@ -243,22 +163,31 @@ export default function AttendancePage() {
 
       const totalEvents = events?.length || 0
 
-      // Calculate stats for each user
-      const stats: MemberStats[] = (users || []).map(user => {
-        const userAttendance = (allAttendance || []).filter(a => a.user_id === user.id)
-        const userAdjustments = (allAdjustments || []).filter(a => a.user_id === user.id)
+      const summaryByUser = new Map<string, number>()
+      if (schemaReady && access?.term_id) {
+        const { data: summaries } = await supabase
+          .from('member_term_point_summary')
+          .select('user_id, total_points')
+          .eq('term_id', access.term_id)
+        for (const summary of summaries || []) summaryByUser.set(summary.user_id, Number(summary.total_points || 0))
+      }
 
-        const attendancePoints = userAttendance.reduce((sum, a) => sum + (a.points_earned || 0), 0)
-        const adjustmentPoints = userAdjustments.reduce((sum, a) => sum + a.points, 0)
+      // Calculate attendance rates and use the canonical ledger for totals.
+      const stats: MemberStats[] = eligibleMembers.map(user => {
+        const userAttendance = ((allAttendance || []) as any[]).filter((a: any) => a.user_id === user.id)
+        const userAdjustments = ((allAdjustments || []) as any[]).filter((a: any) => a.user_id === user.id)
+
+        const attendancePoints = userAttendance.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0)
+        const adjustmentPoints = userAdjustments.reduce((sum: number, a: any) => sum + a.points, 0)
         const eventsAttended = userAttendance.length
         const attendanceRate = totalEvents > 0 ? (eventsAttended / totalEvents) * 100 : 0
 
         return {
           user_id: user.id,
           full_name: user.full_name,
-          email: user.email,
+          email: emailById.get(user.id) || '',
           role: user.role,
-          total_points: attendancePoints + adjustmentPoints,
+          total_points: summaryByUser.has(user.id) ? summaryByUser.get(user.id)! : attendancePoints + adjustmentPoints,
           events_attended: eventsAttended,
           attendance_rate: attendanceRate,
         }
@@ -279,11 +208,14 @@ export default function AttendancePage() {
 
     try {
       // Fetch all events with attendance tracking
-      const { data: events, error: eventsError } = await supabase
+      let eventsQuery: any = supabase
         .from('events')
         .select('id, title, start_at, point_value')
         .eq('track_attendance', true)
-        .order('start_at', { ascending: false })
+      if (schemaReady && access?.term_id) {
+        eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      }
+      const { data: events, error: eventsError } = await eventsQuery.order('start_at', { ascending: false })
 
       if (eventsError) {
         console.error('Error fetching events:', eventsError)
@@ -291,12 +223,14 @@ export default function AttendancePage() {
       }
 
       // Fetch all attendance records with user info
-      const { data: allAttendance, error: attendanceError } = await supabase
+      let allAttendanceQuery: any = supabase
         .from('attendance_records')
         .select(`
           event_id,
           user:profiles(full_name)
         `)
+      if (schemaReady && access?.term_id) allAttendanceQuery = allAttendanceQuery.eq('term_id', access.term_id)
+      const { data: allAttendance, error: attendanceError } = await allAttendanceQuery
 
       if (attendanceError) {
         console.error('Error fetching attendance:', attendanceError)
@@ -304,8 +238,8 @@ export default function AttendancePage() {
       }
 
       // Calculate stats for each event
-      const stats: EventStats[] = (events || []).map(event => {
-        const attendees = (allAttendance || []).filter(a => a.event_id === event.id)
+      const stats: EventStats[] = (events || []).map((event: any) => {
+        const attendees = (allAttendance || []).filter((a: any) => a.event_id === event.id)
         const attendeeNames = attendees.map((a: any) => a.user?.full_name || 'Unknown').filter(Boolean)
 
         return {
@@ -330,32 +264,34 @@ export default function AttendancePage() {
   const fetchMemberAttendance = async (userId: string) => {
     try {
       // Fetch attendance records
-      const { data: attendance, error: attendanceError } = await supabase
+      let attendanceQuery: any = supabase
         .from('attendance_records')
         .select(`
           *,
           event:events(id, title, start_at, point_value)
         `)
         .eq('user_id', userId)
-        .order('checked_in_at', { ascending: false })
+      if (schemaReady && access?.term_id) attendanceQuery = attendanceQuery.eq('term_id', access.term_id)
+      const { data: attendance, error: attendanceError } = await attendanceQuery.order('checked_in_at', { ascending: false })
 
       if (attendanceError) throw attendanceError
 
       setMemberAttendance((attendance as AttendanceWithEvent[]) || [])
 
       // Fetch manual adjustments
-      const { data: adjustments, error: adjustError } = await supabase
+      let adjustmentsQuery: any = supabase
         .from('points_adjustments')
         .select('*')
         .eq('user_id', userId)
-        .order('created_at', { ascending: false })
+      if (schemaReady && access?.term_id) adjustmentsQuery = adjustmentsQuery.eq('term_id', access.term_id)
+      const { data: adjustments, error: adjustError } = await adjustmentsQuery.order('created_at', { ascending: false })
 
       if (adjustError) throw adjustError
 
       // Create combined history
       const history: AttendanceHistoryItem[] = [
         // Add event attendance
-        ...(attendance || []).map(record => ({
+        ...(attendance || []).map((record: any) => ({
           id: record.id,
           type: 'event' as const,
           title: record.event?.title || 'Unknown Event',
@@ -364,7 +300,7 @@ export default function AttendancePage() {
           reason: null
         })),
         // Add manual adjustments
-        ...(adjustments || []).map(adj => ({
+        ...(adjustments || []).map((adj: any) => ({
           id: adj.id,
           type: 'adjustment' as const,
           title: adj.reason?.startsWith('Task completion:')
@@ -482,94 +418,16 @@ export default function AttendancePage() {
     }
   }
 
-  const handleCheckIn = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!profile || !checkInCode.trim()) return
-
-    setCheckingIn(true)
-    setError(null)
-    setCheckInSuccess(false)
-
-    try {
-      const code = checkInCode.trim().toUpperCase()
-
-      // Find event with this code
-      const { data: events, error: eventError } = await supabase
-        .from('events')
-        .select('id, title, point_value, attendance_code, code_expires_at, end_at, start_at, event_category')
-        .eq('attendance_code', code)
-        .eq('track_attendance', true)
-        .single()
-
-      if (eventError || !events) {
-        setError('Invalid check-in code. Please try again.')
-        return
-      }
-
-      // Check if code is expired (null means no expiry)
-      if (events.code_expires_at) {
-        const now = new Date()
-        const expiresAt = new Date(events.code_expires_at)
-        const hasValidExpiry = !Number.isNaN(expiresAt.getTime())
-
-        if (hasValidExpiry && now > expiresAt) {
-          setError('This check-in code has expired.')
-          return
-        }
-      }
-
-      // Check if already checked in
-      const { data: existing, error: checkError } = await supabase
-        .from('attendance_records')
-        .select('id')
-        .eq('event_id', events.id)
-        .eq('user_id', profile.id)
-        .single()
-
-      if (existing) {
-        setError('You have already checked in to this event.')
-        return
-      }
-
-      // Create attendance record
-      const { error: insertError } = await supabase
-        .from('attendance_records')
-        .insert({
-          event_id: events.id,
-          user_id: profile.id,
-          points_earned: events.point_value || 0,
-          event_category: events.event_category,
-        })
-
-      if (insertError) throw insertError
-
-      setCheckInSuccess(true)
-      setCheckInCode('')
-
-      // Refresh data
-      if (isUserAdmin) {
-        await fetchAdminData()
-      } else {
-        await fetchMemberData()
-      }
-
-      // Clear success message after 3 seconds
-      setTimeout(() => setCheckInSuccess(false), 3000)
-    } catch (err: any) {
-      console.error('Error checking in:', err)
-      setError('Failed to check in. Please try again.')
-    } finally {
-      setCheckingIn(false)
-    }
-  }
 
   const fetchAllEvents = async () => {
     try {
-      const { data, error } = await supabase
+      let eventsQuery: any = supabase
         .from('events')
         .select('id, title, start_at, point_value, track_attendance, event_category')
-        .order('start_at', { ascending: false })
-        .limit(50)
+      if (schemaReady && access?.term_id) {
+        eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      }
+      const { data, error } = await eventsQuery.order('start_at', { ascending: false }).limit(50)
 
       if (error) throw error
       setAllEvents((data as Event[]) || [])
@@ -581,6 +439,10 @@ export default function AttendancePage() {
   const handlePointsAdjustment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile || !adjustmentUser || !adjustmentPoints) return
+    if (!memberStats.some((member) => member.user_id === adjustmentUser)) {
+      setError('Select a member approved for the current semester.')
+      return
+    }
 
     // Validate based on adjustment type
     if (adjustmentType === 'event' && !adjustmentEvent) {
@@ -707,171 +569,14 @@ export default function AttendancePage() {
 
   if (!profile) return null
 
-  // Member View
+  // Admin-only page. Members check in from the dashboard and view their points at /points.
   if (!isUserAdmin) {
     return (
-      <div className="p-6 space-y-6 max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <ClipboardCheck className="w-7 h-7 text-primary" />
-            Attendance
-          </h1>
-        </div>
-
-        {error && (
-          <div className="hidden sm:block p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        {checkInSuccess && (
-          <div className="hidden sm:flex p-4 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm items-center gap-2">
-            <CheckCircle2 className="w-5 h-5" />
-            Successfully checked in! Points added to your account.
-          </div>
-        )}
-
-        {/* Stats Cards */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="card-glow p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Points</p>
-                <p className="text-3xl font-bold text-primary">{totalPoints}</p>
-              </div>
-              <Trophy className="w-10 h-10 text-primary opacity-50" />
-            </div>
-            {(() => {
-              const requiredPoints = ROLE_REQUIREMENTS[profile.role].minPoints
-              const pointsProgress = requiredPoints > 0 ? Math.min((totalPoints / requiredPoints) * 100, 100) : 100
-              return requiredPoints > 0 ? (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Required for {profile.role.replace('_', ' ')}</span>
-                    <span className="text-primary font-medium">{requiredPoints} pts</span>
-                  </div>
-                  <div className="w-full h-2 bg-dark-200 rounded-full border border-primary/30">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all"
-                      style={{ width: `${pointsProgress}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {totalPoints >= requiredPoints ? '✅ Requirement met!' : `${requiredPoints - totalPoints} points to go`}
-                  </p>
-                </div>
-              ) : null
-            })()}
-          </div>
-
-          <div className="card-glow p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Events Attended</p>
-                <p className="text-3xl font-bold text-foreground">{eventsAttended}</p>
-              </div>
-              <Calendar className="w-10 h-10 text-blue-400 opacity-50" />
-            </div>
-          </div>
-
-          <div className="card-glow p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <QrCode className="w-4 h-4 text-primary" />
-              <p className="text-sm text-muted-foreground">Check In Event</p>
-            </div>
-            <form onSubmit={handleCheckIn} className="space-y-2">
-              {(error || checkInSuccess) && (
-                <div className="sm:hidden space-y-2">
-                  {error && (
-                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-                      {error}
-                    </div>
-                  )}
-                  {checkInSuccess && (
-                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4" />
-                      Successfully checked in! Points added to your account.
-                    </div>
-                  )}
-                </div>
-              )}
-              <input
-                type="text"
-                value={checkInCode}
-                onChange={(e) => setCheckInCode(e.target.value.toUpperCase())}
-                placeholder="Enter code (e.g. ABC123)"
-                maxLength={6}
-                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm font-mono text-foreground uppercase tracking-wider placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-              <button
-                type="submit"
-                disabled={checkingIn || !checkInCode.trim()}
-                className="w-full px-3 py-2 rounded-md bg-primary text-dark-300 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              >
-                {checkingIn ? 'Checking in...' : 'Check In'}
-              </button>
-            </form>
-          </div>
-        </div>
-
-        {/* Category Points Breakdown */}
-        <CategoryPointsBreakdown userId={profile.id} />
-
-        {/* Attendance History */}
-        <div className="card-glow p-6">
-          <h2 className="text-xl font-semibold text-foreground mb-4">Points History</h2>
-
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
-          ) : attendanceHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No records yet. Check in to your first event!</p>
-          ) : (
-            <div className="space-y-2">
-              {attendanceHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className={`flex items-start justify-between p-4 rounded-lg border ${
-                    item.type === 'event'
-                      ? 'bg-dark-300/50 border-primary/10'
-                      : item.points > 0
-                      ? 'bg-green-500/5 border-green-500/20'
-                      : 'bg-red-500/5 border-red-500/20'
-                  }`}
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-sm font-medium text-foreground">{item.title}</p>
-                      {item.type === 'adjustment' && (
-                        <span className={`px-2 py-0.5 text-[10px] rounded-full font-medium uppercase tracking-wide ${
-                          item.points > 0
-                            ? 'bg-green-500/20 text-green-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          Manual
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(item.timestamp).toLocaleString()}
-                    </p>
-                    {item.reason && (
-                      <p className="text-xs text-muted-foreground mt-2 italic">
-                        Reason: {item.reason}
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-lg font-bold ${
-                      item.points > 0 ? 'text-green-400' : 'text-red-400'
-                    }`}>
-                      {item.points > 0 ? '+' : ''}{item.points} pts
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      <div className="portal-page">
+        <div className="portal-empty">
+          <ShieldCheck className="h-8 w-8" />
+          <h1>Administrator access only</h1>
+          <p>Attendance management is restricted to the portal administrator.</p>
         </div>
       </div>
     )
@@ -879,52 +584,48 @@ export default function AttendancePage() {
 
   // Admin View
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <ClipboardCheck className="w-7 h-7 text-primary" />
-            Attendance Management
-          </h1>
-        </div>
-
-        <div className="flex gap-2">
+    <div className="portal-page max-w-7xl space-y-6">
+      <SectionPageHeader
+        eyebrow="Admin"
+        title="Attendance management"
+        description="Review attendance records, export results, and make documented point adjustments."
+        icon={ClipboardCheck}
+        actions={<>
           <button
             onClick={() => {
               setShowAdjustmentForm(true)
               fetchAllEvents()
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90"
+            className="portal-button"
           >
             <Plus className="w-4 h-4" />
             Adjust Points
           </button>
           <button
             onClick={exportToCSV}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-primary/30 text-sm text-primary hover:bg-primary/10"
+            className="portal-button-secondary"
           >
             <Download className="w-4 h-4" />
             Export CSV
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
       {error && (
-        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+        <div className="portal-alert-error">
           {error}
         </div>
       )}
 
       {/* View Toggle */}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
         <button
           onClick={() => {
             setViewMode('members')
             setSearchQuery('')
             if (memberStats.length === 0) fetchAdminData()
           }}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
             viewMode === 'members'
               ? 'bg-primary text-dark-300'
               : 'border border-primary/30 text-primary hover:bg-primary/10'
@@ -939,7 +640,7 @@ export default function AttendancePage() {
             setSearchQuery('')
             if (eventStats.length === 0) fetchEventStats()
           }}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
             viewMode === 'events'
               ? 'bg-primary text-dark-300'
               : 'border border-primary/30 text-primary hover:bg-primary/10'
@@ -952,9 +653,10 @@ export default function AttendancePage() {
 
       {/* Points Adjustment Form */}
       {showAdjustmentForm && (
-        <div className="card-glow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-foreground">Award Points to Member</h2>
+        <div className="portal-modal-backdrop">
+        <div className="portal-modal max-w-2xl">
+          <div className="portal-form-header">
+            <div><p className="portal-eyebrow">Attendance admin</p><h2>Award points to a member</h2><p>Connect the adjustment to an event or document why a manual change is needed.</p></div>
             <button
               onClick={() => {
                 setShowAdjustmentForm(false)
@@ -965,7 +667,8 @@ export default function AttendancePage() {
                 setAdjustmentType('other')
                 setAdjustmentEvent('')
               }}
-              className="p-2 text-muted-foreground hover:text-primary"
+              className="portal-icon-button"
+              aria-label="Close adjustment form"
             >
               <X className="w-5 h-5" />
             </button>
@@ -974,25 +677,26 @@ export default function AttendancePage() {
           <form onSubmit={handlePointsAdjustment} className="space-y-4">
             <div>
               <label className="text-sm font-medium text-foreground mb-2 block">Member</label>
-              <select
+              <UserSearch
+                users={memberStats.map((stat): UserOption => ({
+                  id: stat.user_id,
+                  full_name: stat.full_name,
+                  email: stat.email,
+                  role: stat.role,
+                }))}
                 value={adjustmentUser}
-                onChange={(e) => setAdjustmentUser(e.target.value)}
-                required
-                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              >
-                <option value="">Select member...</option>
-                {memberStats.map((stat) => (
-                  <option key={stat.user_id} value={stat.user_id}>
-                    {stat.full_name} - {stat.email}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => setAdjustmentUser(value as string)}
+                placeholder="Search approved current-semester members..."
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Includes everyone approved for the semester, even while they are still working toward point minimums.
+              </p>
             </div>
 
             <div>
               <label className="text-sm font-medium text-foreground mb-2 block">Adjustment Type</label>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className={`portal-choice-card ${adjustmentType === 'event' ? 'selected' : ''}`}>
                   <input
                     type="radio"
                     name="adjustmentType"
@@ -1004,9 +708,9 @@ export default function AttendancePage() {
                     }}
                     className="text-primary focus:ring-primary"
                   />
-                  <span className="text-sm text-foreground">For Event Attendance</span>
+                  <span className="text-sm font-medium text-foreground">Event attendance</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className={`portal-choice-card ${adjustmentType === 'other' ? 'selected' : ''}`}>
                   <input
                     type="radio"
                     name="adjustmentType"
@@ -1018,7 +722,7 @@ export default function AttendancePage() {
                     }}
                     className="text-primary focus:ring-primary"
                   />
-                  <span className="text-sm text-foreground">Other (Manual Adjustment)</span>
+                  <span className="text-sm font-medium text-foreground">Other manual adjustment</span>
                 </label>
               </div>
             </div>
@@ -1036,7 +740,7 @@ export default function AttendancePage() {
                     }
                   }}
                   required
-                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  className="portal-input w-full bg-dark-100"
                 >
                   <option value="">Select event...</option>
                   {allEvents.map((event) => (
@@ -1062,7 +766,7 @@ export default function AttendancePage() {
                 onChange={(e) => setAdjustmentPoints(e.target.value)}
                 placeholder={adjustmentType === 'event' ? 'Auto-filled from event' : 'e.g. 5 or -5'}
                 required
-                className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className="portal-input w-full bg-dark-100"
               />
             </div>
 
@@ -1073,7 +777,7 @@ export default function AttendancePage() {
                   value={adjustmentCategory}
                   onChange={(e) => setAdjustmentCategory(e.target.value as typeof adjustmentCategory)}
                   required
-                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 mb-3"
+                  className="portal-input mb-3 w-full bg-dark-100"
                 >
                   <option value="">Select category...</option>
                   <option value="membership">Membership</option>
@@ -1088,18 +792,12 @@ export default function AttendancePage() {
                   placeholder="Why are you adjusting points?"
                   required
                   rows={3}
-                  className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  className="portal-input w-full resize-none bg-dark-100"
                 />
               </div>
             )}
 
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="flex-1 px-4 py-2 rounded-lg bg-primary text-dark-300 font-medium hover:opacity-90"
-              >
-                Apply Adjustment
-              </button>
+            <div className="portal-form-actions">
               <button
                 type="button"
                 onClick={() => {
@@ -1111,17 +809,24 @@ export default function AttendancePage() {
                   setAdjustmentType('other')
                   setAdjustmentEvent('')
                 }}
-                className="px-4 py-2 rounded-lg border border-primary/30 text-muted-foreground hover:bg-dark-100"
+                className="portal-button-secondary justify-center"
               >
                 Cancel
+              </button>
+              <button
+                type="submit"
+                className="portal-button justify-center"
+              >
+                Apply adjustment
               </button>
             </div>
           </form>
         </div>
+        </div>
       )}
 
       {/* Search */}
-      <div className="card-glow p-4">
+      <div className="portal-panel">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
           <input
@@ -1129,15 +834,24 @@ export default function AttendancePage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={viewMode === 'members' ? 'Search members by name or email...' : 'Search events by title...'}
-            className="w-full pl-10 pr-4 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+            className="portal-input w-full bg-dark-100 pl-10"
           />
         </div>
       </div>
 
       {/* Member Stats Table */}
       {viewMode === 'members' && (
-      <div className="card-glow overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="portal-panel overflow-hidden p-0 sm:p-0">
+        <div className="divide-y divide-border md:hidden">
+          {loading ? <div className="portal-loading min-h-32">Loading member data...</div> : filteredStats.length === 0 ? <div className="portal-empty compact">No members found</div> : filteredStats.map((stat) => (
+            <article key={`mobile-${stat.user_id}`} className="space-y-4 p-4">
+              <div className="min-w-0"><p className="font-semibold text-foreground">{stat.full_name}</p><p className="break-all text-xs text-muted-foreground">{stat.email}</p></div>
+              <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/40 p-3 text-center"><div><p className="text-lg font-semibold text-primary">{stat.total_points}</p><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Points</p></div><div><p className="text-lg font-semibold">{stat.events_attended}</p><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Events</p></div><div><p className="text-lg font-semibold">{stat.attendance_rate.toFixed(1)}%</p><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Rate</p></div></div>
+              <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium capitalize text-primary">{stat.role.replace('_', ' ')}</span><button onClick={() => { setSelectedMember(stat.user_id); fetchMemberAttendance(stat.user_id) }} className="portal-button-secondary small">View details</button></div>
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full">
             <thead>
               <tr className="border-b border-primary/10">
@@ -1219,8 +933,16 @@ export default function AttendancePage() {
 
       {/* Event Stats Table */}
       {viewMode === 'events' && (
-      <div className="card-glow overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="portal-panel overflow-hidden p-0 sm:p-0">
+        <div className="divide-y divide-border md:hidden">
+          {loading ? <div className="portal-loading min-h-32">Loading event data...</div> : filteredEventStats.length === 0 ? <div className="portal-empty compact">No events found</div> : filteredEventStats.map((stat) => (
+            <article key={`mobile-${stat.event_id}`} className="space-y-4 p-4">
+              <div><p className="font-semibold text-foreground">{stat.title}</p><p className="mt-1 text-xs text-muted-foreground">{new Date(stat.start_at).toLocaleDateString()}</p></div>
+              <div className="flex items-center justify-between gap-3"><div className="flex gap-4 text-sm"><span><strong>{stat.point_value}</strong> pts</span><span><strong>{stat.total_attendees}</strong> attendees</span></div><button onClick={() => { setSelectedEvent(stat.event_id); fetchEventAttendees(stat.event_id) }} className="portal-button-secondary small">View details</button></div>
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full">
             <thead>
               <tr className="border-b border-primary/10">
@@ -1298,8 +1020,8 @@ export default function AttendancePage() {
 
       {/* Member Detail Modal */}
       {selectedMember && (
-        <div className="fixed inset-0 bg-dark-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-dark-200 rounded-lg border border-primary/20 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+        <div className="portal-modal-backdrop">
+          <div className="portal-modal max-w-2xl p-0 lg:p-0">
             <div className="sticky top-0 bg-dark-200 border-b border-primary/10 p-6 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-foreground">
                 {memberStats.find(s => s.user_id === selectedMember)?.full_name}'s Attendance
@@ -1377,8 +1099,8 @@ export default function AttendancePage() {
 
       {/* Event Detail Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 bg-dark-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-dark-200 rounded-lg border border-primary/20 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+        <div className="portal-modal-backdrop">
+          <div className="portal-modal max-w-2xl p-0 lg:p-0">
             <div className="sticky top-0 bg-dark-200 border-b border-primary/10 p-6 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-foreground">
                 {eventStats.find(s => s.event_id === selectedEvent)?.title} - Attendees

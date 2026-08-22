@@ -111,7 +111,7 @@ export default function RichTextEditor({
                 key={action.command}
                 type="button"
                 onClick={() => runCommand(action.command)}
-                className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary sm:h-9 sm:w-9"
                 title={action.label}
                 aria-label={action.label}
               >
@@ -133,7 +133,7 @@ export default function RichTextEditor({
           onPaste={handlePaste}
           onFocus={handleFocus}
           onBlur={handleBlur}
-          className={`${minHeightClassName} w-full p-3 text-sm text-foreground leading-relaxed focus:outline-none [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:space-y-1 [&_li]:my-0.5 [&_p]:my-1 [&_div]:my-1 [&:empty:before]:pointer-events-none [&:empty:before]:text-muted-foreground [&:empty:before]:content-[attr(data-placeholder)]`}
+          className={`${minHeightClassName} w-full p-3 text-base text-foreground leading-relaxed focus:outline-none sm:text-sm [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:space-y-1 [&_li]:my-0.5 [&_p]:my-1 [&_div]:my-1 [&:empty:before]:pointer-events-none [&:empty:before]:text-muted-foreground [&:empty:before]:content-[attr(data-placeholder)]`}
         />
       </div>
     </div>

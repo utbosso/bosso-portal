@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { usePortalAccess } from '@/hooks/usePortalAccess'
 import { createClient } from '@/lib/supabase/client'
-import { isAdmin } from '@/lib/admin'
 import { canAccessRoleScope } from '@/lib/role-scope'
 import {
   LayoutDashboard,
@@ -43,6 +43,7 @@ type NavItem = {
   href: string
   icon: any
   keywords?: string[]
+  section?: string
 }
 
 function SpotifyIcon({ className }: { className?: string }) {
@@ -70,12 +71,14 @@ const navigation: NavItem[] = [
     name: 'Home',
     href: '/dashboard',
     icon: LayoutDashboard,
+    section: 'Overview',
     keywords: ['dashboard', 'overview', 'main', 'summary', 'stats', 'statistics']
   },
   {
     name: 'Announcements',
     href: '/announcements',
     icon: Megaphone,
+    section: 'Organization',
     keywords: ['news', 'updates', 'posts', 'messages', 'notifications', 'alerts']
   },
   {
@@ -100,6 +103,7 @@ const navigation: NavItem[] = [
     name: 'Opportunities',
     href: '/opportunities',
     icon: Briefcase,
+    section: 'Career',
     keywords: ['jobs', 'internships', 'positions', 'careers', 'openings', 'roles']
   },
   {
@@ -124,11 +128,12 @@ const navigation: NavItem[] = [
     name: 'Feedback',
     href: '/feedback',
     icon: MessageSquare,
+    section: 'Member tools',
     keywords: ['feedback', 'suggestions', 'comments', 'opinions', 'reviews', 'input']
   },
   {
-    name: 'Attendance',
-    href: '/attendance',
+    name: 'Points',
+    href: '/points',
     icon: ClipboardCheck,
     keywords: ['attendance', 'checkin', 'check-in', 'present', 'points']
   },
@@ -149,6 +154,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { user, profile, loading, signOut } = useAuth()
+  const { access, schemaReady } = usePortalAccess(user?.id)
+  const isPortalAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   // Track if we've loaded once - after first load, don't show loading spinner
   // This prevents scroll reset when switching browser tabs
@@ -166,7 +173,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState<any[]>([])
   const [notificationCount, setNotificationCount] = useState(0)
-  const [isLightTheme, setIsLightTheme] = useState(false)
+  const [isLightTheme, setIsLightTheme] = useState(
+    () => typeof document === 'undefined' || document.documentElement.classList.contains('light')
+  )
 
   const roleLabel = profile?.role.replace('_', ' ')
   const isAuthPage = useMemo(
@@ -239,13 +248,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Detect theme changes
   useEffect(() => {
     const checkTheme = () => {
-      setIsLightTheme(document.body.classList.contains('light'))
+      setIsLightTheme(document.documentElement.classList.contains('light'))
     }
 
     checkTheme()
 
     const observer = new MutationObserver(checkTheme)
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 
     return () => observer.disconnect()
   }, [])
@@ -263,9 +272,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         return
       }
 
-      const { data: announcements, error } = await supabase
+      let announcementsQuery: any = supabase
         .from('announcements')
         .select('id, role_scope, role_scope_mode')
+      if (schemaReady && access?.term_id) announcementsQuery = announcementsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      const { data: announcements, error } = await announcementsQuery
 
       if (error) {
         console.error('Failed to load announcements for unread count', error)
@@ -294,7 +305,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     fetchUnreadCount()
-  }, [profile, pathname])
+  }, [profile, pathname, access?.term_id, schemaReady])
 
   useEffect(() => {
     const fetchTaskCount = async () => {
@@ -305,11 +316,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       try {
         // Count tasks assigned to me (not completed)
-        const { data: assignedTasks, error: assignedError } = await supabase
+        let assignedTaskQuery: any = supabase
           .from('tasks')
           .select('id, status')
           .eq('assigned_to', profile.id)
           .neq('status', 'completed')
+        if (schemaReady && access?.term_id) assignedTaskQuery = assignedTaskQuery.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: assignedTasks, error: assignedError } = await assignedTaskQuery
 
         if (assignedError) throw assignedError
 
@@ -336,7 +349,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     fetchTaskCount()
-  }, [profile, pathname])
+  }, [profile, pathname, access?.term_id, schemaReady])
 
   // Search functionality with debouncing
   useEffect(() => {
@@ -371,7 +384,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }))
 
         // Search admin page if user is admin
-        if (profile && isAdmin(profile.role)) {
+        if (profile && isPortalAdmin) {
           const adminKeywords = ['admin', 'dashboard', 'user management', 'users', 'accounts', 'manage users', 'approve', 'pending']
           if (adminKeywords.some(keyword => keyword.includes(query))) {
             results.push({
@@ -399,14 +412,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
 
         // Search announcements
-        const { data: announcements } = await supabase
+        let announcementSearch: any = supabase
           .from('announcements')
           .select('id, title, created_at')
           .ilike('title', `%${query}%`)
-          .limit(3)
+        if (schemaReady && access?.term_id) announcementSearch = announcementSearch.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: announcements } = await announcementSearch.limit(3)
 
         if (announcements) {
-          announcements.forEach(item => results.push({
+          announcements.forEach((item: any) => results.push({
             type: 'announcement',
             id: item.id,
             title: item.title,
@@ -416,32 +430,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
 
         // Search events
-        const { data: events } = await supabase
+        let eventSearch: any = supabase
           .from('events')
-          .select('id, title, event_date')
+          .select('id, title, start_at')
           .ilike('title', `%${query}%`)
-          .limit(3)
+        if (schemaReady && access?.term_id) eventSearch = eventSearch.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: events } = await eventSearch.limit(3)
 
         if (events) {
-          events.forEach(item => results.push({
+          events.forEach((item: any) => results.push({
             type: 'event',
             id: item.id,
             title: item.title,
-            subtitle: item.event_date ? new Date(item.event_date).toLocaleDateString() : '',
+            subtitle: item.start_at ? new Date(item.start_at).toLocaleDateString() : '',
             href: `/calendar`,
             icon: Calendar,
           }))
         }
 
         // Search documents
-        const { data: documents } = await supabase
+        let documentSearch: any = supabase
           .from('documents')
           .select('id, name, type')
           .ilike('name', `%${query}%`)
-          .limit(3)
+        if (schemaReady && access?.term_id) documentSearch = documentSearch.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: documents } = await documentSearch.limit(3)
 
         if (documents) {
-          documents.forEach(item => results.push({
+          documents.forEach((item: any) => results.push({
             type: 'document',
             id: item.id,
             title: item.name,
@@ -452,15 +468,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
 
         // Search tasks
-        const { data: tasks } = await supabase
+        let taskSearch: any = supabase
           .from('tasks')
           .select('id, title, status')
           .or(`assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}`)
           .ilike('title', `%${query}%`)
-          .limit(3)
+        if (schemaReady && access?.term_id) taskSearch = taskSearch.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: tasks } = await taskSearch.limit(3)
 
         if (tasks) {
-          tasks.forEach(item => results.push({
+          tasks.forEach((item: any) => results.push({
             type: 'task',
             id: item.id,
             title: item.title,
@@ -498,7 +515,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }, 300) // Debounce for 300ms
 
     return () => clearTimeout(timeoutId)
-  }, [searchQuery, profile])
+  }, [searchQuery, profile, access?.term_id, schemaReady])
 
   // Keyboard shortcut for search (Cmd/Ctrl + K)
   useEffect(() => {
@@ -527,11 +544,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const allNotifications: any[] = []
 
         // 1. Unread announcements
-        const { data: announcements } = await supabase
+        let notificationAnnouncementQuery: any = supabase
           .from('announcements')
           .select('id, title, created_at, role_scope, role_scope_mode')
-          .order('created_at', { ascending: false })
-          .limit(10)
+        if (schemaReady && access?.term_id) notificationAnnouncementQuery = notificationAnnouncementQuery.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: announcements } = await notificationAnnouncementQuery.order('created_at', { ascending: false }).limit(10)
 
         if (announcements) {
           const visible = announcements.filter((a: any) => {
@@ -546,7 +563,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           const readIds = new Set((reads ?? []).map((r: any) => r.announcement_id))
           const unreadAnnouncements = visible.filter((a: any) => !readIds.has(a.id))
 
-          unreadAnnouncements.forEach(item => allNotifications.push({
+          unreadAnnouncements.forEach((item: any) => allNotifications.push({
             id: `announcement-${item.id}`,
             type: 'announcement',
             title: item.title,
@@ -585,17 +602,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const nextWeek = new Date(today)
         nextWeek.setDate(today.getDate() + 7)
 
-        const { data: upcomingEvents } = await supabase
+        let upcomingEventQuery: any = supabase
           .from('events')
-          .select('id, title, event_date')
-          .gte('event_date', today.toISOString())
-          .lte('event_date', nextWeek.toISOString())
-          .order('event_date', { ascending: true })
-          .limit(5)
+          .select('id, title, start_at')
+          .gte('start_at', today.toISOString())
+          .lte('start_at', nextWeek.toISOString())
+        if (schemaReady && access?.term_id) upcomingEventQuery = upcomingEventQuery.eq('term_id', access.term_id).is('archived_at', null)
+        const { data: upcomingEvents } = await upcomingEventQuery.order('start_at', { ascending: true }).limit(5)
 
         if (upcomingEvents) {
           upcomingEvents.forEach((event: any) => {
-            const eventDate = new Date(event.event_date)
+            const eventDate = new Date(event.start_at)
             const daysUntil = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 
             allNotifications.push({
@@ -629,7 +646,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     // Refresh every 30 seconds
     const interval = setInterval(fetchNotifications, 30000)
     return () => clearInterval(interval)
-  }, [profile, pathname])
+  }, [profile, pathname, access?.term_id, schemaReady])
 
   // Don't wrap login/signup with shell
   if (isAuthPage) {
@@ -662,11 +679,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const mainPaddingClass = sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
 
   return (
-    <div className="min-h-screen bg-dark-300">
+    <div className="min-h-screen bg-background">
       {/* Desktop sidebar (collapsible) */}
       <aside className={`hidden lg:fixed lg:inset-y-0 lg:flex ${sidebarWidth} lg:flex-col`}>
-        <div className="flex flex-col flex-grow border-r border-primary/20 bg-dark-200 overflow-y-auto">
-          <div className="flex items-center justify-between h-16 px-4 border-b border-primary/20">
+        <div className="flex flex-col flex-grow overflow-y-auto border-r border-border bg-card">
+          <div className="flex items-center justify-between h-16 px-4 border-b border-border">
             {!sidebarCollapsed && (
               <Link href="/dashboard" className="flex items-center gap-3">
                 <Image
@@ -711,11 +728,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const Icon = item.icon
               const active = pathname.startsWith(item.href)
               return (
+                <Fragment key={item.name}>
+                {item.section && !sidebarCollapsed && <p className="mb-1 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground first:mt-0">{item.section}</p>}
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-all hover:bg-primary/10 ${
-                    active ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-primary'
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    active ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   }`}
                 >
                   <Icon className="w-5 h-5" />
@@ -723,29 +742,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     <span className="flex items-center gap-2">
                       {item.name}
                       {item.href === '/announcements' && unreadCount > 0 && (
-                        <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-destructive text-[11px] font-semibold text-dark-300 text-center">
+                        <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-destructive text-[11px] font-semibold text-destructive-foreground text-center">
                           {unreadCount}
                         </span>
                       )}
                       {item.href === '/tasks' && taskCount > 0 && (
-                        <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-primary text-[11px] font-semibold text-dark-300 text-center">
+                        <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-primary text-[11px] font-semibold text-primary-foreground text-center">
                           {taskCount}
                         </span>
                       )}
                     </span>
                   )}
                 </Link>
+                </Fragment>
               )
             })}
 
             {/* Admin Link (only for admins) */}
-            {profile && isAdmin(profile.role) && (
+            {profile && isPortalAdmin && (
               <Link
                 href="/admin"
-                className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-all hover:bg-red-500/10 ${
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                   pathname.startsWith('/admin')
-                    ? 'text-red-400 bg-red-500/10 border border-red-500/30'
-                    : 'text-red-400/80 hover:text-red-400 border border-transparent hover:border-red-500/20'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
                 <Shield className="w-5 h-5" />
@@ -781,7 +801,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="border-t border-primary/20 p-4">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center text-dark-300 font-bold">
+              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold">
                 {profile.full_name.charAt(0)}
               </div>
               {!sidebarCollapsed && (
@@ -818,13 +838,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Mobile sidebar (slide-in) */}
-      {sidebarOpen && (
-        <>
-          <div
-            className="fixed inset-0 bg-dark-900/80 backdrop-blur-sm z-40 lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-          <aside className="fixed inset-y-0 left-0 w-72 bg-dark-200 border-r border-primary/20 z-50 lg:hidden">
+      <div
+        className={`fixed inset-0 z-40 bg-dark-900/80 backdrop-blur-sm transition-opacity duration-200 lg:hidden ${sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[min(19rem,calc(100vw-2rem))] transform border-r border-border bg-card shadow-2xl transition-transform duration-200 ease-out lg:hidden ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        aria-hidden={!sidebarOpen}
+      >
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between h-16 px-4 border-b border-primary/20">
                 <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setSidebarOpen(false)}>
@@ -858,41 +880,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   const Icon = item.icon
                   const active = pathname.startsWith(item.href)
                   return (
+                    <Fragment key={item.name}>
+                    {item.section && <p className="mb-1 mt-5 px-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground first:mt-0">{item.section}</p>}
                     <Link
                       key={item.name}
                       href={item.href}
                       onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all ${
-                        active ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                      className={`flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
+                        active ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
                       <Icon className="w-5 h-5" />
                       <span className="flex items-center gap-2 flex-1">
                         {item.name}
                         {item.href === '/announcements' && unreadCount > 0 && (
-                          <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-destructive text-[11px] font-semibold text-dark-300 text-center">
+                          <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-destructive text-[11px] font-semibold text-destructive-foreground text-center">
                             {unreadCount}
                           </span>
                         )}
                         {item.href === '/tasks' && taskCount > 0 && (
-                          <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-primary text-[11px] font-semibold text-dark-300 text-center">
+                          <span className="min-w-[20px] px-2 py-0.5 rounded-full bg-primary text-[11px] font-semibold text-primary-foreground text-center">
                             {taskCount}
                           </span>
                         )}
                       </span>
                     </Link>
+                    </Fragment>
                   )
                 })}
 
                 {/* Admin Link (only for admins) */}
-                {profile && isAdmin(profile.role) && (
+                {profile && isPortalAdmin && (
                   <Link
                     href="/admin"
                     onClick={() => setSidebarOpen(false)}
                     className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all ${
                       pathname.startsWith('/admin')
                         ? 'text-red-400 bg-red-500/10 border border-red-500/30'
-                        : 'text-red-400/80 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20'
+                        : 'text-destructive/80 hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20'
                     }`}
                   >
                     <Shield className="w-5 h-5" />
@@ -926,7 +951,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               <div className="border-t border-primary/20 p-4">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center text-dark-300 font-bold">
+                  <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold">
                     {profile.full_name.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -958,15 +983,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </aside>
-        </>
-      )}
 
       {/* Main content */}
       <div className={mainPaddingClass}>
-        <header className="sticky top-0 z-30 flex items-center gap-4 h-16 px-4 border-b border-primary/20 bg-dark-200/80 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-border bg-card/90 px-3 backdrop-blur-xl sm:gap-4 sm:px-4">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 text-muted-foreground hover:text-primary lg:hidden"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-primary lg:hidden"
             aria-label="Open sidebar"
           >
             <Menu className="w-6 h-6" />
@@ -981,8 +1004,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
-                placeholder="Search BOSSO (Ctrl+K)..."
-                className="w-full pl-10 pr-4 py-2 bg-dark-100 border border-primary/20 rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                placeholder="Search portal..."
+                className="min-h-10 w-full rounded-lg border border-primary/20 bg-dark-100 py-2 pl-10 pr-4 text-base text-foreground placeholder-muted-foreground transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:text-sm"
               />
               {searchLoading && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -993,7 +1016,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
             {/* Search Results Dropdown */}
             {showSearchResults && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-dark-100 border border-primary/20 rounded-lg shadow-2xl max-h-96 overflow-y-auto z-50">
+              <div className="fixed inset-x-4 top-16 z-50 mt-2 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-lg border border-primary/20 bg-dark-100 shadow-2xl sm:absolute sm:inset-x-0 sm:top-full sm:max-h-96">
                 <div className="p-2">
                   <div className="text-xs text-muted-foreground uppercase tracking-wide px-3 py-2">
                     Search Results ({searchResults.length})
@@ -1021,7 +1044,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-muted-foreground px-2 py-1 bg-dark-200 rounded capitalize">
+                        <span className="hidden rounded bg-dark-200 px-2 py-1 text-xs capitalize text-muted-foreground sm:inline">
                           {result.type}
                         </span>
                       </Link>
@@ -1043,11 +1066,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
+              aria-label="Open notifications"
             >
               <Bell className="w-6 h-6" />
               {notificationCount > 0 && (
-                <span className="absolute top-0 right-0 flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-accent rounded-full">
+                <span className="absolute top-0 right-0 flex items-center justify-center w-5 h-5 text-xs font-bold text-accent-foreground bg-accent rounded-full">
                   {notificationCount > 9 ? '9+' : notificationCount}
                 </span>
               )}
@@ -1055,7 +1079,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
             {/* Notifications Dropdown */}
             {showNotifications && (
-              <div className="absolute top-full right-0 mt-2 w-96 bg-dark-100 border border-primary/20 rounded-lg shadow-2xl max-h-[600px] overflow-hidden z-50 flex flex-col">
+              <div className="fixed inset-x-4 top-16 z-50 mt-2 flex max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-lg border border-primary/20 bg-dark-100 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:max-h-[600px] sm:w-96">
                 <div className="p-4 border-b border-primary/20 flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-foreground">Notifications</h3>
                   {notificationCount > 0 && (
@@ -1134,7 +1158,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="p-6">{children}</main>
+        <main className="px-4 py-5 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   )

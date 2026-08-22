@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/route-handler'
+import { createAdminClient, isPortalAdminUser } from '@/lib/supabase/admin'
 import { createCalendarEvent } from '@/lib/google-calendar'
-import { filterUsersByAudience, getRoleScopeLabel } from '@/lib/role-scope'
+import { getRoleScopeLabel } from '@/lib/role-scope'
+import { loadCurrentTermMembers, selectCurrentTermRecipients } from '@/lib/current-term-recipients'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,16 +13,6 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile) {
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
 
     // Get event details from request
@@ -45,32 +37,31 @@ export async function POST(request: NextRequest) {
     const calendarSummary = /^bosso\b/i.test(event.title) ? event.title : `BOSSO ${event.title}`
 
     // Verify user is either admin or event creator
-    const isAdmin = profile.role === 'admin'
+    const admin = createAdminClient()
+    const currentContext = await loadCurrentTermMembers(admin)
+    const isAdmin = isPortalAdminUser(user)
     const isCreator = event.created_by === user.id
+    const isCurrentMember = currentContext.members.some((member) => member.id === user.id)
 
-    if (!isAdmin && !isCreator) {
+    if (!isAdmin && (!isCreator || !isCurrentMember)) {
       return NextResponse.json({
-        error: 'Forbidden: Only admins or event creators can send calendar invites'
+        error: 'Forbidden: Only the current-semester event creator or portal admin can send calendar invites'
       }, { status: 403 })
     }
 
-    // Get users who should receive this event based on audience scope or selected users
-    const { data: allUsers, error: usersError } = await supabase
-      .from('profiles')
-      .select('id, email, full_name, role')
-      .eq('account_status', 'active')
-
-    if (usersError) {
-      console.error('Error fetching users:', usersError)
-      return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 })
+    if (event.term_id && event.term_id !== currentContext.term.id) {
+      return NextResponse.json({ error: 'Archived-semester events cannot email the current member list.' }, { status: 409 })
     }
 
-    const eligibleUsers = filterUsersByAudience(
-      allUsers || [],
-      event.audience_scope,
-      event.audience_scope_mode,
-      event.target_user_ids
-    )
+    const eligibleUsers = selectCurrentTermRecipients(currentContext, {
+      roleScope: event.audience_scope,
+      roleScopeMode: event.audience_scope_mode,
+      targetUserIds: event.target_user_ids,
+    })
+
+    if (eligibleUsers.length === 0) {
+      return NextResponse.json({ error: 'No approved current-semester members match this audience.' }, { status: 409 })
+    }
 
     const audienceLabel = event.target_user_ids?.length
       ? `${event.target_user_ids.length} selected member(s)`
@@ -109,6 +100,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       message: 'Calendar invites sent',
+      term: currentContext.term.name,
       sent: successful,
       failed,
       total: eligibleUsers.length,

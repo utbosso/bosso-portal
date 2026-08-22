@@ -179,7 +179,7 @@ export default function LoginPage() {
               type="button"
               onClick={handleGoogleSignIn}
               disabled={loading}
-              className="w-full bg-white hover:bg-gray-100 text-gray-900 font-semibold py-4 px-4 rounded-lg border-2 border-gray-300 flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+              className="google-auth-button flex w-full items-center justify-center gap-3 rounded-lg border-2 px-4 py-4 font-semibold shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">

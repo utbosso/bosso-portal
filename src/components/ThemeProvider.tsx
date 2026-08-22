@@ -1,16 +1,17 @@
 'use client'
 
 import { useEffect } from 'react'
+import { applyPortalTheme, getStoredTheme, THEME_STORAGE_KEY } from '@/lib/theme'
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    // Apply saved theme on mount
-    const savedTheme = localStorage.getItem('theme')
-    if (savedTheme === 'light') {
-      document.body.classList.add('light')
-    } else {
-      document.body.classList.remove('light')
+    applyPortalTheme(getStoredTheme())
+
+    const syncAcrossTabs = (event: StorageEvent) => {
+      if (event.key === THEME_STORAGE_KEY) applyPortalTheme(event.newValue === 'dark' ? 'dark' : 'light')
     }
+    window.addEventListener('storage', syncAcrossTabs)
+    return () => window.removeEventListener('storage', syncAcrossTabs)
   }, [])
 
   return <>{children}</>

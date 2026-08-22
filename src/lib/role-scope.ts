@@ -40,6 +40,20 @@ export function toRoleScopePayload(option: RoleScopeOption): {
     }
   }
 
+  if (option === 'general_member') {
+    return {
+      roleScope: 'general_member',
+      roleScopeMode: 'exact_role',
+    }
+  }
+
+  if (option === 'board_member') {
+    return {
+      roleScope: 'board_member',
+      roleScopeMode: 'exact_role',
+    }
+  }
+
   return {
     roleScope: option,
     roleScopeMode: 'minimum_role',
@@ -61,10 +75,14 @@ export function getRoleScopeLabel(
 ): string {
   if (!roleScope) return 'All BOSSO members'
   if (roleScope === 'analyst' && roleScopeMode === 'exact_role') return 'Analysts only'
-  if (roleScope === 'general_member') return 'General Members only'
+  if (roleScope === 'general_member') {
+    return roleScopeMode === 'exact_role' ? 'General Members only' : 'All BOSSO members'
+  }
   if (roleScope === 'analyst') return 'Analysts and above'
   if (roleScope === 'project_manager') return 'PMs and Board'
-  if (roleScope === 'board_member') return 'Board only'
+  if (roleScope === 'board_member') {
+    return roleScopeMode === 'exact_role' ? 'Board only' : 'Board and portal admin'
+  }
   return roleScope.replace('_', ' ')
 }
 

@@ -95,8 +95,8 @@ export default function VerifyEmailPage() {
                 </svg>
                 <span className="text-amber-400 font-semibold text-sm">Email Not Verified</span>
               </div>
-              <p className="text-xs text-amber-400/80">
-                Your email verification is pending. An admin will contact you.
+              <p className="text-xs text-muted-foreground">
+                An administrator will email you to confirm this address.
               </p>
             </div>
           )}
@@ -107,20 +107,11 @@ export default function VerifyEmailPage() {
             <div className="bg-dark-100 border border-primary/20 rounded-lg p-4 space-y-3">
               <h3 className="font-semibold text-foreground text-sm">What happens next?</h3>
               <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
-                <li>A BOSSO admin will send you an email verification request</li>
-                <li>Reply to that email to verify your account</li>
-                <li>Once the admin receives your reply, they'll mark your email as verified</li>
-                <li>Your account will then be reviewed and approved by an admin</li>
-                <li>You'll be able to sign in once approved</li>
+                <li>An administrator will email you to confirm this address</li>
+                <li>Reply to confirm, and an administrator will mark it verified</li>
+                <li>Your position code and dues status will be reviewed</li>
+                <li>Portal access opens after administrator approval</li>
               </ol>
-            </div>
-          )}
-
-          {emailParam && (
-            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-              <p className="text-amber-400 text-sm">
-                <strong>Note:</strong> Do not try to log in yet. You'll need to wait for the admin's verification email and account approval.
-              </p>
             </div>
           )}
 
@@ -129,10 +120,10 @@ export default function VerifyEmailPage() {
             <div className="bg-dark-100 border border-primary/20 rounded-lg p-4 space-y-3">
               <h3 className="font-semibold text-foreground text-sm">What happens next?</h3>
               <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
-                <li>A BOSSO admin will send you an email verification request</li>
-                <li>Reply to that email to verify your account</li>
-                <li>Your account will be reviewed and approved by an admin</li>
-                <li>You'll be able to sign in once approved</li>
+                <li>An administrator will email you to confirm this address</li>
+                <li>Reply to confirm, and an administrator will mark it verified</li>
+                <li>Your position and dues will be reviewed</li>
+                <li>Portal access opens after approval</li>
               </ol>
             </div>
           )}

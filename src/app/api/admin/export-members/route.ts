@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { isPortalAdminUser } from '@/lib/supabase/admin'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
@@ -15,13 +18,7 @@ export async function GET() {
     }
 
     // Check if user is admin
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile || profile.role !== 'admin') {
+    if (!isPortalAdminUser(user)) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
     }
 

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import dynamic from "next/dynamic";
+import PortalAccessGate from "@/components/PortalAccessGate";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -35,16 +36,34 @@ export const viewport: Viewport = {
 const AppShell = dynamic(() => import("@/components/AppShell"), { ssr: false });
 const ThemeProvider = dynamic(() => import("@/components/ThemeProvider"), { ssr: false });
 
+const themeBootScript = `
+  (function () {
+    try {
+      var theme = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
+      var root = document.documentElement;
+      root.classList.remove('light', 'dark');
+      root.classList.add(theme);
+      root.style.colorScheme = theme;
+    } catch (_) {
+      document.documentElement.classList.add('light');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${outfit.variable}`}>
+    <html lang="en" className={`${inter.variable} ${outfit.variable} light`} suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: themeBootScript }} /></head>
       <body className="antialiased">
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <PortalAccessGate>
+            <AppShell>{children}</AppShell>
+          </PortalAccessGate>
         </ThemeProvider>
       </body>
     </html>

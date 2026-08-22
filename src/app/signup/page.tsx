@@ -36,7 +36,7 @@ export default function SignupPage() {
 
   const validateRegistrationCode = async () => {
     if (!formData.registrationCode) {
-      setError('Please enter a registration code')
+      setError('Please enter a position code')
       return
     }
 
@@ -44,27 +44,23 @@ export default function SignupPage() {
     setError('')
 
     try {
-      const { data, error } = await supabase.rpc('validate_registration_code', {
-        code_text: formData.registrationCode
+      const response = await fetch('/api/semester/validate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: formData.registrationCode }),
       })
+      const result = await response.json()
 
-      if (error) throw error
-
-      if (data && data.length > 0) {
-        const result = data[0]
-        if (result.is_valid) {
-          setCodeValidated(true)
-          setIntendedRole(result.intended_role)
-          setError('')
-        } else {
-          setError('Invalid or expired registration code. Please contact the BOSSO board at internal@txbosso.com.')
-        }
+      if (response.ok && result.valid) {
+        setCodeValidated(true)
+        setIntendedRole(result.intendedRole)
+        setError('')
       } else {
-        setError('Invalid registration code. Please check and try again.')
+        setError('Invalid or expired position code. Please contact the BOSSO board at internal@txbosso.com.')
       }
     } catch (err) {
       console.error('Error validating code:', err)
-      setError('Failed to validate registration code. Please try again.')
+      setError('Failed to validate the position code. Please try again.')
     } finally {
       setValidatingCode(false)
     }
@@ -73,7 +69,7 @@ export default function SignupPage() {
   const handleGoogleSignIn = async () => {
     // Check if code is validated
     if (!codeValidated) {
-      setError('Please validate your registration code first')
+      setError('Please validate your position code first')
       return
     }
 
@@ -88,11 +84,13 @@ export default function SignupPage() {
 
     try {
       // Store signup data in session storage for callback
-      sessionStorage.setItem('signup_data', JSON.stringify({
+      const signupData = JSON.stringify({
         fullName: formData.fullName,
         registrationCode: formData.registrationCode,
         intendedRole: intendedRole,
-      }))
+      })
+      sessionStorage.setItem('signup_data', signupData)
+      localStorage.setItem('signup_data', signupData)
 
       // Initiate Google OAuth sign in
       const { error } = await supabase.auth.signInWithOAuth({
@@ -124,7 +122,7 @@ export default function SignupPage() {
 
     // Check if code is validated
     if (!codeValidated) {
-      setError('Please validate your registration code first')
+      setError('Please validate your position code first')
       return
     }
 
@@ -151,7 +149,15 @@ export default function SignupPage() {
     setError('')
 
     try {
-      // Sign up with email and password - disable email confirmation
+      const signupData = JSON.stringify({
+        fullName: formData.fullName,
+        registrationCode: formData.registrationCode,
+        intendedRole,
+      })
+      sessionStorage.setItem('signup_data', signupData)
+      localStorage.setItem('signup_data', signupData)
+
+      // New email/password accounts must confirm the automated Supabase email.
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: formData.password,
@@ -165,6 +171,11 @@ export default function SignupPage() {
 
       if (signUpError) throw signUpError
       if (!authData.user) throw new Error('No user returned from signup')
+
+      if (!authData.session) {
+        router.push('/verify-email?email=' + encodeURIComponent(email))
+        return
+      }
 
       // Create or update profile
       // Check if profile already exists (in case auth trigger created it)
@@ -185,7 +196,6 @@ export default function SignupPage() {
           .from('profiles')
           .update({
             full_name: formData.fullName,
-            role: intendedRole,
             account_status: 'pending_approval',
             email_verified: false,
           })
@@ -207,7 +217,7 @@ export default function SignupPage() {
           email: email,
           full_name: formData.fullName,
           account_status: 'pending_approval',
-          role: intendedRole,
+          role: 'general_member' as const,
           email_verified: false,
         }
         console.log('[signup] Profile data being inserted:', profileData)
@@ -226,15 +236,13 @@ export default function SignupPage() {
         console.log('[signup] ROLE CHECK - Expected:', intendedRole, 'Got:', insertedProfile?.[0]?.role)
       }
 
-      // Increment code usage
-      try {
-        await supabase.rpc('increment_code_usage', {
-          code_text: formData.registrationCode,
-          user_uuid: authData.user.id
-        })
-      } catch (codeError) {
-        console.error('Error incrementing code usage:', codeError)
-      }
+      // The code is claimed after authentication and remains pending until an
+      // administrator approves the new term membership.
+      await fetch('/api/semester/renew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: formData.registrationCode }),
+      })
 
       // Sign out immediately so they need to verify email first
       await supabase.auth.signOut()
@@ -281,7 +289,7 @@ export default function SignupPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <label htmlFor="registrationCode" className="text-sm font-medium text-foreground">
-                Registration Code
+                Position Code
               </label>
               <div className="flex gap-2">
                 <input
@@ -292,21 +300,21 @@ export default function SignupPage() {
                   onChange={handleChange}
                   required
                   disabled={codeValidated}
-                  className="flex-1 px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="Enter code from BOSSO admin"
+                  className="portal-input min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-60"
+                  placeholder="Enter position code"
                 />
                 {!codeValidated && (
                   <button
                     type="button"
                     onClick={validateRegistrationCode}
                     disabled={validatingCode || !formData.registrationCode}
-                    className="px-6 py-3 bg-primary/20 border border-primary/30 rounded-lg text-primary hover:bg-primary/30 hover:border-primary/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    className="portal-button-secondary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {validatingCode ? 'Validating...' : 'Validate'}
                   </button>
                 )}
                 {codeValidated && (
-                  <div className="px-4 py-3 bg-green-500/20 border border-green-500/30 rounded-lg text-green-400 flex items-center gap-2 font-medium">
+                  <div className="flex shrink-0 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 font-medium text-emerald-800">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
@@ -315,8 +323,8 @@ export default function SignupPage() {
                 )}
               </div>
               {codeValidated && (
-                <p className="text-xs text-green-400">
-                  Code validated! You'll be registered as: <span className="font-semibold">{intendedRole.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</span>
+                <p className="text-xs text-emerald-700">
+                  Code accepted. Requested position: <span className="font-semibold">{intendedRole.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</span>. An admin will review it before access opens.
                 </p>
               )}
             </div>
@@ -332,7 +340,7 @@ export default function SignupPage() {
                 value={formData.fullName}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
+                className="portal-input w-full"
                 placeholder="First Last"
               />
             </div>
@@ -351,7 +359,7 @@ export default function SignupPage() {
                     value={formData.email}
                     onChange={handleChange}
                     required
-                    className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
+                    className="portal-input w-full"
                     placeholder="yourname@eid.utexas.edu or @my.utexas.edu"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -371,7 +379,7 @@ export default function SignupPage() {
                     onChange={handleChange}
                     required
                     minLength={8}
-                    className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon"
+                    className="portal-input w-full"
                     placeholder="Minimum 8 characters"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -405,7 +413,7 @@ export default function SignupPage() {
               type="button"
               onClick={handleGoogleSignIn}
               disabled={loading || !codeValidated || !formData.fullName.trim()}
-              className="w-full bg-white hover:bg-gray-100 text-gray-900 font-semibold py-3 px-4 rounded-lg border-2 border-gray-300 flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+              className="google-auth-button flex w-full items-center justify-center gap-2 rounded-lg border-2 px-3 py-3 font-semibold shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 sm:gap-3 sm:px-4"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -423,7 +431,7 @@ export default function SignupPage() {
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                   </svg>
-                  <span>Sign up with Google</span>
+                  <span className="whitespace-nowrap">Sign up with Google</span>
                 </>
               )}
             </button>
@@ -451,8 +459,9 @@ export default function SignupPage() {
               disabled={loading || !codeValidated || !formData.fullName.trim()}
               className="w-full py-3 border-2 border-primary/30 rounded-lg text-primary hover:bg-primary/10 hover:border-primary/60 transition-all hover-glow font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Sign up with Email/Password (@eid / @my.utexas.edu)
+              Sign up with UT email
             </button>
+            <p className="text-center text-xs text-muted-foreground">For @eid.utexas.edu or @my.utexas.edu accounts</p>
               </>
             )}
           </div>

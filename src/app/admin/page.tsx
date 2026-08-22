@@ -2,9 +2,10 @@
 
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
-import { isAdmin, getRoleDisplayName as getAdminRoleDisplayName } from '@/lib/admin'
+import { getRoleDisplayName as getAdminRoleDisplayName } from '@/lib/admin'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Shield,
   Users,
@@ -29,12 +30,19 @@ import {
   KeyRound,
   Plus,
   X,
+  CalendarRange,
+  Loader2,
 } from 'lucide-react'
-import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole } from '@/types/database.types'
+import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
 import { meetsRoleRequirements } from '@/lib/membership-tiers'
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
-import UserSearch, { UserOption } from '@/components/UserSearch'
+import type { UserOption } from '@/components/UserSearch'
+import MemberGroupPicker from '@/components/MemberGroupPicker'
+import {
+  fetchCurrentMemberDirectory,
+  type CommunicationMemberGroup,
+} from '@/lib/communication-recipients'
 
 const supabase = createClient()
 
@@ -70,7 +78,8 @@ type PointsSourceItem = {
 }
 
 export default function AdminDashboard() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
+  const isPortalAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -181,7 +190,7 @@ export default function AdminDashboard() {
   }, [loading])
 
   useEffect(() => {
-    if (profile && isAdmin(profile.role)) {
+    if (profile && isPortalAdmin) {
       fetchDashboardData()
     }
   }, [profile])
@@ -204,31 +213,63 @@ export default function AdminDashboard() {
         .from('applications')
         .select('*')
 
-      // Fetch all feedback
-      const { data: feedback } = await supabase
+      const { data: currentTerm } = await supabase
+        .from('academic_terms')
+        .select('id')
+        .eq('status', 'current')
+        .maybeSingle()
+
+      // Fetch current-term feedback. A missing term is the pre-migration fallback.
+      let feedbackQuery: any = supabase
         .from('feedback_submissions')
         .select(`
           *,
           submitter:profiles!feedback_submissions_submitted_by_fkey(id, full_name, email)
         `)
-        .order('created_at', { ascending: false })
-        .limit(10)
+      if (currentTerm?.id) feedbackQuery = feedbackQuery.eq('term_id', currentTerm.id).is('archived_at', null)
+      const { data: feedback } = await feedbackQuery.order('created_at', { ascending: false }).limit(10)
+
+      // Pending renewals are counted from this term's memberships, not the legacy
+      // account_status field, which is never reset by a semester rollover.
+      let pendingUsers = 0
+      if (currentTerm?.id) {
+        const { count } = await supabase
+          .from('member_term_memberships')
+          .select('id', { count: 'exact', head: true })
+          .eq('term_id', currentTerm.id)
+          .in('status', ['pending_dues', 'pending_approval'])
+        pendingUsers = count || 0
+      } else {
+        pendingUsers = users?.filter(u => u.account_status === 'pending_approval' || u.account_status === 'pending').length || 0
+      }
 
       // Calculate stats
       const totalUsers = users?.length || 0
       const totalApplications = applications?.length || 0
       const totalFeedback = feedback?.length || 0
-      const pendingFeedback = feedback?.filter(f => f.status === 'new').length || 0
+      const pendingFeedback = feedback?.filter((f: any) => f.status === 'new').length || 0
       const activeApplications = applications?.filter(a =>
         a.status === 'saved' || a.status === 'applied' || a.status === 'interviewing'
       ).length || 0
-      const pendingUsers = users?.filter(u => u.account_status === 'pending_approval' || u.account_status === 'pending').length || 0
 
-      // Count users by role
+      // Count users by role. profiles.role is never reset by a rollover (it's last-known,
+      // not current-term), so once the term schema is live this counts approved memberships
+      // for the current term instead - otherwise it just replays last term's breakdown.
       const roleCount: Record<string, number> = {}
-      users?.forEach(user => {
-        roleCount[user.role] = (roleCount[user.role] || 0) + 1
-      })
+      if (currentTerm?.id) {
+        const { data: approvedMemberships } = await supabase
+          .from('member_term_memberships')
+          .select('position_role')
+          .eq('term_id', currentTerm.id)
+          .in('status', ['active', 'exempt'])
+        approvedMemberships?.forEach((membership) => {
+          roleCount[membership.position_role] = (roleCount[membership.position_role] || 0) + 1
+        })
+      } else {
+        users?.forEach(user => {
+          roleCount[user.role] = (roleCount[user.role] || 0) + 1
+        })
+      }
 
       setStats({
         totalUsers,
@@ -250,13 +291,13 @@ export default function AdminDashboard() {
   }
 
   const deleteFeedback = async (feedbackId: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this feedback? This action cannot be undone.')
+    const confirmed = window.confirm('Archive this feedback? It will remain in semester history.')
     if (!confirmed) return
 
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('feedback_submissions')
-        .delete()
+        .update({ archived_at: new Date().toISOString() })
         .eq('id', feedbackId)
 
       if (error) throw error
@@ -268,9 +309,9 @@ export default function AdminDashboard() {
     }
   }
 
-  if (!profile || !isAdmin(profile.role)) {
+  if (!profile || !isPortalAdmin) {
     return (
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="portal-page max-w-7xl">
         <div className="card-glow p-12 text-center">
           <Shield className="w-16 h-16 text-red-400 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-foreground mb-2">Access Denied</h1>
@@ -284,7 +325,7 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="portal-page max-w-7xl">
         <div className="card-glow p-12 text-center">
           <Activity className="w-12 h-12 text-primary mx-auto mb-3 animate-pulse" />
           <p className="text-muted-foreground">Loading admin dashboard...</p>
@@ -294,9 +335,10 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="portal-page max-w-7xl space-y-6">
       {/* Header */}
-      <div className="space-y-2">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-2">
         <div className="flex items-center gap-3">
           <Shield className="w-8 h-8 text-red-400" />
           <h1 className="text-3xl font-bold text-gradient">Admin Dashboard</h1>
@@ -304,10 +346,19 @@ export default function AdminDashboard() {
         <p className="text-muted-foreground">
           Master account oversight and management
         </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/attendance" className="portal-button-secondary">
+            <ClipboardCheck className="h-4 w-4" /> Attendance & manual points
+          </Link>
+          <Link href="/admin/semester" className="portal-button">
+            <CalendarRange className="h-4 w-4" /> Semester setup
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-primary/20">
+      <div className="portal-scroll-row flex gap-2 overflow-x-auto border-b border-primary/20">
         <button
           onClick={() => setActiveTab('overview')}
           className={`px-4 py-2 text-sm font-medium transition-all relative ${
@@ -359,19 +410,19 @@ export default function AdminDashboard() {
       {/* Alert for pending users - Only show on Overview tab */}
       {activeTab === 'overview' && stats.pendingUsers > 0 && (
         <div className="bg-yellow-500/20 border-2 border-yellow-500/30 rounded-lg p-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
             <AlertCircle className="w-6 h-6 text-yellow-400 flex-shrink-0" />
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-yellow-400">
                 {stats.pendingUsers} user{stats.pendingUsers > 1 ? 's' : ''} awaiting approval
               </h3>
-              <p className="text-xs text-yellow-300/80 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 New accounts need to be reviewed and approved before they can access the portal.
               </p>
             </div>
             <button
               onClick={() => setActiveTab('users')}
-              className="px-4 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded-lg hover:bg-yellow-500/30 transition-all font-medium text-sm flex-shrink-0"
+              className="min-h-10 w-full flex-shrink-0 rounded-lg border border-yellow-500/30 bg-yellow-500/20 px-4 py-2 text-sm font-medium text-yellow-400 transition-all hover:bg-yellow-500/30 sm:w-auto"
             >
               Review Now
             </button>
@@ -429,7 +480,7 @@ export default function AdminDashboard() {
       <div className="card-glow p-6">
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 className="w-5 h-5 text-primary" />
-          <h2 className="text-xl font-semibold text-foreground">Users by Role</h2>
+          <h2 className="text-xl font-semibold text-foreground">Approved This Semester, by Role</h2>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div className="p-3 rounded-lg bg-dark-300/50 border border-gray-500/20">
@@ -617,6 +668,12 @@ function UserManagementTab() {
   const [tempResetUserId, setTempResetUserId] = useState('')
   const [tempPassword, setTempPassword] = useState('')
   const [settingTempPassword, setSettingTempPassword] = useState(false)
+  const [cleanupEmail, setCleanupEmail] = useState('')
+  const [cleaningUpAuth, setCleaningUpAuth] = useState(false)
+  const [currentTerm, setCurrentTerm] = useState<AcademicTerm | null>(null)
+  const [termMemberships, setTermMemberships] = useState<Record<string, MemberTermMembership>>({})
+  const [fullYearTermIds, setFullYearTermIds] = useState<string[]>([])
+  const [reviewingUser, setReviewingUser] = useState<Profile | null>(null)
 
   useEffect(() => {
     fetchUsers()
@@ -631,14 +688,113 @@ function UserManagementTab() {
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      console.log('[Admin] Fetched users:', data)
-      console.log('[Admin] User count:', data?.length)
-      console.log('[Admin] User roles:', data?.map(u => ({ email: u.email, role: u.role, status: u.account_status })))
       setUsers(data || [])
+
+      const { data: term } = await supabase
+        .from('academic_terms')
+        .select('*')
+        .eq('status', 'current')
+        .maybeSingle()
+      setCurrentTerm((term as AcademicTerm) || null)
+
+      if (term) {
+        const [membershipResult, siblingTermsResult] = await Promise.all([
+          supabase.from('member_term_memberships').select('*').eq('term_id', term.id),
+          supabase
+            .from('academic_terms')
+            .select('id')
+            .eq('academic_year', term.academic_year)
+            .in('status', ['current', 'upcoming']),
+        ])
+        setTermMemberships(
+          Object.fromEntries(((membershipResult.data || []) as MemberTermMembership[]).map((item) => [item.user_id, item]))
+        )
+        setFullYearTermIds((siblingTermsResult.data || []).map((item) => item.id))
+      } else {
+        setTermMemberships({})
+        setFullYearTermIds([])
+      }
     } catch (error) {
       console.error('Error fetching users:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const refreshMembership = async (userId: string) => {
+    if (!currentTerm) return
+    const { data } = await supabase
+      .from('member_term_memberships')
+      .select('*')
+      .eq('term_id', currentTerm.id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (data) setTermMemberships((prev) => ({ ...prev, [userId]: data as MemberTermMembership }))
+  }
+
+  const [duesPromptOpen, setDuesPromptOpen] = useState<{ annual: boolean } | null>(null)
+  const [duesAmount, setDuesAmount] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [reviewSaving, setReviewSaving] = useState('')
+
+  const closeReview = () => {
+    setReviewingUser(null)
+    setDuesPromptOpen(null)
+    setDuesAmount('')
+    setReviewError('')
+  }
+
+  const postSemesterAction = async (payload: Record<string, unknown>) => {
+    const response = await fetch('/api/admin/semester', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json()
+    if (!response.ok) {
+      setReviewError(result.error || 'The change could not be saved.')
+      return null
+    }
+    return result
+  }
+
+  const submitDuesAmount = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!reviewingUser || !duesPromptOpen || !currentTerm) return
+    const amountNumber = Number(duesAmount)
+    if (!Number.isFinite(amountNumber) || amountNumber < 0) {
+      setReviewError('Enter a valid non-negative payment amount.')
+      return
+    }
+    setReviewSaving('dues')
+    setReviewError('')
+    const coverage = duesPromptOpen.annual ? fullYearTermIds : [currentTerm.id]
+    const result = await postSemesterAction({
+      action: 'record_dues',
+      userId: reviewingUser.id,
+      termIds: coverage,
+      amountCents: Math.round(amountNumber * 100),
+    })
+    setReviewSaving('')
+    if (result) {
+      setDuesPromptOpen(null)
+      setDuesAmount('')
+      await refreshMembership(reviewingUser.id)
+    }
+  }
+
+  const submitMembershipDecision = async (decision: 'approve' | 'decline') => {
+    if (!reviewingUser) return
+    const membership = termMemberships[reviewingUser.id]
+    if (!membership) return
+    if (decision === 'decline' && !window.confirm('Decline this semester renewal?')) return
+    setReviewSaving(decision)
+    setReviewError('')
+    const result = await postSemesterAction({ action: 'review_membership', membershipId: membership.id, decision })
+    setReviewSaving('')
+    if (result) {
+      await fetchUsers()
+      closeReview()
     }
   }
 
@@ -908,7 +1064,7 @@ BOSSO Team`)
   }
 
   const cleanupOrphanedAuth = async () => {
-    const email = prompt('Enter the email address of the orphaned auth user to delete:')
+    const email = cleanupEmail.trim()
     if (!email) return
 
     if (!email.includes('@eid.utexas.edu') && !email.includes('@my.utexas.edu') && !email.includes('@utexas.edu') && !email.includes('@txbosso.com')) {
@@ -916,6 +1072,7 @@ BOSSO Team`)
       return
     }
 
+    setCleaningUpAuth(true)
     try {
       const response = await fetch('/api/admin/cleanup-orphaned-auth', {
         method: 'POST',
@@ -932,9 +1089,12 @@ BOSSO Team`)
       }
 
       alert(data.message || 'Successfully deleted orphaned auth user. You can now sign up with this email.')
+      setCleanupEmail('')
     } catch (error: any) {
       console.error('Error cleaning up orphaned auth:', error)
       alert(error.message || 'Failed to cleanup orphaned auth user. Please try again.')
+    } finally {
+      setCleaningUpAuth(false)
     }
   }
 
@@ -1090,32 +1250,60 @@ BOSSO Team`)
     }
   }
 
+  // A semester rollover never resets the legacy account_status field, so once the term
+  // schema is live, a member's badge and reviewability reflect THIS term's membership
+  // instead - otherwise everyone still reads as approved from whatever term they last
+  // renewed for. Fall back to account_status only if the term schema is missing.
+  const isPendingThisTerm = (user: Profile) => {
+    if (currentTerm) return ['pending_dues', 'pending_approval'].includes(termMemberships[user.id]?.status || '')
+    return user.account_status === 'pending_approval'
+  }
+
   const filteredUsers = users.filter(user => {
     if (filter === 'all') return true
+    if (currentTerm) {
+      const membership = termMemberships[user.id]
+      if (filter === 'pending') return membership ? ['pending_dues', 'pending_approval'].includes(membership.status) : false
+      if (filter === 'active') return membership ? ['active', 'exempt'].includes(membership.status) : false
+      if (filter === 'rejected') return membership?.status === 'declined'
+      return true
+    }
     if (filter === 'pending') return user.account_status === 'pending_approval'
     if (filter === 'active') return user.account_status === 'approved' || user.account_status === 'active' || user.account_status === null
     if (filter === 'rejected') return user.account_status === 'rejected'
     return true
   })
 
+  const pendingCount = currentTerm
+    ? Object.values(termMemberships).filter((item) => ['pending_dues', 'pending_approval'].includes(item.status)).length
+    : users.filter((u) => u.account_status === 'pending_approval').length
+
   const tempPasswordUsers = users.filter((user) => user.id !== adminProfile?.id)
 
   return (
     <div className="space-y-6">
       {/* Cleanup Section */}
-      <div className="card-glow p-4 bg-red-500/10 border border-red-500/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-red-400 mb-1">Cleanup Orphaned Auth Users</h3>
-            <p className="text-xs text-red-300/80">
-              If signup fails with "User already registered" but no profile exists, click here to cleanup
-            </p>
-          </div>
+      <div className="card-glow p-4 bg-red-500/10 border border-red-500/30 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-red-400 mb-1">Cleanup Orphaned Auth Users</h3>
+          <p className="text-xs text-muted-foreground">
+            If signup fails with "User already registered" but no profile exists, enter the email and clean it up here
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <input
+            type="email"
+            value={cleanupEmail}
+            onChange={(e) => setCleanupEmail(e.target.value)}
+            placeholder="orphaned.user@eid.utexas.edu"
+            className="flex-1 min-w-[220px] px-3 py-2 bg-dark-300 border border-red-500/20 text-foreground rounded-lg text-sm focus:outline-none focus:border-red-400"
+          />
           <button
             onClick={cleanupOrphanedAuth}
-            className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm whitespace-nowrap"
+            disabled={cleaningUpAuth || !cleanupEmail.trim()}
+            className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Cleanup Orphaned Auth
+            {cleaningUpAuth ? 'Cleaning up...' : 'Cleanup Orphaned Auth'}
           </button>
         </div>
       </div>
@@ -1126,7 +1314,7 @@ BOSSO Team`)
           <KeyRound className="w-5 h-5 text-blue-400 mt-0.5" />
           <div>
             <h3 className="text-sm font-semibold text-blue-400 mb-1">Temporary Password Reset</h3>
-            <p className="text-xs text-blue-300/80">
+            <p className="text-xs text-muted-foreground">
               Select a user, set a temporary password, then open a prefilled Gmail draft so you only need to hit send.
             </p>
           </div>
@@ -1214,9 +1402,9 @@ BOSSO Team`)
               }`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              {tab === 'pending' && users.filter(u => u.account_status === 'pending_approval').length > 0 && (
+              {tab === 'pending' && pendingCount > 0 && (
                 <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
-                  {users.filter(u => u.account_status === 'pending_approval').length}
+                  {pendingCount}
                 </span>
               )}
             </button>
@@ -1244,49 +1432,50 @@ BOSSO Team`)
         </div>
       ) : (
         <div className="grid gap-4">
-          {filteredUsers.map((user) => (
-            <div key={user.id} className="card-glow p-6 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-2">
+          {filteredUsers.map((user) => {
+            const membership = currentTerm ? termMemberships[user.id] : undefined
+            const statusBadge = currentTerm
+              ? membership
+                ? {
+                    pending_dues: { label: 'Dues required', className: 'bg-yellow-500/20 text-yellow-400' },
+                    pending_approval: { label: 'Pending approval', className: 'bg-yellow-500/20 text-yellow-400' },
+                    active: { label: 'Approved this term', className: 'bg-green-500/20 text-green-400' },
+                    exempt: { label: 'Approved · exempt', className: 'bg-green-500/20 text-green-400' },
+                    declined: { label: 'Declined this term', className: 'bg-red-500/20 text-red-400' },
+                  }[membership.status]
+                : { label: 'Not yet renewed', className: 'bg-dark-200 text-muted-foreground' }
+              : {
+                  label: user.account_status || 'Active',
+                  className:
+                    user.account_status === 'approved' || user.account_status === null
+                      ? 'bg-green-500/20 text-green-400'
+                      : user.account_status === 'pending_approval'
+                      ? 'bg-yellow-500/20 text-yellow-400'
+                      : 'bg-red-500/20 text-red-400',
+                }
+
+            return (
+            <div key={user.id} className="card-glow p-4 sm:p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-lg font-semibold text-foreground truncate">
                       {user.full_name}
                     </h3>
-                    <span
-                      className={`px-2 py-1 text-xs rounded-full font-medium ${
-                        user.account_status === 'approved' || user.account_status === null
-                          ? 'bg-green-500/20 text-green-400'
-                          : user.account_status === 'pending_approval'
-                          ? 'bg-yellow-500/20 text-yellow-400'
-                          : 'bg-red-500/20 text-red-400'
-                      }`}
-                    >
-                      {user.account_status || 'Active'}
+                    <span className={`px-2 py-1 text-xs rounded-full font-medium ${statusBadge.className}`}>
+                      {statusBadge.label}
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-1">{user.email}</p>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    {user.account_status !== 'pending_approval' && user.account_status !== 'rejected' ? (
+                  <p className="text-sm text-muted-foreground">{user.email}</p>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Shield className="w-3 h-3" />
+                      {getRoleDisplayName(user.role)}
+                    </span>
+                    {membership && (
                       <span className="flex items-center gap-1">
-                        <Shield className="w-3 h-3" />
-                        <select
-                          value={user.role}
-                          onChange={(e) => updateUserRole(user.id, e.target.value as UserRole)}
-                          disabled={processingUserId === user.id || user.id === adminProfile?.id}
-                          className="bg-dark-300 border border-primary/20 text-foreground rounded px-1.5 py-0.5 text-xs cursor-pointer hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={user.id === adminProfile?.id ? 'You cannot change your own role' : 'Change role'}
-                        >
-                          {ALL_ROLES.map((role) => (
-                            <option key={role} value={role}>
-                              {getAdminRoleDisplayName(role)}
-                            </option>
-                          ))}
-                        </select>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1">
-                        <Shield className="w-3 h-3" />
-                        {getRoleDisplayName(user.role)}
+                        <ClipboardCheck className="w-3 h-3" />
+                        Requested: {getRoleDisplayName(membership.position_role)}
                       </span>
                     )}
                     {user.email_verified !== null && (
@@ -1308,7 +1497,7 @@ BOSSO Team`)
 
                   {/* Work Experience */}
                   {(user as any).work_experiences && (user as any).work_experiences.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-primary/10">
+                    <div className="pt-2 border-t border-primary/10">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
                         <Briefcase className="w-3 h-3" />
                         Work Experience
@@ -1336,97 +1525,70 @@ BOSSO Team`)
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex flex-col gap-3 min-w-[280px]">
-                  {user.account_status === 'pending_approval' && (
-                    <>
-                      {/* Primary Actions */}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => updateUserStatus(user.id, 'active')}
-                          disabled={processingUserId === user.id}
-                          className="flex-1 px-3 py-2 bg-green-500/20 border border-green-500/30 text-green-400 rounded-lg hover:bg-green-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {processingUserId === user.id ? '...' : 'Approve'}
-                        </button>
-                        <button
-                          onClick={() => updateUserStatus(user.id, 'rejected')}
-                          disabled={processingUserId === user.id}
-                          className="flex-1 px-3 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {processingUserId === user.id ? '...' : 'Reject'}
-                        </button>
-                        <button
-                          onClick={() => deleteUser(user.id, user.email)}
-                          disabled={processingUserId === user.id}
-                          className="px-3 py-2 bg-red-500/10 border border-red-500/20 text-red-400/70 rounded-lg hover:bg-red-500/20 hover:text-red-400 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Delete Account"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* Email Actions */}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => sendDuesPaymentRequest(user)}
-                          className="flex-1 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded text-xs hover:bg-yellow-500/30 transition-all"
-                        >
-                          Request Dues
-                        </button>
-                        {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
-                          <>
-                            <button
-                              onClick={() => sendVerificationEmail(user)}
-                              className="flex-1 px-3 py-1.5 bg-primary/20 border border-primary/30 text-primary rounded text-xs hover:bg-primary/30 transition-all"
-                            >
-                              Verify Email
-                            </button>
-                            <button
-                              onClick={() => markEmailVerified(user.id)}
-                              disabled={processingUserId === user.id}
-                              className="px-3 py-1.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded text-xs hover:bg-blue-500/30 transition-all disabled:opacity-50"
-                              title="Mark as verified"
-                            >
-                              ✓
-                            </button>
-                          </>
+                <div className="flex w-full flex-col gap-2 lg:w-auto lg:max-w-md lg:shrink-0 lg:items-end">
+                  {isPendingThisTerm(user) && (
+                    <div className="flex w-full flex-wrap items-center gap-2 lg:justify-end">
+                      <button
+                        onClick={() => setReviewingUser(user)}
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+                      >
+                        Review & approve
+                      </button>
+                      <button
+                        onClick={() => sendDuesPaymentRequest(user)}
+                        className="px-3 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded-lg text-xs hover:bg-yellow-500/30 transition-all"
+                      >
+                        Request Dues
+                      </button>
+                      {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
+                        <>
+                          <button
+                            onClick={() => sendVerificationEmail(user)}
+                            className="px-3 py-2 bg-primary/20 border border-primary/30 text-primary rounded-lg text-xs hover:bg-primary/30 transition-all"
+                          >
+                            Verify Email
+                          </button>
+                          <button
+                            onClick={() => markEmailVerified(user.id)}
+                            disabled={processingUserId === user.id}
+                            className="px-3 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg text-xs hover:bg-blue-500/30 transition-all disabled:opacity-50"
+                            title="Mark as verified"
+                          >
+                            ✓
+                          </button>
+                        </>
+                      )}
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={!!(user as any).dues_email_sent_at}
+                          onChange={() => toggleDuesEmailSent(user.id, !!(user as any).dues_email_sent_at)}
+                          className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
+                        />
+                        Dues sent
+                        {(user as any).dues_email_sent_at && (
+                          <span className="text-muted-foreground/70">
+                            ({new Date((user as any).dues_email_sent_at).toLocaleDateString()})
+                          </span>
                         )}
-                      </div>
-
-                      {/* Email sent tracking */}
-                      <div className="flex flex-col gap-1">
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                      </label>
+                      {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                           <input
                             type="checkbox"
-                            checked={!!(user as any).dues_email_sent_at}
-                            onChange={() => toggleDuesEmailSent(user.id, !!(user as any).dues_email_sent_at)}
+                            checked={!!(user as any).verification_email_sent_at}
+                            onChange={() => toggleVerificationEmailSent(user.id, !!(user as any).verification_email_sent_at)}
                             className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
                           />
-                          Dues email sent
-                          {(user as any).dues_email_sent_at && (
+                          Verification sent
+                          {(user as any).verification_email_sent_at && (
                             <span className="text-muted-foreground/70">
-                              ({new Date((user as any).dues_email_sent_at).toLocaleDateString()})
+                              ({new Date((user as any).verification_email_sent_at).toLocaleDateString()})
                             </span>
                           )}
                         </label>
-                        {(user.email?.endsWith('@eid.utexas.edu') || user.email?.endsWith('@my.utexas.edu')) && user.email_verified !== true && (
-                          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={!!(user as any).verification_email_sent_at}
-                              onChange={() => toggleVerificationEmailSent(user.id, !!(user as any).verification_email_sent_at)}
-                              className="w-3.5 h-3.5 rounded border-primary/30 bg-dark-300 text-primary focus:ring-primary/20 cursor-pointer"
-                            />
-                            Verification email sent
-                            {(user as any).verification_email_sent_at && (
-                              <span className="text-muted-foreground/70">
-                                ({new Date((user as any).verification_email_sent_at).toLocaleDateString()})
-                              </span>
-                            )}
-                          </label>
-                        )}
-                      </div>
-                    </>
+                      )}
+                    </div>
                   )}
 
                   {/* Show email button for recently approved users or active users */}
@@ -1436,7 +1598,7 @@ BOSSO Team`)
                       className="px-4 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-all font-medium text-sm flex items-center gap-2"
                     >
                       <Mail className="w-4 h-4" />
-                      {recentlyApproved.has(user.id) ? 'Send Welcome Email' : 'Send Email'}
+                      Send Welcome Email
                     </button>
                   )}
 
@@ -1450,21 +1612,95 @@ BOSSO Team`)
                     </button>
                   )}
 
-                  {/* Delete button - avoid duplicate for pending_approval users */}
-                  {user.account_status !== 'pending_approval' && (
-                    <button
-                      onClick={() => deleteUser(user.id, user.email)}
-                      disabled={processingUserId === user.id}
-                      className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/30 transition-all font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Delete Account
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
-          ))}
+          )})}
+        </div>
+      )}
+
+      {reviewingUser && (
+        <div className="portal-modal-backdrop" onMouseDown={closeReview}>
+          <div onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-md">
+            <div className="portal-form-header">
+              <div>
+                <p className="portal-eyebrow">Semester renewal</p>
+                <h2>{reviewingUser.full_name}</h2>
+                <p className="text-sm text-muted-foreground">{reviewingUser.email}</p>
+              </div>
+              <button type="button" onClick={closeReview} className="portal-icon-button"><X className="h-5 w-5" /></button>
+            </div>
+
+            {!currentTerm ? (
+              <p className="mt-6 text-sm text-muted-foreground">No current term is active.</p>
+            ) : !termMemberships[reviewingUser.id] ? (
+              <p className="mt-6 text-sm text-muted-foreground">This member hasn't submitted a position code for {currentTerm.name} yet.</p>
+            ) : (
+              <div className="mt-6 space-y-5">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Requested position</p>
+                    <p className="mt-1 font-medium capitalize">{getRoleDisplayName(termMemberships[reviewingUser.id].position_role)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Dues</p>
+                    <p className="mt-1 font-medium capitalize">{termMemberships[reviewingUser.id].dues_status}</p>
+                  </div>
+                </div>
+
+                {reviewError && <p className="text-sm text-red-700">{reviewError}</p>}
+
+                {termMemberships[reviewingUser.id].dues_status === 'unpaid' && !duesPromptOpen && (
+                  <div className="flex gap-2">
+                    <button onClick={() => { setDuesAmount(''); setDuesPromptOpen({ annual: false }) }} className="portal-button-secondary small flex-1 justify-center">Record semester dues</button>
+                    <button onClick={() => { setDuesAmount(''); setDuesPromptOpen({ annual: true }) }} className="portal-button-secondary small flex-1 justify-center">Record full year</button>
+                  </div>
+                )}
+
+                {duesPromptOpen && (
+                  <form onSubmit={submitDuesAmount} className="space-y-3 rounded-lg border border-border p-3">
+                    <label className="block">
+                      <span className="portal-label">{duesPromptOpen.annual ? 'Full-year' : 'Semester'} payment amount in dollars</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        autoFocus
+                        className="portal-input w-full"
+                        value={duesAmount}
+                        onChange={(event) => setDuesAmount(event.target.value)}
+                        required
+                      />
+                    </label>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setDuesPromptOpen(null)} className="portal-button-secondary small">Cancel</button>
+                      <button type="submit" disabled={reviewSaving === 'dues'} className="portal-button small">
+                        {reviewSaving === 'dues' && <Loader2 className="h-4 w-4 animate-spin" />} Save
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="flex gap-2 border-t border-border pt-4">
+                  <button
+                    disabled={reviewSaving !== '' || !['paid', 'exempt'].includes(termMemberships[reviewingUser.id].dues_status)}
+                    onClick={() => void submitMembershipDecision('approve')}
+                    className="portal-button flex-1 justify-center"
+                    title={!['paid', 'exempt'].includes(termMemberships[reviewingUser.id].dues_status) ? 'Record dues before approving' : undefined}
+                  >
+                    {reviewSaving === 'approve' && <Loader2 className="h-4 w-4 animate-spin" />} Approve
+                  </button>
+                  <button
+                    disabled={reviewSaving !== ''}
+                    onClick={() => void submitMembershipDecision('decline')}
+                    className="portal-button-ghost flex-1 justify-center"
+                  >
+                    {reviewSaving === 'decline' && <Loader2 className="h-4 w-4 animate-spin" />} Decline
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1484,6 +1720,7 @@ function PointsBreakdownTab() {
   const [showAddPointsModal, setShowAddPointsModal] = useState(false)
   const [addingPoints, setAddingPoints] = useState(false)
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [selectedCategory, setSelectedCategory] = useState<EventCategory>('membership')
   const [selectedEventType, setSelectedEventType] = useState<EventType | ''>('')
   const [customEventType, setCustomEventType] = useState('')
@@ -1492,6 +1729,13 @@ function PointsBreakdownTab() {
   const [addPointsError, setAddPointsError] = useState<string | null>(null)
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
+  const [requirementsPublished, setRequirementsPublished] = useState(false)
+  const [pointMinimums, setPointMinimums] = useState<Record<EventCategory, number>>({
+    membership: 0,
+    professional_education: 0,
+    social: 0,
+    philanthropy: 0,
+  })
 
   const getAttendanceCategory = (row: any): EventCategory | null => {
     if (row.event_category) return row.event_category as EventCategory
@@ -1548,13 +1792,114 @@ function PointsBreakdownTab() {
   const fetchPointsData = async () => {
     setLoading(true)
     try {
-      // Fetch all users
-      const { data: users, error: usersError } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role')
-        .order('full_name', { ascending: true })
+      const { members, groups } = await fetchCurrentMemberDirectory()
+      setMemberGroups(groups)
+      const eligibleMembers = members.filter((member) => member.role !== 'admin')
+      const eligibleIds = eligibleMembers.map((member) => member.id)
+      const usersResult = eligibleIds.length > 0
+        ? await supabase.from('profiles').select('id, email').in('id', eligibleIds)
+        : { data: [], error: null }
 
-      if (usersError) throw usersError
+      if (usersResult.error) throw usersResult.error
+      const emailById = new Map((usersResult.data || []).map((member) => [member.id, member.email]))
+      const users = eligibleMembers.map((member) => ({
+        ...member,
+        email: emailById.get(member.id) || '',
+      }))
+
+      // Canonical term ledger. Every member and admin view derives from these
+      // same rows; the legacy calculation below is only a pre-migration fallback.
+      const { data: currentTerm, error: currentTermError } = await supabase
+        .from('academic_terms')
+        .select('id, points_rules_status')
+        .eq('status', 'current')
+        .maybeSingle()
+
+      if (!currentTermError && currentTerm) {
+        const [summariesResult, ledgerResult, rulesResult] = await Promise.all([
+          supabase.from('member_term_point_summary').select('*').eq('term_id', currentTerm.id),
+          supabase
+            .from('point_ledger')
+            .select('*')
+            .eq('term_id', currentTerm.id)
+            .is('voided_at', null)
+            .order('occurred_at', { ascending: false }),
+          supabase.from('term_point_rules').select('*').eq('term_id', currentTerm.id),
+        ])
+
+        if (!summariesResult.error && !ledgerResult.error && !rulesResult.error) {
+          const summariesByUser = new Map((summariesResult.data || []).map((row) => [row.user_id, row]))
+          const sourcesByUser = new Map<string, UserPointsBreakdown['source_breakdown']>()
+          const minimums = Object.fromEntries(
+            (rulesResult.data || []).map((rule) => [rule.category, Number(rule.minimum_points || 0)])
+          ) as Partial<Record<EventCategory, number>>
+          setRequirementsPublished(currentTerm.points_rules_status === 'published')
+          setPointMinimums({
+            membership: Number(minimums.membership || 0),
+            professional_education: Number(minimums.professional_education || 0),
+            social: Number(minimums.social || 0),
+            philanthropy: Number(minimums.philanthropy || 0),
+          })
+
+          for (const entry of ledgerResult.data || []) {
+            const sources = sourcesByUser.get(entry.user_id) || {
+              membership: [],
+              professional_education: [],
+              social: [],
+              philanthropy: [],
+              uncategorized: [],
+            }
+            sources[entry.category as EventCategory].push({
+              id: entry.id,
+              title: entry.note || entry.source_type.replaceAll('_', ' '),
+              points: Number(entry.points || 0),
+              timestamp: entry.occurred_at,
+            })
+            sourcesByUser.set(entry.user_id, sources)
+          }
+
+          const canonicalBreakdown: UserPointsBreakdown[] = users.map((member) => {
+            const summary = summariesByUser.get(member.id)
+            const categories = {
+              membership: Number(summary?.membership_points || 0),
+              professional_education: Number(summary?.professional_education_points || 0),
+              social: Number(summary?.social_points || 0),
+              philanthropy: Number(summary?.philanthropy_points || 0),
+            }
+            const total = Number(summary?.total_points || 0)
+            const requirementsPublished = currentTerm.points_rules_status === 'published'
+            const meetsPublishedMinimums = (Object.keys(categories) as EventCategory[]).every(
+              (category) => categories[category] >= Number(minimums[category] || 0)
+            )
+
+            return {
+              user_id: member.id,
+              full_name: member.full_name,
+              email: member.email,
+              role: member.role,
+              total_points: total,
+              membership_points: categories.membership,
+              professional_points: categories.professional_education,
+              social_points: categories.social,
+              philanthropy_points: categories.philanthropy,
+              uncategorized_points: 0,
+              is_active: requirementsPublished && meetsPublishedMinimums,
+              meets_role_requirements: requirementsPublished && meetsPublishedMinimums,
+              source_breakdown: sourcesByUser.get(member.id) || {
+                membership: [],
+                professional_education: [],
+                social: [],
+                philanthropy: [],
+                uncategorized: [],
+              },
+            }
+          })
+
+          setPointsData(canonicalBreakdown)
+          setLastUpdatedAt(new Date())
+          return
+        }
+      }
 
       const [attendanceResult, adjustmentsResult] = await Promise.all([
         supabase
@@ -1564,6 +1909,9 @@ function PointsBreakdownTab() {
           .from('points_adjustments')
           .select('id, user_id, points, reason, created_at'),
       ])
+
+      setRequirementsPublished(true)
+      setPointMinimums({ membership: 25, professional_education: 25, social: 25, philanthropy: 25 })
 
       if (attendanceResult.error) throw attendanceResult.error
       if (adjustmentsResult.error) throw adjustmentsResult.error
@@ -1635,7 +1983,7 @@ function PointsBreakdownTab() {
         sourceBreakdownByUser.set(row.user_id, userSources)
       }
 
-      const breakdown = (users || []).map((user) => {
+      const breakdown = users.map((user) => {
         const { categoryTotals, totalPoints, uncategorizedPoints } = buildCategoryTotals(
           attendanceByUser.get(user.id) || [],
           adjustmentsByUser.get(user.id) || []
@@ -1716,8 +2064,8 @@ function PointsBreakdownTab() {
       'Social',
       'Philanthropy',
       'Other/Uncategorized',
-      'Active Status',
-      'Meets Role Requirements',
+      'Requirement Status',
+      'Meets Published Requirements',
     ]
     const rows = filteredAndSortedData.map((user) => [
       user.full_name,
@@ -1729,8 +2077,8 @@ function PointsBreakdownTab() {
       user.social_points,
       user.philanthropy_points,
       user.uncategorized_points,
-      user.is_active ? 'Active' : 'Inactive',
-      user.meets_role_requirements ? 'Yes' : 'No',
+      requirementsPublished ? (user.is_active ? 'Meets minimums' : 'Below minimums') : 'Rules in draft',
+      requirementsPublished ? (user.meets_role_requirements ? 'Yes' : 'No') : 'Draft',
     ])
 
     const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
@@ -1757,6 +2105,11 @@ function PointsBreakdownTab() {
       role: user.role,
     }))
   }, [pointsData])
+
+  useEffect(() => {
+    const eligibleIds = new Set(userOptions.map((member) => member.id))
+    setSelectedUsers((current) => current.filter((id) => eligibleIds.has(id)))
+  }, [userOptions])
 
   // Reset modal state
   const resetModalState = () => {
@@ -1911,6 +2264,11 @@ function PointsBreakdownTab() {
           Last updated: {lastUpdatedAt.toLocaleTimeString()}
         </p>
       )}
+      {!requirementsPublished && !loading && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Point requirements are still in draft. Totals are current, but no member is marked above or below a minimum yet.
+        </div>
+      )}
 
       {/* Points table */}
       {loading ? (
@@ -1977,7 +2335,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            user.membership_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                            !requirementsPublished ? 'text-foreground' : user.membership_points >= pointMinimums.membership ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.membership_points}
@@ -1986,7 +2344,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            user.professional_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                            !requirementsPublished ? 'text-foreground' : user.professional_points >= pointMinimums.professional_education ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.professional_points}
@@ -1995,7 +2353,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            user.social_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                            !requirementsPublished ? 'text-foreground' : user.social_points >= pointMinimums.social ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.social_points}
@@ -2004,7 +2362,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            user.philanthropy_points >= 25 ? 'text-green-400' : 'text-orange-400'
+                            !requirementsPublished ? 'text-foreground' : user.philanthropy_points >= pointMinimums.philanthropy ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.philanthropy_points}
@@ -2022,15 +2380,17 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <div className="flex flex-col items-center gap-0.5">
                           <span
-                            className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap ${
-                              user.is_active
-                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                            className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap border ${
+                              !requirementsPublished
+                                ? 'border-border bg-muted text-muted-foreground'
+                                : user.is_active
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                  : 'border-amber-200 bg-amber-50 text-amber-800'
                             }`}
                           >
-                            {user.is_active ? 'Active' : 'Inactive'}
+                            {!requirementsPublished ? 'Draft' : user.is_active ? 'Meets minimums' : 'Below minimums'}
                           </span>
-                          {!user.meets_role_requirements && (
+                          {requirementsPublished && !user.meets_role_requirements && (
                             <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
                               Below req.
                             </span>
@@ -2055,8 +2415,8 @@ function PointsBreakdownTab() {
       )}
 
       {selectedDetailsUser && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-dark-200 border border-primary/20 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div className="portal-modal-backdrop">
+          <div className="portal-modal max-w-2xl p-0 lg:p-0">
             <div className="flex items-center justify-between p-4 border-b border-primary/20">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Points Source Details</h2>
@@ -2118,33 +2478,26 @@ function PointsBreakdownTab() {
       <div className="card-glow p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Legend</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-green-400">●</span>
-            <span className="text-muted-foreground">Green: 25+ points (meets category minimum)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-orange-400">●</span>
-            <span className="text-muted-foreground">Orange: Below 25 points (needs more)</span>
-          </div>
+          {requirementsPublished ? <>
+            <div className="flex items-center gap-2"><span className="text-emerald-700">●</span><span className="text-muted-foreground">Meets that category's published minimum</span></div>
+            <div className="flex items-center gap-2"><span className="text-amber-700">●</span><span className="text-muted-foreground">Below that category's published minimum</span></div>
+          </> : <div className="flex items-center gap-2 md:col-span-2"><span className="text-muted-foreground">●</span><span className="text-muted-foreground">Requirements are in draft; totals are shown without pass/fail labels.</span></div>}
           <div className="flex items-center gap-2">
             <span className="text-yellow-400">●</span>
             <span className="text-muted-foreground">Yellow: Uncategorized points (included in total)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Active</span>
-            <span className="text-muted-foreground">100+ total points AND 25+ in each category</span>
-          </div>
-          <div className="flex items-center gap-2">
+          {requirementsPublished && <div className="flex items-center gap-2"><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">Meets minimums</span><span className="text-muted-foreground">Meets all four published category values</span></div>}
+          {requirementsPublished && <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">Below role req.</span>
             <span className="text-muted-foreground">Doesn't meet minimum points for current role</span>
-          </div>
+          </div>}
         </div>
       </div>
 
       {/* Add Points Modal */}
       {showAddPointsModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-dark-200 border border-primary/20 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="portal-modal-backdrop">
+          <div className="portal-modal max-w-lg p-0 lg:p-0">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-primary/20">
               <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -2181,82 +2534,16 @@ function PointsBreakdownTab() {
                 <label className="text-sm font-medium text-foreground">
                   Select Members <span className="text-red-400">*</span>
                 </label>
-
-                {/* Quick Select by Role */}
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Quick select by role:</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allUserIds = userOptions.map(u => u.id)
-                        setSelectedUsers(allUserIds)
-                      }}
-                      className="px-2.5 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-md hover:bg-primary/30 transition"
-                    >
-                      All Members
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ids = userOptions.filter(u => u.role === 'general_member').map(u => u.id)
-                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
-                      }}
-                      className="px-2.5 py-1 text-xs bg-gray-500/20 text-gray-400 border border-gray-500/30 rounded-md hover:bg-gray-500/30 transition"
-                    >
-                      General Members
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ids = userOptions.filter(u => u.role === 'analyst').map(u => u.id)
-                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
-                      }}
-                      className="px-2.5 py-1 text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-md hover:bg-blue-500/30 transition"
-                    >
-                      Analysts
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ids = userOptions.filter(u => u.role === 'project_manager').map(u => u.id)
-                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
-                      }}
-                      className="px-2.5 py-1 text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-md hover:bg-purple-500/30 transition"
-                    >
-                      Project Managers
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ids = userOptions.filter(u => u.role === 'board_member').map(u => u.id)
-                        setSelectedUsers(prev => [...new Set([...prev, ...ids])])
-                      }}
-                      className="px-2.5 py-1 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded-md hover:bg-yellow-500/30 transition"
-                    >
-                      Board Members
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedUsers([])}
-                      className="px-2.5 py-1 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded-md hover:bg-red-500/30 transition"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                </div>
-
-                {/* Individual Search */}
-                <UserSearch
-                  users={userOptions}
-                  value={selectedUsers}
-                  onChange={(value) => setSelectedUsers(value as string[])}
-                  placeholder="Search and select individual members..."
-                  multiple={true}
-                />
                 <p className="text-xs text-muted-foreground">
-                  {selectedUsers.length} member{selectedUsers.length !== 1 ? 's' : ''} selected
+                  Search individually, choose a position, or use an admin-created semester group. Point progress does not remove approved members.
                 </p>
+                <MemberGroupPicker
+                  users={userOptions}
+                  groups={memberGroups}
+                  value={selectedUsers}
+                  onChange={setSelectedUsers}
+                  placeholder="Search approved current-semester members..."
+                />
               </div>
 
               {/* Category Selection */}

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
-import { isAdmin } from '@/lib/admin'
 import type { Event } from '@/types/database.types'
 import { getEventCategoryLabel, getEventTypeLabel, getEventCategoryColor } from '@/lib/bosso-points'
 import {
@@ -23,14 +22,14 @@ import {
 const supabase = createClient()
 
 export default function AttendanceDisplayPage() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const [loading, setLoading] = useState(true)
   const [attendeeCount, setAttendeeCount] = useState(0)
   const [recentCheckIns, setRecentCheckIns] = useState<any[]>([])
 
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   const canAccessEvent = (event: Event) => {
     if (!profile) return false

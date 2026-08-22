@@ -5,23 +5,22 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import type { Opportunity } from '@/types/database.types'
-import { Briefcase, ExternalLink, Filter, MapPin, Search, BookmarkPlus, Check, Trash2 } from 'lucide-react'
-import { isAdmin } from '@/lib/admin'
+import { Briefcase, ExternalLink, MapPin, Search, BookmarkPlus, Check, Trash2 } from 'lucide-react'
+import SectionPageHeader from '@/components/SectionPageHeader'
 
 const supabase = createClient()
 
 export default function OpportunitiesPage() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
   const [savedOpportunities, setSavedOpportunities] = useState<Set<string>>(new Set())
   const [savingId, setSavingId] = useState<string | null>(null)
 
   const isBoard = profile?.role === 'board_member'
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   const fetchOpportunities = async () => {
     setLoading(true)
@@ -87,17 +86,11 @@ export default function OpportunitiesPage() {
   const visibleOpportunities = useMemo(() => {
     const query = search.trim().toLowerCase()
     return opportunities.filter((item) => {
-      const matchesSearch = !query || `${item.title} ${item.company ?? ''} ${item.location ?? ''}`
+      return !query || `${item.title} ${item.company ?? ''} ${item.location ?? ''}`
         .toLowerCase()
         .includes(query)
-      const matchesType = typeFilter === 'all' || (item.opportunity_type ?? '').toLowerCase() === typeFilter
-      return matchesSearch && matchesType
     })
-  }, [opportunities, search, typeFilter])
-
-  const types = Array.from(
-    new Set(opportunities.map((item) => (item.opportunity_type ?? '').toLowerCase()).filter(Boolean))
-  )
+  }, [opportunities, search])
 
   const handleSaveOpportunity = async (opp: Opportunity) => {
     if (!profile) return
@@ -158,54 +151,41 @@ export default function OpportunitiesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <Briefcase className="w-7 h-7 text-primary" />
-            Opportunities
-          </h1>
-        </div>
-      </div>
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Career"
+        title="Opportunities"
+        description="Discover roles shared by the BOSSO community and move the right ones into your application pipeline."
+        icon={Briefcase}
+        actions={<Link href="/applications" className="portal-button-secondary">View my pipeline</Link>}
+      />
 
-      <div className="card-glow p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Search className="w-4 h-4" />
+      <div className="portal-panel flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:max-w-xl">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by title, company, or location"
-            className="w-full md:w-80 bg-transparent text-sm text-foreground focus:outline-none"
+            className="portal-input w-full pl-9"
           />
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 rounded-md bg-dark-100 border border-primary/20 text-sm text-foreground"
-          >
-            <option value="all">All types</option>
-            {types.map((type) => (
-              <option key={type} value={type}>
-                {type.replace('_', ' ')}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span className="text-xs text-muted-foreground sm:whitespace-nowrap">{visibleOpportunities.length} shown · {savedOpportunities.size} saved</span>
       </div>
 
-      <div className="card-glow p-4 text-sm text-muted-foreground">
-        If you know of opportunities, please share them in the <span className="text-primary">#opportunities</span> Slack channel.
+      <div className="portal-alert-info">
+        Know of a role worth sharing? Add it to the <span className="font-semibold">#opportunities</span> Slack channel for the community.
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      {loading && <p className="text-sm text-muted-foreground">Loading opportunities...</p>}
+      {error && <div className="portal-alert-error">{error}</div>}
+      {loading && <div className="portal-loading">Loading opportunities...</div>}
 
       {!loading && visibleOpportunities.length === 0 && (
-        <div className="card-glow p-4 text-sm text-muted-foreground">
-          No opportunities found.
+        <div className="portal-empty">
+          <Briefcase className="h-9 w-9" />
+          <h3>No matching opportunities</h3>
+          <p>Try a broader title, company, or location search.</p>
         </div>
       )}
 
@@ -216,8 +196,8 @@ export default function OpportunitiesPage() {
             const isSaving = savingId === item.id
 
             return (
-              <div key={item.id} className="card-glow p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
+              <article key={item.id} className="portal-panel space-y-4 transition-colors hover:border-primary/40">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex-1 min-w-0">
                     <h2 className="text-lg font-semibold text-foreground">{item.title}</h2>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -235,11 +215,11 @@ export default function OpportunitiesPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                     {isSaved ? (
                       <Link
                         href="/applications"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-medium hover:bg-green-500/30 transition"
+                        className="badge-success inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium"
                       >
                         <Check className="w-3.5 h-3.5" />
                         Saved
@@ -248,7 +228,7 @@ export default function OpportunitiesPage() {
                       <button
                         onClick={() => handleSaveOpportunity(item)}
                         disabled={isSaving}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-dark-200 text-foreground border border-primary/20 text-xs font-medium hover:bg-dark-100 hover:border-primary/40 transition disabled:opacity-50"
+                        className="portal-button-secondary small"
                       >
                         <BookmarkPlus className="w-3.5 h-3.5" />
                         {isSaving ? 'Saving...' : 'Save'}
@@ -257,7 +237,7 @@ export default function OpportunitiesPage() {
                     {canManageOpportunity(item) && (
                       <button
                         onClick={(e) => handleDelete(item.id, e)}
-                        className="p-1.5 rounded-md bg-dark-200 hover:bg-red-500/10 text-red-400 hover:text-red-300 transition"
+                        className="portal-icon-button text-destructive hover:text-destructive"
                         title="Delete opportunity"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -267,7 +247,7 @@ export default function OpportunitiesPage() {
                       <Link
                         href={item.link}
                         target="_blank"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-dark-300 text-xs font-medium hover:opacity-90 transition"
+                        className="portal-button small"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         Apply
@@ -287,7 +267,7 @@ export default function OpportunitiesPage() {
                     <span>Posted by {item.poster.full_name}</span>
                   )}
                 </div>
-              </div>
+              </article>
             )
           })}
         </div>

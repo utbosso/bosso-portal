@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
+import { usePortalAccess } from '@/hooks/usePortalAccess'
 import type { Event, EventCategory, EventType, Task } from '@/types/database.types'
-import UserSearch, { type UserOption } from '@/components/UserSearch'
+import type { UserOption } from '@/components/UserSearch'
+import MemberGroupPicker from '@/components/MemberGroupPicker'
+import SectionPageHeader from '@/components/SectionPageHeader'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
@@ -17,23 +20,28 @@ import {
   Trash2,
   X,
   Calendar,
-  AlertCircle,
   Mail,
   Folder,
   Tag,
   CheckSquare,
+  Info,
 } from 'lucide-react'
-import { isAdmin } from '@/lib/admin'
 import {
   canAccessAudience,
-  filterUsersByAudience,
   fromRoleScopePayload,
   getRoleScopeLabel,
   toRoleScopePayload,
   type RoleScopeOption,
 } from '@/lib/role-scope'
+import {
+  fetchCurrentMemberDirectory,
+  resolveCommunicationRecipients,
+  type CommunicationMemberGroup,
+} from '@/lib/communication-recipients'
 
 const supabase = createClient()
+
+type CalendarView = 'day' | 'week' | 'month'
 
 type EventFormState = {
   title: string
@@ -82,15 +90,21 @@ const emptyForm: EventFormState = {
 }
 
 export default function CalendarPage() {
-  const { profile, hasMinimumRole } = useAuth()
+  const { user, profile, hasMinimumRole } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
   const [events, setEvents] = useState<Event[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])
+  const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [currentMonth, setCurrentMonth] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
+  const [calendarView, setCalendarView] = useState<CalendarView>('week')
+  const [calendarViewChosen, setCalendarViewChosen] = useState(false)
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
+  const [detailsDate, setDetailsDate] = useState<Date | null>(null)
 
   // Initialize form state from sessionStorage if available
   const [formOpen, setFormOpen] = useState(() => {
@@ -121,7 +135,7 @@ export default function CalendarPage() {
   })
 
   const canManage = hasMinimumRole('project_manager')
-  const isUserAdmin = isAdmin(profile?.role)
+  const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   const canSeeEvent = (item: Event) => {
     return canAccessAudience(
@@ -171,6 +185,17 @@ export default function CalendarPage() {
     return date
   }
 
+  const addDays = (value: Date, amount: number) => {
+    const date = new Date(value)
+    date.setDate(date.getDate() + amount)
+    return date
+  }
+
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(selectedDate)
+    return Array.from({ length: 7 }, (_, index) => addDays(start, index))
+  }, [selectedDate])
+
   const daysInGrid = useMemo(() => {
     const start = startOfWeek(startOfMonth(currentMonth))
     const end = endOfWeek(endOfMonth(currentMonth))
@@ -186,14 +211,18 @@ export default function CalendarPage() {
   }, [currentMonth])
 
   const fetchEvents = async () => {
+    if (accessLoading) return
     setLoading(true)
     setError(null)
     try {
       // Fetch events
-      const { data: eventsData, error: eventsError } = await supabase
+      let eventsQuery: any = supabase
         .from('events')
         .select('*')
-        .order('start_at', { ascending: true })
+      if (schemaReady && access?.term_id) {
+        eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
+      }
+      const { data: eventsData, error: eventsError } = await eventsQuery.order('start_at', { ascending: true })
 
       if (eventsError) throw eventsError
       const rows = (eventsData as Event[]) ?? []
@@ -201,13 +230,16 @@ export default function CalendarPage() {
 
       // Fetch tasks assigned to current user with due dates
       if (profile?.id) {
-        const { data: tasksData, error: tasksError } = await supabase
+        let tasksQuery: any = supabase
           .from('tasks')
           .select('*')
           .eq('assigned_to', profile.id)
           .not('due_at', 'is', null)
           .neq('status', 'completed')
-          .order('due_at', { ascending: true })
+        if (schemaReady && access?.term_id) {
+          tasksQuery = tasksQuery.eq('term_id', access.term_id).is('archived_at', null)
+        }
+        const { data: tasksData, error: tasksError } = await tasksQuery.order('due_at', { ascending: true })
 
         if (tasksError) {
           console.error('Error loading tasks', tasksError)
@@ -226,27 +258,37 @@ export default function CalendarPage() {
   useEffect(() => {
     fetchEvents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.id, profile?.role])
+  }, [profile?.id, profile?.role, access?.term_id, schemaReady, accessLoading])
+
+  useEffect(() => {
+    if (calendarViewChosen) return
+
+    const setResponsiveDefault = () => {
+      const width = window.innerWidth
+      setCalendarView(width < 768 ? 'day' : width >= 1536 ? 'month' : 'week')
+    }
+
+    setResponsiveDefault()
+    window.addEventListener('resize', setResponsiveDefault)
+    return () => window.removeEventListener('resize', setResponsiveDefault)
+  }, [calendarViewChosen])
 
   useEffect(() => {
     const fetchPeopleOptions = async () => {
       if (!canManage) return
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('account_status', 'active')
-        .order('full_name', { ascending: true })
-
-      if (error) {
-        console.error('Error loading members for targeting', error)
-        return
+      try {
+        const { members, groups } = await fetchCurrentMemberDirectory()
+        setPeopleOptions(members)
+        setMemberGroups(groups)
+      } catch (directoryError) {
+        console.error('Error loading current-semester members for targeting', directoryError)
+        setPeopleOptions([])
+        setMemberGroups([])
       }
-
-      setPeopleOptions((data ?? []) as UserOption[])
     }
 
-    fetchPeopleOptions()
-  }, [canManage])
+    void fetchPeopleOptions()
+  }, [access?.term_id, canManage])
 
   // Persist form state to sessionStorage
   useEffect(() => {
@@ -298,6 +340,28 @@ export default function CalendarPage() {
   const selectedKey = toDateKey(selectedDate)
   const selectedEvents = eventsByDay.get(selectedKey) ?? []
   const selectedTasks = tasksByDay.get(selectedKey) ?? []
+  const detailsKey = detailsDate ? toDateKey(detailsDate) : null
+  const detailsEvents = detailsKey ? eventsByDay.get(detailsKey) ?? [] : []
+  const detailsTasks = detailsKey ? tasksByDay.get(detailsKey) ?? [] : []
+
+  const selectedScheduleItems = useMemo(() => {
+    return [
+      ...selectedEvents.map((event) => ({
+        kind: 'event' as const,
+        id: event.id,
+        title: event.title,
+        date: new Date(event.start_at),
+        event,
+      })),
+      ...selectedTasks.map((task) => ({
+        kind: 'task' as const,
+        id: task.id,
+        title: task.title,
+        date: new Date(task.due_at as string),
+        task,
+      })),
+    ].sort((first, second) => first.date.getTime() - second.date.getTime())
+  }, [selectedEvents, selectedTasks])
 
   // Helper function to clear form state from sessionStorage
   const clearFormState = () => {
@@ -308,12 +372,92 @@ export default function CalendarPage() {
     }
   }
 
-  const handlePrevMonth = () => {
-    setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+  const updateSelectedDate = (date: Date) => {
+    setSelectedDate(date)
+    setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1))
   }
 
-  const handleNextMonth = () => {
-    setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+  const navigateCalendar = (direction: -1 | 1) => {
+    if (calendarView === 'day') {
+      updateSelectedDate(addDays(selectedDate, direction))
+      return
+    }
+
+    if (calendarView === 'week') {
+      updateSelectedDate(addDays(selectedDate, direction * 7))
+      return
+    }
+
+    const targetMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + direction, 1)
+    const targetDay = Math.min(
+      selectedDate.getDate(),
+      new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0).getDate()
+    )
+    setCurrentMonth(targetMonth)
+    setSelectedDate(new Date(targetMonth.getFullYear(), targetMonth.getMonth(), targetDay))
+  }
+
+  const goToToday = () => {
+    updateSelectedDate(new Date())
+  }
+
+  const changeCalendarView = (view: CalendarView) => {
+    setCalendarViewChosen(true)
+    setCalendarView(view)
+    if (view === 'month') {
+      setCurrentMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1))
+    }
+  }
+
+  const calendarTitle = (() => {
+    if (calendarView === 'day') {
+      return selectedDate.toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    }
+
+    if (calendarView === 'week') {
+      const start = weekDays[0]
+      const end = weekDays[6]
+      const sameYear = start.getFullYear() === end.getFullYear()
+      const sameMonth = sameYear && start.getMonth() === end.getMonth()
+
+      if (sameMonth) {
+        const month = start.toLocaleDateString(undefined, { month: 'short' })
+        return `${month} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`
+      }
+
+      if (sameYear) {
+        const startLabel = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        const endLabel = end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        return `${startLabel} – ${endLabel}, ${end.getFullYear()}`
+      }
+
+      const startLabel = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      const endLabel = end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      return `${startLabel} – ${endLabel}`
+    }
+
+    return formatMonthYear(currentMonth)
+  })()
+
+  const closeCalendarDetails = () => {
+    setSelectedEvent(null)
+    setDetailsDate(null)
+  }
+
+  const openEventDetails = (event: Event) => {
+    setDetailsDate(null)
+    setSelectedEvent(event)
+  }
+
+  const openDayDetails = (date: Date) => {
+    updateSelectedDate(date)
+    setSelectedEvent(null)
+    setDetailsDate(date)
   }
 
   const openCreate = () => {
@@ -323,6 +467,13 @@ export default function CalendarPage() {
       date: toDateKey(selectedDate),
     })
     setFormOpen(true)
+  }
+
+  const closeEventForm = () => {
+    clearFormState()
+    setFormOpen(false)
+    setEditingId(null)
+    setForm(emptyForm)
   }
 
   const openEdit = (event: Event) => {
@@ -523,6 +674,7 @@ export default function CalendarPage() {
       custom_event_type: (form.eventType === 'other' && form.customEventType) ? form.customEventType : null,
       is_recurring: !editingId && form.repeatEnabled,
       max_occurrences: !editingId && form.repeatEnabled ? Number(form.repeatCount || 1) : null,
+      ...(schemaReady && access?.term_id && !editingId ? { term_id: access.term_id, archived_at: null } : {}),
     }
 
     try {
@@ -588,19 +740,20 @@ export default function CalendarPage() {
   }
 
   const handleDelete = async (eventId: string) => {
-    const confirmDelete = window.confirm('Delete this event? This cannot be undone.')
-    if (!confirmDelete) return
+    const confirmDelete = window.confirm('Archive this event? It will remain in semester history.')
+    if (!confirmDelete) return false
 
     try {
-      const { error } = await supabase
-        .from('events')
-        .delete()
-        .eq('id', eventId)
+      const { error } = schemaReady
+        ? await (supabase as any).from('events').update({ archived_at: new Date().toISOString() }).eq('id', eventId)
+        : await supabase.from('events').delete().eq('id', eventId)
       if (error) throw error
       await fetchEvents()
+      return true
     } catch (err: any) {
       console.error('Error deleting event', err)
       setError('Failed to delete event. You may not have permission.')
+      return false
     }
   }
 
@@ -636,25 +789,18 @@ export default function CalendarPage() {
     if (!event) return
 
     try {
-      // Fetch all eligible users based on audience_scope
-      let query = supabase
-        .from('profiles')
-        .select('id, email, full_name, role')
-        .eq('account_status', 'active')
-
-      const { data: users, error } = await query
-
-      if (error) throw error
-
-      const eligibleUsers = filterUsersByAudience(
-        users || [],
-        event.audience_scope,
-        event.audience_scope_mode,
-        event.target_user_ids
-      )
+      const { recipients, termName } = await resolveCommunicationRecipients({
+        roleScope: event.audience_scope,
+        roleScopeMode: event.audience_scope_mode,
+        targetUserIds: event.target_user_ids,
+      })
+      if (recipients.length === 0) {
+        alert('No approved members in the current semester match this audience.')
+        return
+      }
 
       // Get list of email addresses for BCC
-      const bccEmails = eligibleUsers.map(u => u.email).join(',')
+      const bccEmails = recipients.map((recipient) => recipient.email).join(',')
 
       // Format dates for Google Calendar link
       const startDate = new Date(event.start_at)
@@ -677,6 +823,10 @@ Time: ${startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short
 
 ${event.description || ''}
 
+Audience: ${getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
+Semester: ${termName}
+Recipients: ${recipients.length} current portal member(s)
+
 Add to your calendar: ${calendarUrl}
 
 View on portal: ${window.location.origin}/calendar`)
@@ -687,386 +837,607 @@ View on portal: ${window.location.origin}/calendar`)
       window.open(gmailUrl, '_blank')
     } catch (error) {
       console.error('Error preparing calendar invite email:', error)
-      alert('Failed to prepare calendar invite. Please try again.')
+      alert(error instanceof Error ? error.message : 'Failed to prepare calendar invite. Please try again.')
     }
   }
 
+  const renderEventDetailCard = (event: Event, showTitle = true) => (
+    <article key={event.id} className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="space-y-4 p-4 sm:p-5">
+        {showTitle && <h3 className="text-lg font-semibold text-foreground">{event.title}</h3>}
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-2">
-            <CalendarDays className="w-7 h-7 text-primary" />
-            Calendar
-          </h1>
+        <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
+          <div className="flex items-start gap-2.5">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>{new Date(event.start_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+          <div className="flex items-start gap-2.5">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>
+              {new Date(event.start_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–
+              {new Date(event.end_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          </div>
+          {event.location && (
+            <div className="flex min-w-0 items-start gap-2.5 sm:col-span-2">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0 break-words">{event.location}</span>
+            </div>
+          )}
         </div>
 
+        {event.description && (
+          <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{event.description}</p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+            Audience: {event.target_user_ids?.length
+              ? `${event.target_user_ids.length} selected member(s)`
+              : getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
+          </span>
+          {event.track_attendance && (
+            <span className="badge-success rounded-full px-2.5 py-1 text-xs font-medium">
+              ✓ Attendance: {event.point_value} pts
+              {canAccessAttendanceCode(event) && (
+                <span className="ml-2 font-mono text-[10px]">({event.attendance_code})</span>
+              )}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
+        <button
+          type="button"
+          onClick={() => addToGoogleCalendar(event)}
+          className="portal-icon-button h-11 w-11"
+          title="Add to Google Calendar"
+          aria-label="Add to Google Calendar"
+        >
+          <Calendar className="h-5 w-5" />
+        </button>
+        {(isUserAdmin || event.created_by === profile?.id) && (
+          <button
+            type="button"
+            onClick={() => sendCalendarInvites(event.id)}
+            className="portal-icon-button h-11 w-11"
+            title="Email calendar invite"
+            aria-label="Email calendar invite"
+          >
+            <Mail className="h-5 w-5" />
+          </button>
+        )}
         {canManage && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                closeCalendarDetails()
+                openEdit(event)
+              }}
+              className="portal-icon-button h-11 w-11"
+              title="Edit event"
+              aria-label="Edit event"
+            >
+              <Pencil className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                closeCalendarDetails()
+                openDuplicate(event)
+              }}
+              className="portal-icon-button h-11 w-11"
+              title="Duplicate event"
+              aria-label="Duplicate event"
+            >
+              <CheckSquare className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (await handleDelete(event.id)) closeCalendarDetails()
+              }}
+              className="portal-icon-button h-11 w-11 text-destructive hover:text-destructive"
+              title="Archive event"
+              aria-label="Archive event"
+            >
+              <Trash2 className="h-5 w-5" />
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  )
+
+
+  return (
+    <div className="portal-page space-y-7">
+      <SectionPageHeader
+        eyebrow="Organization"
+        title="Events & Calendar"
+        description="See semester events, deadlines, attendance points, and assigned work in one schedule."
+        note={(
+          <span className="inline-flex items-start gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 font-medium text-foreground">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span>Google Calendar copies do not update automatically. Check the portal for changes or cancellations.</span>
+          </span>
+        )}
+        icon={CalendarDays}
+        actions={canManage ? (
           <button
             type="button"
             onClick={openCreate}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-dark-300 text-sm font-medium hover:opacity-90 transition"
+            className="portal-button"
           >
             <PlusCircle className="w-4 h-4" />
             New event
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <div className="portal-alert-error">{error}</div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[1.7fr_0.8fr]">
-        <div className="card-glow p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="p-2 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <h2 className="text-lg font-semibold text-foreground">
-              {formatMonthYear(currentMonth)}
+      <div className="space-y-6">
+        <section className="portal-panel space-y-5 overflow-hidden">
+          <div className="grid items-center gap-4 lg:grid-cols-[1fr_auto_1fr]">
+            <h2 className="min-w-0 text-lg font-semibold text-foreground lg:order-2 lg:text-center xl:text-xl">
+              {calendarTitle}
             </h2>
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="p-2 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
 
-          <div className="grid grid-cols-7 text-xs uppercase text-muted-foreground tracking-widest">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-              <div key={day} className="text-center py-2">
-                {day}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-3">
-            {daysInGrid.map((day) => {
-              const key = toDateKey(day)
-              const eventsForDay = eventsByDay.get(key) ?? []
-              const tasksForDay = tasksByDay.get(key) ?? []
-              const totalItems = eventsForDay.length + tasksForDay.length
-              const isOutside = day.getMonth() !== currentMonth.getMonth()
-              const isSelected = key === selectedKey
-              const isToday = key === toDateKey(new Date())
-
-              // Combine events and tasks for display, showing up to 2 items
-              const displayItems: { type: 'event' | 'task'; id: string; title: string }[] = [
-                ...eventsForDay.map(e => ({ type: 'event' as const, id: e.id, title: e.title })),
-                ...tasksForDay.map(t => ({ type: 'task' as const, id: t.id, title: t.title })),
-              ].slice(0, 2)
-
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSelectedDate(day)}
-                  className={`flex flex-col justify-start rounded-xl border border-primary/10 p-3 text-left transition min-h-[110px] md:min-h-[130px] lg:min-h-[150px] ${
-                    isSelected ? 'bg-primary/15 border-primary/40' : 'hover:border-primary/40'
-                  } ${isOutside ? 'opacity-50' : ''}`}
-                >
-                  <div className="flex items-start justify-between">
-                    <span className={`text-sm font-semibold ${isToday ? 'text-primary' : 'text-foreground'}`}>
-                      {day.getDate()}
-                    </span>
-                    {totalItems > 0 && (
-                      <span className="text-[10px] text-primary font-semibold">
-                        {totalItems}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-3 space-y-1">
-                    {displayItems.map((item) => (
-                      <span
-                        key={`${item.type}-${item.id}`}
-                        className={`block truncate rounded-md px-2 py-1 text-[11px] ${
-                          item.type === 'task'
-                            ? 'bg-red-500/10 text-red-400'
-                            : 'bg-orange-500/10 text-orange-400'
-                        }`}
-                      >
-                        {item.title}
-                      </span>
-                    ))}
-                    {totalItems > 2 && (
-                      <span className="block text-[11px] text-muted-foreground">
-                        +{totalItems - 2} more
-                      </span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="card-glow p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-foreground">
-                Events on {selectedDate.toLocaleDateString()}
-              </h3>
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-primary/30 text-sm text-primary hover:bg-primary/10"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  Add
-                </button>
-              )}
+            <div className="flex items-center gap-2 lg:order-1">
+              <button type="button" onClick={goToToday} className="portal-button-secondary small">
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateCalendar(-1)}
+                className="portal-icon-button"
+                aria-label={`Previous ${calendarView}`}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateCalendar(1)}
+                className="portal-icon-button"
+                aria-label={`Next ${calendarView}`}
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
             </div>
 
-            {!loading && selectedEvents.length > 0 && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
-                <AlertCircle className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-muted-foreground">
-                  Events added to your Google calendar won't auto-update. Check back here for any changes or cancellations.
-                </p>
-              </div>
-            )}
-
-            {loading && (
-              <p className="text-sm text-muted-foreground">Loading events...</p>
-            )}
-
-            {!loading && selectedEvents.length === 0 && (
-              <p className="text-sm text-muted-foreground">No events scheduled.</p>
-            )}
-
-            {!loading && selectedEvents.map((event) => (
-              <div key={event.id} className="rounded-lg border border-primary/10 p-3 space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-foreground">{event.title}</p>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {new Date(event.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} -{' '}
-                        {new Date(event.end_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {event.location && (
-                        <span className="inline-flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          {event.location}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => addToGoogleCalendar(event)}
-                      className="p-2 rounded-md text-primary hover:bg-primary/10"
-                      title="Add to Google Calendar"
-                    >
-                      <Calendar className="w-4 h-4" />
-                    </button>
-                    {(isUserAdmin || event.created_by === profile?.id) && (
-                      <button
-                        type="button"
-                        onClick={() => sendCalendarInvites(event.id)}
-                        className="p-2 rounded-md text-green-400 hover:bg-green-500/10"
-                        title="Send Calendar Invites to Members"
-                      >
-                        <Mail className="w-4 h-4" />
-                      </button>
-                    )}
-                    {canManage && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => openEdit(event)}
-                          className="p-2 rounded-md text-primary hover:bg-primary/10"
-                          title="Edit Event"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openDuplicate(event)}
-                          className="p-2 rounded-md text-sky-400 hover:bg-sky-500/10"
-                          title="Duplicate Event"
-                        >
-                          <CheckSquare className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(event.id)}
-                          className="p-2 rounded-md text-destructive hover:bg-destructive/10"
-                          title="Delete Event"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {event.description && (
-                  <p className="text-sm text-muted-foreground">{event.description}</p>
-                )}
-
-                <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide">
-                  <span className="text-primary">
-                    Visible to {event.target_user_ids?.length
-                      ? `${event.target_user_ids.length} selected member(s)`
-                      : getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
-                  </span>
-                  {event.track_attendance && (
-                    <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
-                      ✓ Attendance: {event.point_value} pts
-                      {canAccessAttendanceCode(event) && (
-                        <span className="ml-2 text-[10px] font-mono">({event.attendance_code})</span>
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
+            <div
+              className="grid w-full grid-cols-3 rounded-xl border border-border bg-muted/40 p-1 lg:order-3 lg:w-auto lg:justify-self-end"
+              role="group"
+              aria-label="Calendar view"
+            >
+              {(['day', 'week', 'month'] as CalendarView[]).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => changeCalendarView(view)}
+                  aria-pressed={calendarView === view}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold capitalize transition-colors sm:text-sm ${
+                    calendarView === view
+                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
+                  }`}
+                >
+                  {view}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Tasks Section */}
-          {selectedTasks.length > 0 && (
-            <div className="card-glow p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <CheckSquare className="w-5 h-5 text-red-400" />
-                <h3 className="text-lg font-semibold text-foreground">
-                  Tasks Due
-                </h3>
+          {calendarView === 'month' && (
+            <div className="space-y-2">
+              <div className="grid min-w-0 grid-cols-7 text-[10px] uppercase tracking-wider text-muted-foreground sm:text-xs sm:tracking-widest">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+                  <div key={day} className="py-2 text-center">
+                    <span className="sm:hidden">{day.slice(0, 1)}</span>
+                    <span className="hidden sm:inline">{day}</span>
+                  </div>
+                ))}
               </div>
 
-              {selectedTasks.map((task) => (
-                <a
-                  key={task.id}
-                  href="/tasks"
-                  className="block rounded-lg border border-red-500/20 p-3 space-y-2 hover:border-red-500/40 transition-colors"
-                >
-                  <p className="text-sm font-semibold text-foreground">{task.title}</p>
-                  {task.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
+              <div className="grid min-w-0 grid-cols-7 gap-1 sm:gap-2 lg:gap-3">
+                {daysInGrid.map((day) => {
+                  const key = toDateKey(day)
+                  const eventsForDay = eventsByDay.get(key) ?? []
+                  const tasksForDay = tasksByDay.get(key) ?? []
+                  const totalItems = eventsForDay.length + tasksForDay.length
+                  const isOutside = day.getMonth() !== currentMonth.getMonth()
+                  const isToday = key === toDateKey(new Date())
+                  const displayItems: { type: 'event' | 'task'; id: string; title: string }[] = [
+                    ...eventsForDay.map((event) => ({ type: 'event' as const, id: event.id, title: event.title })),
+                    ...tasksForDay.map((task) => ({ type: 'task' as const, id: task.id, title: task.title })),
+                  ].slice(0, 2)
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => openDayDetails(day)}
+                      aria-label={`Open schedule for ${day.toLocaleDateString()}`}
+                      className={`flex min-h-16 min-w-0 flex-col justify-start rounded-lg border border-border p-1.5 text-left transition sm:min-h-[110px] sm:rounded-xl sm:p-3 md:min-h-[130px] lg:min-h-[150px] ${
+                        isToday
+                          ? 'border-primary/50 bg-primary/10 ring-2 ring-primary/10'
+                          : 'bg-card hover:border-primary/40 hover:bg-muted/30'
+                      } ${isOutside ? 'opacity-50' : ''}`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <span className={`shrink-0 whitespace-nowrap text-sm font-semibold ${isToday ? 'text-primary' : 'text-foreground'}`}>
+                          {day.getDate()}
+                        </span>
+                        {totalItems > 0 && (
+                          <span className="hidden items-center text-primary sm:inline-flex" title="Open day details">
+                            <Info className="h-3 w-3" aria-hidden="true" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-1 sm:hidden">
+                        <div className="flex flex-wrap gap-1" aria-hidden="true">
+                          {displayItems.map((item) => (
+                            <span
+                              key={`dot-${item.type}-${item.id}`}
+                              className={`h-1.5 w-1.5 rounded-full ${item.type === 'task' ? 'bg-destructive' : 'bg-primary'}`}
+                            />
+                          ))}
+                        </div>
+                        {totalItems > 0 && (
+                          <Info className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
+                        )}
+                      </div>
+                      <div className="mt-3 hidden space-y-1 sm:block">
+                        {displayItems.map((item) => (
+                          <span
+                            key={`${item.type}-${item.id}`}
+                            className={`block truncate rounded-md px-2 py-1 text-[11px] ${
+                              item.type === 'task'
+                                ? 'bg-destructive/10 text-destructive'
+                                : 'bg-primary/10 text-primary'
+                            }`}
+                          >
+                            {item.title}
+                          </span>
+                        ))}
+                        {totalItems > 2 && (
+                          <span className="block text-[11px] text-muted-foreground">+{totalItems - 2} more</span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {calendarView === 'week' && (
+            <div className="overflow-x-auto pb-2">
+              <div className="grid min-w-[760px] grid-cols-7 overflow-hidden rounded-2xl border border-border bg-card">
+                {weekDays.map((day) => {
+                  const key = toDateKey(day)
+                  const eventsForDay = eventsByDay.get(key) ?? []
+                  const tasksForDay = tasksByDay.get(key) ?? []
+                  const isToday = key === toDateKey(new Date())
+                  const items = [
+                    ...eventsForDay.map((event) => ({
+                      kind: 'event' as const,
+                      id: event.id,
+                      title: event.title,
+                      date: new Date(event.start_at),
+                      event,
+                    })),
+                    ...tasksForDay.map((task) => ({
+                      kind: 'task' as const,
+                      id: task.id,
+                      title: task.title,
+                      date: new Date(task.due_at as string),
+                    })),
+                  ].sort((first, second) => first.date.getTime() - second.date.getTime())
+
+                  return (
+                    <div
+                      key={key}
+                      className={`min-w-0 border-r border-border last:border-r-0 ${isToday ? 'bg-primary/[0.045]' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateSelectedDate(day)
+                          changeCalendarView('day')
+                        }}
+                        aria-label={`Open day view for ${day.toLocaleDateString()}`}
+                        className="flex w-full flex-col items-center gap-1 border-b border-border px-2 py-3 text-center transition-colors hover:bg-muted/40"
+                      >
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {day.toLocaleDateString(undefined, { weekday: 'short' })}
+                        </span>
+                        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${
+                          isToday ? 'bg-primary text-primary-foreground' : 'text-foreground'
+                        }`}>
+                          {day.getDate()}
+                        </span>
+                      </button>
+
+                      <div className="min-h-[360px] space-y-2 p-2">
+                        {items.length === 0 && (
+                          <span className="block py-4 text-center text-[11px] text-muted-foreground/70">Open</span>
+                        )}
+                        {items.map((item) => item.kind === 'event' ? (
+                          <button
+                            key={`week-event-${item.id}`}
+                            type="button"
+                            onClick={() => {
+                              updateSelectedDate(day)
+                              openEventDetails(item.event)
+                            }}
+                            aria-label={`View details for ${item.title}`}
+                            className="block w-full rounded-lg border border-primary/20 bg-primary/10 px-2 py-2 text-left transition hover:border-primary/40 hover:bg-primary/15"
+                          >
+                            <span className="flex items-center justify-between gap-1 text-[10px] font-semibold text-primary">
+                              <span>{item.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                              <Info className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            </span>
+                            <span className="mt-0.5 block line-clamp-2 text-xs font-medium leading-4 text-foreground">{item.title}</span>
+                          </button>
+                        ) : (
+                          <a
+                            key={`week-task-${item.id}`}
+                            href="/tasks"
+                            className="block rounded-lg border border-destructive/20 bg-destructive/10 px-2 py-2 transition hover:border-destructive/40 hover:bg-destructive/15"
+                          >
+                            <span className="block text-[10px] font-semibold text-destructive">
+                              Due {item.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                            <span className="mt-0.5 block line-clamp-2 text-xs font-medium leading-4 text-foreground">{item.title}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {calendarView === 'day' && (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+              <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Daily schedule</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {selectedScheduleItems.length} {selectedScheduleItems.length === 1 ? 'item' : 'items'}
+                  </p>
+                </div>
+                {canManage && (
+                  <button type="button" onClick={openCreate} className="portal-button-secondary small">
+                    <PlusCircle className="h-4 w-4" />
+                    Add event
+                  </button>
+                )}
+              </div>
+
+              {loading ? (
+                <div className="portal-loading min-h-40">Loading schedule...</div>
+              ) : selectedScheduleItems.length === 0 ? (
+                <div className="px-5 py-12 text-center">
+                  <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground/50" />
+                  <p className="mt-3 text-sm font-medium text-foreground">Nothing scheduled</p>
+                  <p className="mt-1 text-xs text-muted-foreground">This day is clear.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {selectedScheduleItems.map((item) => (
+                    <div key={`day-${item.kind}-${item.id}`} className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-4 sm:grid-cols-[6rem_minmax(0,1fr)] sm:px-5">
+                      <div className="pt-1 text-right text-xs font-semibold text-muted-foreground">
+                        {item.kind === 'event'
+                          ? item.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                          : `Due ${item.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+                      </div>
+                      {item.kind === 'event' ? (
+                        <button
+                          type="button"
+                          onClick={() => openEventDetails(item.event)}
+                          aria-label={`View details for ${item.title}`}
+                          className="min-w-0 rounded-xl border-l-4 border-primary bg-primary/[0.07] px-4 py-3 text-left transition hover:bg-primary/10"
+                        >
+                          <span className="flex items-start justify-between gap-3">
+                            <span className="font-semibold text-foreground">{item.title}</span>
+                            <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                          </span>
+                          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span>
+                              {item.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–
+                              {new Date(item.event.end_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                            {item.event.location && <span>{item.event.location}</span>}
+                          </div>
+                        </button>
+                      ) : (
+                        <a
+                          href="/tasks"
+                          className="min-w-0 rounded-xl border-l-4 border-destructive bg-destructive/[0.07] px-4 py-3 transition hover:bg-destructive/10"
+                        >
+                          <p className="font-semibold text-foreground">{item.title}</p>
+                          <p className="mt-1.5 text-xs text-muted-foreground">Open this action item</p>
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <div className="space-y-6">
+          {selectedEvent && (
+            <div className="portal-modal-backdrop" onMouseDown={closeCalendarDetails}>
+              <div className="portal-modal max-w-2xl" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="portal-form-header">
+                  <div className="min-w-0">
+                    <p className="portal-eyebrow">Event details</p>
+                    <h2 className="break-words">{selectedEvent.title}</h2>
+                    <p>Review the schedule, audience, and available event actions.</p>
+                  </div>
+                  <button type="button" onClick={closeCalendarDetails} className="portal-icon-button shrink-0" aria-label="Close event details">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                {renderEventDetailCard(selectedEvent, false)}
+              </div>
+            </div>
+          )}
+
+          {detailsDate && (
+            <div className="portal-modal-backdrop" onMouseDown={closeCalendarDetails}>
+              <div className="portal-modal max-w-3xl" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="portal-form-header">
+                  <div className="min-w-0">
+                    <p className="portal-eyebrow">Day schedule</p>
+                    <h2>{detailsDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h2>
+                    <p>
+                      {detailsEvents.length} {detailsEvents.length === 1 ? 'event' : 'events'}
+                      {detailsTasks.length > 0 ? ` · ${detailsTasks.length} ${detailsTasks.length === 1 ? 'task' : 'tasks'} due` : ''}
+                    </p>
+                  </div>
+                  <button type="button" onClick={closeCalendarDetails} className="portal-icon-button shrink-0" aria-label="Close day schedule">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-5">
+                  {detailsEvents.length === 0 && detailsTasks.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-border px-5 py-12 text-center">
+                      <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground/50" />
+                      <p className="mt-3 text-sm font-medium text-foreground">Nothing scheduled</p>
+                      <p className="mt-1 text-xs text-muted-foreground">This day is clear.</p>
+                    </div>
                   )}
-                </a>
-              ))}
+
+                  {detailsEvents.map((event) => renderEventDetailCard(event))}
+
+                  {detailsTasks.length > 0 && (
+                    <section className="space-y-3 rounded-2xl border border-border bg-muted/20 p-4 sm:p-5">
+                      <div className="flex items-center gap-2">
+                        <CheckSquare className="h-5 w-5 text-destructive" />
+                        <h3 className="font-semibold text-foreground">Tasks due</h3>
+                      </div>
+                      {detailsTasks.map((task) => (
+                        <a
+                          key={task.id}
+                          href="/tasks"
+                          className="block rounded-xl border border-border bg-card p-3 transition-colors hover:border-destructive/40 hover:bg-muted/30"
+                        >
+                          <p className="text-sm font-semibold text-foreground">{task.title}</p>
+                          {task.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.description}</p>}
+                        </a>
+                      ))}
+                    </section>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
           {formOpen && canManage && (
-            <div className="card-glow p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-foreground">
-                  {editingId ? 'Edit event' : 'Create event'}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearFormState()
-                    setFormOpen(false)
-                    setEditingId(null)
-                    setForm(emptyForm)
-                  }}
-                  className="p-2 text-muted-foreground hover:text-primary"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+            <div className="portal-modal-backdrop" onMouseDown={closeEventForm}>
+              <div className="portal-modal max-w-4xl" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="portal-form-header">
+                  <div><p className="portal-eyebrow">{editingId ? 'Edit event' : 'New event'}</p><h2>{editingId ? 'Update the event' : 'Schedule an event'}</h2><p>Start with the schedule and audience. Points and recurrence stay optional.</p></div>
+                  <button type="button" onClick={closeEventForm} className="portal-icon-button"><X className="h-5 w-5" /></button>
+                </div>
 
-              <form onSubmit={handleSave} className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground uppercase tracking-wide">Title</label>
+              <form onSubmit={handleSave} className="space-y-5">
+                <section className="portal-form-section">
+                  <div className="portal-form-section-heading"><span>1</span><div><h3>Event basics</h3><p>What is happening, when, and where?</p></div></div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="portal-label">Title</label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
                     required
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    className="portal-input w-full"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground uppercase tracking-wide">Date</label>
+                  <label className="portal-label">Date</label>
                   <input
                     type="date"
                     value={form.date}
                     onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
                     required
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                    className="portal-input w-full"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:col-span-2">
                   <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground uppercase tracking-wide">Start time</label>
+                    <label className="portal-label">Start time</label>
                     <input
                       type="time"
                       value={form.startTime}
                       onChange={(e) => setForm((prev) => ({ ...prev, startTime: e.target.value }))}
                       required
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                      className="portal-input w-full"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground uppercase tracking-wide">End time</label>
+                    <label className="portal-label">End time</label>
                     <input
                       type="time"
                       value={form.endTime}
                       onChange={(e) => setForm((prev) => ({ ...prev, endTime: e.target.value }))}
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                      className="portal-input w-full"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground uppercase tracking-wide">Location</label>
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="portal-label">Location <span className="font-normal text-muted-foreground">(optional)</span></label>
                   <input
                     type="text"
                     value={form.location}
                     onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
                     placeholder="Enter location..."
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    className="portal-input w-full"
                   />
                 </div>
+                  </div>
+                </section>
 
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground uppercase tracking-wide">Audience</label>
-                  <div className="flex gap-2">
+                <section className="portal-form-section">
+                  <div className="portal-form-section-heading"><span>2</span><div><h3>Audience</h3><p>Choose approved members from this semester.</p></div></div>
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={() => setForm((prev) => ({ ...prev, audienceMode: 'role' }))}
-                      className={`px-3 py-1.5 rounded-md text-xs border ${
-                        form.audienceMode === 'role'
-                          ? 'bg-primary/20 text-primary border-primary/40'
-                          : 'bg-dark-100 text-muted-foreground border-primary/20'
-                      }`}
+                      className={`portal-choice-card ${form.audienceMode === 'role' ? 'selected' : ''}`}
                     >
-                      Role Group
+                      <span><strong className="block text-sm">Position group</strong><span className="mt-1 block text-xs text-muted-foreground">Target a position level.</span></span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setForm((prev) => ({ ...prev, audienceMode: 'people' }))}
-                      className={`px-3 py-1.5 rounded-md text-xs border ${
-                        form.audienceMode === 'people'
-                          ? 'bg-primary/20 text-primary border-primary/40'
-                          : 'bg-dark-100 text-muted-foreground border-primary/20'
-                      }`}
+                      className={`portal-choice-card ${form.audienceMode === 'people' ? 'selected' : ''}`}
                     >
-                      Specific People
+                      <span><strong className="block text-sm">People or custom group</strong><span className="mt-1 block text-xs text-muted-foreground">Search names or choose a semester team.</span></span>
                     </button>
                   </div>
+                  <div className="mt-4">
                   {form.audienceMode === 'role' ? (
                     <select
                       value={form.audience}
                       onChange={(e) => setForm((prev) => ({ ...prev, audience: e.target.value as any }))}
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                      className="portal-input w-full"
                     >
                       <option value="all">All BOSSO members</option>
                       <option value="general_member">General Members only</option>
@@ -1077,31 +1448,32 @@ View on portal: ${window.location.origin}/calendar`)
                     </select>
                   ) : (
                     <div className="space-y-2">
-                      <UserSearch
+                      <MemberGroupPicker
                         users={peopleOptions}
+                        groups={memberGroups}
                         value={form.selectedUserIds}
-                        onChange={(value) => setForm((prev) => ({ ...prev, selectedUserIds: value as string[] }))}
-                        placeholder="Search and select members..."
-                        multiple
+                        onChange={(selectedUserIds) => setForm((prev) => ({ ...prev, selectedUserIds }))}
+                        placeholder="Search approved current-semester members..."
                       />
-                      <p className="text-xs text-muted-foreground">
-                        {form.selectedUserIds.length} member(s) selected
-                      </p>
                     </div>
                   )}
-                </div>
+                  </div>
+                </section>
 
+                <section className="portal-form-section">
+                  <div className="portal-form-section-heading"><span>3</span><div><h3>Details and points</h3><p>Add context and optionally connect the event to attendance points.</p></div></div>
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground uppercase tracking-wide">Description</label>
+                  <label className="portal-label">Description <span className="font-normal text-muted-foreground">(optional)</span></label>
                   <textarea
                     value={form.description}
                     onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                     rows={4}
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                    className="portal-input w-full resize-none"
                   />
                 </div>
 
                 {/* Event Category Selection */}
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
                     <Folder className="w-3.5 h-3.5" />
@@ -1110,7 +1482,7 @@ View on portal: ${window.location.origin}/calendar`)
                   <select
                     value={form.eventCategory}
                     onChange={(e) => handleCategoryChange(e.target.value as EventCategory | '')}
-                    className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    className="portal-input w-full"
                   >
                     <option value="">Select Category (Optional)</option>
                     {Object.entries(EVENT_CATEGORIES).map(([key, info]) => (
@@ -1136,7 +1508,7 @@ View on portal: ${window.location.origin}/calendar`)
                     <select
                       value={form.eventType}
                       onChange={(e) => handleEventTypeChange(e.target.value as EventType | '')}
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      className="portal-input w-full"
                     >
                       <option value="">Select Event Type (Optional)</option>
                       {getEventTypesByCategory(form.eventCategory as EventCategory).map((type) => (
@@ -1152,6 +1524,7 @@ View on portal: ${window.location.origin}/calendar`)
                     )}
                   </div>
                 )}
+                </div>
 
                 {/* Custom Event Type Input (for "Other") */}
                 {form.eventType === 'other' && (
@@ -1162,7 +1535,7 @@ View on portal: ${window.location.origin}/calendar`)
                       value={form.customEventType}
                       onChange={(e) => setForm((prev) => ({ ...prev, customEventType: e.target.value }))}
                       placeholder="e.g., Board Retreat, Alumni Panel"
-                      className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      className="portal-input w-full"
                     />
                     <p className="text-xs text-muted-foreground">
                       Enter a custom name for this event type
@@ -1170,7 +1543,7 @@ View on portal: ${window.location.origin}/calendar`)
                   </div>
                 )}
 
-                <div className="space-y-3 pt-2 border-t border-primary/10">
+                <div className="mt-5 space-y-3 border-t border-border pt-5">
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
@@ -1195,7 +1568,7 @@ View on portal: ${window.location.origin}/calendar`)
                         onChange={(e) => setForm((prev) => ({ ...prev, pointValue: e.target.value }))}
                         placeholder="e.g. 5"
                         required={form.trackAttendance}
-                        className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        className="portal-input w-full"
                       />
                       <p className="text-xs text-muted-foreground">
                         Points members will earn for attending this event
@@ -1221,9 +1594,12 @@ View on portal: ${window.location.origin}/calendar`)
                     </div>
                   )}
                 </div>
+                </section>
 
                 {!editingId && (
-                  <div className="space-y-3 pt-2 border-t border-primary/10">
+                  <section className="portal-form-section">
+                    <div className="portal-form-section-heading"><span>4</span><div><h3>Repeat <span className="font-normal text-muted-foreground">(optional)</span></h3><p>Create a recurring series with unique attendance codes.</p></div></div>
+                  <div className="space-y-3">
                     <div className="flex items-center gap-3">
                       <input
                         type="checkbox"
@@ -1249,7 +1625,7 @@ View on portal: ${window.location.origin}/calendar`)
                                 max="12"
                                 value={form.repeatInterval}
                                 onChange={(e) => setForm((prev) => ({ ...prev, repeatInterval: e.target.value }))}
-                                className="w-20 px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                                className="portal-input w-20"
                               />
                               <select
                                 value={form.repeatUnit}
@@ -1259,7 +1635,7 @@ View on portal: ${window.location.origin}/calendar`)
                                     repeatUnit: e.target.value as EventFormState['repeatUnit'],
                                   }))
                                 }
-                                className="flex-1 px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                                className="portal-input flex-1"
                               >
                                 <option value="week">Week(s)</option>
                                 <option value="month">Month(s)</option>
@@ -1274,7 +1650,7 @@ View on portal: ${window.location.origin}/calendar`)
                               max="52"
                               value={form.repeatCount}
                               onChange={(e) => setForm((prev) => ({ ...prev, repeatCount: e.target.value }))}
-                              className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground"
+                              className="portal-input w-full"
                             />
                           </div>
                         </div>
@@ -1318,15 +1694,12 @@ View on portal: ${window.location.origin}/calendar`)
                       </div>
                     )}
                   </div>
+                  </section>
                 )}
 
-                <button
-                  type="submit"
-                  className="w-full px-4 py-2 rounded-md bg-primary text-dark-300 text-sm font-medium hover:opacity-90"
-                >
-                  {editingId ? 'Save changes' : 'Create event'}
-                </button>
+                <div className="portal-form-actions"><button type="button" onClick={closeEventForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><CalendarDays className="h-4 w-4" /> {editingId ? 'Save changes' : 'Create event'}</button></div>
               </form>
+              </div>
             </div>
           )}
         </div>
