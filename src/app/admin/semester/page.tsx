@@ -54,8 +54,58 @@ type SetupData = {
   groups: Array<CommunicationMemberGroup & { term_id: string }>
 }
 type GeneratedCode = { label: string; role: UserRole; code: string }
+type RoleMinimums = Record<UserRole, Record<EventCategory, number>>
+
+function emptyRoleMinimums(): RoleMinimums {
+  return Object.fromEntries(
+    POSITION_OPTIONS.map((position) => [
+      position.value,
+      { membership: 0, professional_education: 0, social: 0, philanthropy: 0 },
+    ])
+  ) as RoleMinimums
+}
 
 const ADMIN_EMAIL = 'internal@txbosso.com'
+
+function RoleMinimumsGrid({ value, onChange }: { value: RoleMinimums; onChange: (next: RoleMinimums) => void }) {
+  return (
+    <div className="mt-5 overflow-x-auto">
+      <table className="w-full min-w-[640px] text-left text-sm">
+        <thead>
+          <tr className="text-xs uppercase tracking-wider text-muted-foreground">
+            <th className="pb-2 font-medium">Position</th>
+            {POINT_CATEGORY_OPTIONS.map((option) => (
+              <th key={option.value} className="pb-2 pl-3 font-medium">{option.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {POSITION_OPTIONS.map((position) => (
+            <tr key={position.value}>
+              <td className="py-1.5 pr-3 font-medium">{position.label}</td>
+              {POINT_CATEGORY_OPTIONS.map((option) => (
+                <td key={option.value} className="py-1.5 pl-3">
+                  <input
+                    type="number"
+                    min="0"
+                    className="portal-input w-full"
+                    value={value[position.value][option.value]}
+                    onChange={(event) =>
+                      onChange({
+                        ...value,
+                        [position.value]: { ...value[position.value], [option.value]: Number(event.target.value) },
+                      })
+                    }
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 export default function SemesterSetupPage() {
   const { user } = useAuth()
@@ -79,19 +129,9 @@ export default function SemesterSetupPage() {
     endsOn: '2027-05-14',
     renewalOpensAt: '2026-12-01T09:00',
   })
-  const [minimums, setMinimums] = useState<Record<EventCategory, number>>({
-    membership: 0,
-    professional_education: 0,
-    social: 0,
-    philanthropy: 0,
-  })
+  const [minimums, setMinimums] = useState<RoleMinimums>(emptyRoleMinimums())
   const [ruleTermId, setRuleTermId] = useState('')
-  const [ruleMinimums, setRuleMinimums] = useState<Record<EventCategory, number>>({
-    membership: 0,
-    professional_education: 0,
-    social: 0,
-    philanthropy: 0,
-  })
+  const [ruleMinimums, setRuleMinimums] = useState<RoleMinimums>(emptyRoleMinimums())
 
   const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL
 
@@ -156,10 +196,14 @@ export default function SemesterSetupPage() {
       : currentTerm?.id || editableTerms[0]?.id || ''
     if (nextTermId !== ruleTermId) setRuleTermId(nextTermId)
     if (!nextTermId) return
-    const nextMinimums = { ...ruleMinimums }
-    for (const option of POINT_CATEGORY_OPTIONS) {
-      const rule = data.rules.find((item) => item.term_id === nextTermId && item.category === option.value)
-      nextMinimums[option.value] = Number(rule?.minimum_points || 0)
+    const nextMinimums = emptyRoleMinimums()
+    for (const position of POSITION_OPTIONS) {
+      for (const option of POINT_CATEGORY_OPTIONS) {
+        const rule = data.rules.find(
+          (item) => item.term_id === nextTermId && item.category === option.value && item.position_role === position.value
+        )
+        nextMinimums[position.value][option.value] = Number(rule?.minimum_points || 0)
+      }
     }
     setRuleMinimums(nextMinimums)
     // Reset this editor only when refreshed server data or the selected term changes.
@@ -354,7 +398,7 @@ export default function SemesterSetupPage() {
         <div className="portal-panel-header"><div><span className="portal-eyebrow">Point system</span><h2>Draft and publish minimums</h2><p>Keep requirements visibly in draft while the board is deciding, then publish one shared set of values everywhere.</p></div><Coins className="h-5 w-5 text-muted-foreground" /></div>
         {editableTerms.length === 0 ? <p className="text-sm text-muted-foreground">Create a term before editing point requirements.</p> : <>
           <label className="block max-w-sm"><span className="portal-label">Term</span><select className="portal-input w-full" value={ruleTermId} onChange={(event) => setRuleTermId(event.target.value)}>{editableTerms.map((term) => <option key={term.id} value={term.id}>{term.name} · {term.points_rules_status}</option>)}</select></label>
-          <div className="mt-5 grid gap-4 md:grid-cols-4">{POINT_CATEGORY_OPTIONS.map((option) => <label key={option.value}><span className="portal-label">{option.label}</span><input type="number" min="0" className="portal-input w-full" value={ruleMinimums[option.value]} onChange={(event) => setRuleMinimums({ ...ruleMinimums, [option.value]: Number(event.target.value) })} /></label>)}</div>
+          <RoleMinimumsGrid value={ruleMinimums} onChange={setRuleMinimums} />
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-muted-foreground">Current state: <span className="font-medium capitalize text-foreground">{selectedRuleTerm?.points_rules_status || 'draft'}</span></p><div className="flex gap-2"><button type="button" disabled={saving.startsWith('rules-')} onClick={() => void updatePointRules('draft')} className="portal-button-secondary">Save as draft</button><button type="button" disabled={saving.startsWith('rules-')} onClick={() => void updatePointRules('published')} className="portal-button"><Check className="h-4 w-4" /> Publish requirements</button></div></div>
         </>}
       </section>
@@ -373,7 +417,7 @@ export default function SemesterSetupPage() {
           </div>
 
           <div className="mt-8 border-t border-border pt-7"><div className="flex items-center gap-2"><Coins className="h-5 w-5 text-primary" /><h3 className="font-semibold">Draft point minimums</h3></div><p className="mt-1 text-sm text-muted-foreground">Leave at zero while the board finalizes the system. Members will see a clear draft notice.</p>
-            <div className="mt-5 grid gap-4 md:grid-cols-4">{POINT_CATEGORY_OPTIONS.map((option) => <label key={option.value}><span className="portal-label">{option.label}</span><input type="number" min="0" className="portal-input w-full" value={minimums[option.value]} onChange={(event) => setMinimums({ ...minimums, [option.value]: Number(event.target.value) })} /></label>)}</div>
+            <RoleMinimumsGrid value={minimums} onChange={setMinimums} />
           </div>
 
           <div className="mt-7 flex justify-end"><button disabled={saving === 'save-term'} className="portal-button">{saving === 'save-term' ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Save term and generate codes</button></div>

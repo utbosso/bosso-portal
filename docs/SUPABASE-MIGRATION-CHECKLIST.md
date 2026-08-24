@@ -27,6 +27,7 @@ Apply the files in timestamp order:
 4. `20260820181500_announcement_reference_links.sql`
 5. `20260820214008_atomic_semester_activation.sql`
 6. `20260821050000_point_request_event_link.sql`
+7. `20260824000000_role_based_point_minimums.sql`
 
 Schema installation does not activate Fall. It keeps Spring 2026 current, assigns
 legacy records to Spring, preserves their visibility, and creates Fall 2026 as an

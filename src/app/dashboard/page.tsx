@@ -234,7 +234,7 @@ export default function DashboardPage() {
           .eq('user_id', profile.id)
           .eq('source_type', 'attendance')
           .is('voided_at', null),
-        supabase.from('term_point_rules').select('minimum_points').eq('term_id', access.term_id),
+        supabase.from('term_point_rules').select('minimum_points').eq('term_id', access.term_id).eq('position_role', profile.role),
         supabase.from('academic_terms').select('points_rules_status').eq('id', access.term_id).maybeSingle(),
       ])
 

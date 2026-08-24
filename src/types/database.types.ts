@@ -834,6 +834,7 @@ export interface TermPointRule {
   id: string
   term_id: string
   category: EventCategory
+  position_role: Exclude<UserRole, 'admin'>
   label: string
   minimum_points: number
   target_points: number | null

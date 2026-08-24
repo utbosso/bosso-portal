@@ -1730,12 +1730,7 @@ function PointsBreakdownTab() {
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
   const [requirementsPublished, setRequirementsPublished] = useState(false)
-  const [pointMinimums, setPointMinimums] = useState<Record<EventCategory, number>>({
-    membership: 0,
-    professional_education: 0,
-    social: 0,
-    philanthropy: 0,
-  })
+  const [pointMinimumsByRole, setPointMinimumsByRole] = useState<Record<string, Record<EventCategory, number>>>({})
 
   const getAttendanceCategory = (row: any): EventCategory | null => {
     if (row.event_category) return row.event_category as EventCategory
@@ -1830,16 +1825,16 @@ function PointsBreakdownTab() {
         if (!summariesResult.error && !ledgerResult.error && !rulesResult.error) {
           const summariesByUser = new Map((summariesResult.data || []).map((row) => [row.user_id, row]))
           const sourcesByUser = new Map<string, UserPointsBreakdown['source_breakdown']>()
-          const minimums = Object.fromEntries(
-            (rulesResult.data || []).map((rule) => [rule.category, Number(rule.minimum_points || 0)])
-          ) as Partial<Record<EventCategory, number>>
+          const minimumsByRole: Record<string, Record<EventCategory, number>> = {}
+          for (const rule of rulesResult.data || []) {
+            const role = (rule as any).position_role as string
+            if (!minimumsByRole[role]) {
+              minimumsByRole[role] = { membership: 0, professional_education: 0, social: 0, philanthropy: 0 }
+            }
+            minimumsByRole[role][rule.category as EventCategory] = Number(rule.minimum_points || 0)
+          }
           setRequirementsPublished(currentTerm.points_rules_status === 'published')
-          setPointMinimums({
-            membership: Number(minimums.membership || 0),
-            professional_education: Number(minimums.professional_education || 0),
-            social: Number(minimums.social || 0),
-            philanthropy: Number(minimums.philanthropy || 0),
-          })
+          setPointMinimumsByRole(minimumsByRole)
 
           for (const entry of ledgerResult.data || []) {
             const sources = sourcesByUser.get(entry.user_id) || {
@@ -1868,8 +1863,9 @@ function PointsBreakdownTab() {
             }
             const total = Number(summary?.total_points || 0)
             const requirementsPublished = currentTerm.points_rules_status === 'published'
+            const roleMinimums = minimumsByRole[member.role]
             const meetsPublishedMinimums = (Object.keys(categories) as EventCategory[]).every(
-              (category) => categories[category] >= Number(minimums[category] || 0)
+              (category) => categories[category] >= Number(roleMinimums?.[category] || 0)
             )
 
             return {
@@ -1911,7 +1907,13 @@ function PointsBreakdownTab() {
       ])
 
       setRequirementsPublished(true)
-      setPointMinimums({ membership: 25, professional_education: 25, social: 25, philanthropy: 25 })
+      const flatFallbackMinimums = { membership: 25, professional_education: 25, social: 25, philanthropy: 25 }
+      setPointMinimumsByRole({
+        general_member: flatFallbackMinimums,
+        analyst: flatFallbackMinimums,
+        project_manager: flatFallbackMinimums,
+        board_member: flatFallbackMinimums,
+      })
 
       if (attendanceResult.error) throw attendanceResult.error
       if (adjustmentsResult.error) throw adjustmentsResult.error
@@ -2335,7 +2337,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.membership_points >= pointMinimums.membership ? 'text-emerald-700' : 'text-amber-700'
+                            !requirementsPublished ? 'text-foreground' : user.membership_points >= Number(pointMinimumsByRole[user.role]?.membership || 0) ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.membership_points}
@@ -2344,7 +2346,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.professional_points >= pointMinimums.professional_education ? 'text-emerald-700' : 'text-amber-700'
+                            !requirementsPublished ? 'text-foreground' : user.professional_points >= Number(pointMinimumsByRole[user.role]?.professional_education || 0) ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.professional_points}
@@ -2353,7 +2355,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.social_points >= pointMinimums.social ? 'text-emerald-700' : 'text-amber-700'
+                            !requirementsPublished ? 'text-foreground' : user.social_points >= Number(pointMinimumsByRole[user.role]?.social || 0) ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.social_points}
@@ -2362,7 +2364,7 @@ function PointsBreakdownTab() {
                       <td className="px-2 py-2 text-center">
                         <span
                           className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.philanthropy_points >= pointMinimums.philanthropy ? 'text-emerald-700' : 'text-amber-700'
+                            !requirementsPublished ? 'text-foreground' : user.philanthropy_points >= Number(pointMinimumsByRole[user.role]?.philanthropy || 0) ? 'text-emerald-700' : 'text-amber-700'
                           }`}
                         >
                           {user.philanthropy_points}

@@ -246,10 +246,10 @@ export default function PointsPage() {
     () =>
       POINT_CATEGORY_OPTIONS.map((option) => {
         const points = Number(values[`${option.value}_points` as keyof MemberTermPointSummary] || 0)
-        const rule = rules.find((item) => item.category === option.value)
+        const rule = rules.find((item) => item.category === option.value && item.position_role === profile?.role)
         return { ...option, points, rule }
       }),
-    [rules, values]
+    [rules, values, profile?.role]
   )
   const remainingCategoryGoals = useMemo(
     () =>

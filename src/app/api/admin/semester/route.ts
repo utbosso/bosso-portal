@@ -115,21 +115,24 @@ export async function POST(request: Request) {
     const { data: savedTerm, error: termError } = termResult
     if (termError) return NextResponse.json({ error: termError.message }, { status: 500 })
 
-    const minimums = body?.minimums || {}
+    const minimumsByRole = body?.minimums || {}
     const { error: rulesError } = await admin.from('term_point_rules').upsert(
-      CATEGORIES.map((category) => ({
-        term_id: savedTerm.id,
-        category,
-        label:
-          category === 'professional_education'
-            ? 'Professional / Education'
-            : category.charAt(0).toUpperCase() + category.slice(1),
-        minimum_points: Math.max(0, Number(minimums[category]) || 0),
-        target_points: null,
-        description: 'Requirements are being finalized for this semester.',
-        updated_at: new Date().toISOString(),
-      })),
-      { onConflict: 'term_id,category' }
+      ROLES.flatMap((role) =>
+        CATEGORIES.map((category) => ({
+          term_id: savedTerm.id,
+          category,
+          position_role: role,
+          label:
+            category === 'professional_education'
+              ? 'Professional / Education'
+              : category.charAt(0).toUpperCase() + category.slice(1),
+          minimum_points: Math.max(0, Number(minimumsByRole?.[role]?.[category]) || 0),
+          target_points: null,
+          description: 'Requirements are being finalized for this semester.',
+          updated_at: new Date().toISOString(),
+        }))
+      ),
+      { onConflict: 'term_id,category,position_role' }
     )
     if (rulesError) return NextResponse.json({ error: rulesError.message }, { status: 500 })
 
@@ -169,15 +172,21 @@ export async function POST(request: Request) {
   if (action === 'update_point_rules') {
     const termId = typeof body?.termId === 'string' ? body.termId : ''
     const status = body?.status === 'published' ? 'published' : 'draft'
-    const minimums = body?.minimums
-    if (!termId || !minimums || typeof minimums !== 'object') {
+    const minimumsByRole = body?.minimums
+    if (!termId || !minimumsByRole || typeof minimumsByRole !== 'object') {
       return NextResponse.json({ error: 'Term and category minimums are required.' }, { status: 400 })
     }
 
-    const normalizedMinimums = Object.fromEntries(
-      CATEGORIES.map((category) => [category, Number(minimums[category])])
-    ) as Record<EventCategory, number>
-    if (CATEGORIES.some((category) => !Number.isFinite(normalizedMinimums[category]) || normalizedMinimums[category] < 0)) {
+    const normalizedMinimums: Record<UserRole, Record<EventCategory, number>> = {} as any
+    for (const role of ROLES) {
+      normalizedMinimums[role] = Object.fromEntries(
+        CATEGORIES.map((category) => [category, Number(minimumsByRole?.[role]?.[category])])
+      ) as Record<EventCategory, number>
+    }
+    const hasInvalidValue = ROLES.some((role) =>
+      CATEGORIES.some((category) => !Number.isFinite(normalizedMinimums[role][category]) || normalizedMinimums[role][category] < 0)
+    )
+    if (hasInvalidValue) {
       return NextResponse.json({ error: 'Every point minimum must be a non-negative number.' }, { status: 400 })
     }
 
@@ -193,19 +202,22 @@ export async function POST(request: Request) {
         ? 'Published semester point requirement.'
         : 'Requirements are being finalized for this semester.'
     const { error: rulesError } = await admin.from('term_point_rules').upsert(
-      CATEGORIES.map((category) => ({
-        term_id: termId,
-        category,
-        label:
-          category === 'professional_education'
-            ? 'Professional / Education'
-            : category.charAt(0).toUpperCase() + category.slice(1),
-        minimum_points: normalizedMinimums[category],
-        target_points: null,
-        description,
-        updated_at: now,
-      })),
-      { onConflict: 'term_id,category' }
+      ROLES.flatMap((role) =>
+        CATEGORIES.map((category) => ({
+          term_id: termId,
+          category,
+          position_role: role,
+          label:
+            category === 'professional_education'
+              ? 'Professional / Education'
+              : category.charAt(0).toUpperCase() + category.slice(1),
+          minimum_points: normalizedMinimums[role][category],
+          target_points: null,
+          description,
+          updated_at: now,
+        }))
+      ),
+      { onConflict: 'term_id,category,position_role' }
     )
     if (rulesError) return NextResponse.json({ error: rulesError.message }, { status: 500 })
 
