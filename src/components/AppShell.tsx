@@ -142,7 +142,7 @@ const navigation: NavItem[] = [
 const quickLinks = [
   { name: 'Website', url: 'http://www.txbosso.com/', icon: Globe },
   { name: 'LinkedIn', url: 'https://www.linkedin.com/company/txbosso/', icon: Linkedin },
-  { name: 'Linktree', url: 'https://linktr.ee/txbosso', icon: LinkTreeIcon },
+  { name: 'Linktree', url: 'https://linktr.ee/texasbosso', icon: LinkTreeIcon },
   { name: 'HornsLink', url: 'https://utexas.campuslabs.com/engage/organization/txsportsanalytics', icon: ExternalLink },
   { name: 'Instagram', url: 'https://www.instagram.com/txbosso/', icon: Instagram },
   { name: 'Spotify', url: 'https://open.spotify.com/show/16Nnwts9OfKgd134xZtdMu', icon: SpotifyIcon },
