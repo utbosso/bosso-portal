@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { createClient } from '@/lib/supabase/client'
 import { ROLE_REQUIREMENTS } from '@/lib/membership-tiers'
@@ -23,6 +24,7 @@ import {
   Award,
   FileText,
   QrCode,
+  CheckCircle2,
 } from 'lucide-react'
 
 const supabase = createClient()
@@ -30,6 +32,9 @@ const supabase = createClient()
 export default function DashboardPage() {
   const { user, profile, hasMinimumRole } = useAuth()
   const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [showDuesSuccess, setShowDuesSuccess] = useState(false)
 
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([])
   const [myTasks, setMyTasks] = useState<Task[]>([])
@@ -118,6 +123,15 @@ export default function DashboardPage() {
       fetchDashboardData()
     }
   }, [profile, access?.term_id, schemaReady, accessLoading])
+
+  useEffect(() => {
+    if (searchParams.get('dues') !== 'success') return
+    setShowDuesSuccess(true)
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('dues')
+    router.replace(params.size > 0 ? `/dashboard?${params.toString()}` : '/dashboard', { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const fetchDashboardData = async () => {
     if (!profile || accessLoading) return
@@ -274,6 +288,16 @@ export default function DashboardPage() {
 
   return (
     <div className="portal-page space-y-7">
+      {showDuesSuccess && (
+        <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          <div>
+            <p className="font-semibold">Dues payment received</p>
+            <p className="mt-1 text-emerald-800">Your dues are paid and your portal access is active. A payment receipt was sent to your email.</p>
+          </div>
+        </div>
+      )}
+
       {/* Welcome header */}
       <div className="space-y-2">
         <h1 className="text-3xl font-bold text-gradient sm:text-4xl">

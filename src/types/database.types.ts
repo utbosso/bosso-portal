@@ -321,7 +321,12 @@ export type Database = {
       }
       dues_payments: {
         Row: DuesPayment
-        Insert: Omit<DuesPayment, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Insert: Omit<DuesPayment, 'id' | 'created_at' | 'source' | 'stripe_checkout_session_id'> & {
+          id?: string
+          created_at?: string
+          source?: DuesPaymentSource
+          stripe_checkout_session_id?: string | null
+        }
         Update: Partial<DuesPayment>
         Relationships: []
       }
@@ -329,6 +334,22 @@ export type Database = {
         Row: DuesPaymentTerm
         Insert: Omit<DuesPaymentTerm, 'created_at'> & { created_at?: string }
         Update: Partial<DuesPaymentTerm>
+        Relationships: []
+      }
+      dues_prices: {
+        Row: DuesPrice
+        Insert: Omit<DuesPrice, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<DuesPrice>
+        Relationships: []
+      }
+      dues_checkout_settings: {
+        Row: DuesCheckoutSettings
+        Insert: Partial<DuesCheckoutSettings> & { id?: true }
+        Update: Partial<DuesCheckoutSettings>
         Relationships: []
       }
       position_codes: {
@@ -786,6 +807,8 @@ export interface TermMemberGroupMember {
   added_at: string
 }
 
+export type DuesPaymentSource = 'manual' | 'stripe'
+
 export interface DuesPayment {
   id: string
   user_id: string
@@ -794,6 +817,8 @@ export interface DuesPayment {
   paid_at: string
   recorded_by: string | null
   note: string | null
+  source: DuesPaymentSource
+  stripe_checkout_session_id: string | null
   created_at: string
 }
 
@@ -801,6 +826,25 @@ export interface DuesPaymentTerm {
   payment_id: string
   term_id: string
   created_at: string
+}
+
+export type DuesPlanLength = 'semester' | 'annual'
+
+export interface DuesPrice {
+  id: string
+  term_id: string
+  position_role: Exclude<UserRole, 'admin'>
+  plan_length: DuesPlanLength
+  amount_cents: number
+  stripe_price_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DuesCheckoutSettings {
+  id: true
+  pass_fee_to_member: boolean
+  updated_at: string
 }
 
 export interface PositionCode {

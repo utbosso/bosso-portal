@@ -32,7 +32,9 @@ with expected_tables(table_name) as (
     ('task_status_history'),
     ('semester_rollovers'),
     ('term_member_groups'),
-    ('term_member_group_members')
+    ('term_member_group_members'),
+    ('dues_prices'),
+    ('dues_checkout_settings')
 )
 select
   expected.table_name,
@@ -74,7 +76,9 @@ where table_schema = 'public'
     'task_status_history',
     'semester_rollovers',
     'term_member_groups',
-    'term_member_group_members'
+    'term_member_group_members',
+    'dues_prices',
+    'dues_checkout_settings'
   )
 group by grantee, table_name
 order by table_name, grantee;

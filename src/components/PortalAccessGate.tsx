@@ -1,11 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { ArrowRight, BadgeCheck, CircleDollarSign, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowRight, BadgeCheck, CircleDollarSign, CreditCard, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
+import { createClient } from '@/lib/supabase/client'
 import { getRenewalMessage } from '@/lib/semester'
+import type { DuesPlanLength } from '@/types/database.types'
 
 const PUBLIC_PATHS = [
   '/login',
@@ -25,11 +27,38 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [planLength, setPlanLength] = useState<DuesPlanLength>('semester')
+  const [duesPrices, setDuesPrices] = useState<Record<DuesPlanLength, number> | null>(null)
+  const [payingError, setPayingError] = useState('')
+  const [paying, setPaying] = useState(false)
 
   const isPublicPath = useMemo(
     () => PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`)),
     [pathname]
   )
+
+  useEffect(() => {
+    if (access?.reason !== 'dues_required' || !access.term_id || !access.position_role) {
+      setDuesPrices(null)
+      return
+    }
+    let cancelled = false
+    const supabase = createClient()
+    void supabase
+      .from('dues_prices')
+      .select('plan_length, amount_cents')
+      .eq('term_id', access.term_id)
+      .eq('position_role', access.position_role)
+      .then(({ data }) => {
+        if (cancelled) return
+        const next = { semester: 0, annual: 0 } as Record<DuesPlanLength, number>
+        for (const row of data || []) next[row.plan_length as DuesPlanLength] = row.amount_cents
+        setDuesPrices(next)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [access?.reason, access?.term_id, access?.position_role])
 
   if (isPublicPath || !user || !schemaReady || access?.access_granted) return <>{children}</>
 
@@ -65,7 +94,26 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
     }
   }
 
-  const waiting = submitted || access?.reason === 'dues_required' || access?.reason === 'pending_approval'
+  const payDues = async () => {
+    setPaying(true)
+    setPayingError('')
+    try {
+      const response = await fetch('/api/stripe/checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planLength }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Checkout could not be started.')
+      window.location.href = payload.url
+    } catch (checkoutError) {
+      setPayingError(checkoutError instanceof Error ? checkoutError.message : 'Checkout could not be started.')
+      setPaying(false)
+    }
+  }
+
+  const showPayment = access?.reason === 'dues_required'
+  const waiting = !showPayment && (submitted || access?.reason === 'pending_approval')
 
   return (
     <div className="min-h-screen bg-background px-5 py-10 text-foreground">
@@ -101,7 +149,43 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
               <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
             )}
 
-            {waiting ? (
+            {showPayment ? (
+              <div className="mt-8 rounded-xl border border-border bg-card p-6">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-primary">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 text-lg font-semibold text-stone-900">Pay your dues</h3>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  Access opens the moment payment clears. Pay by card or bank transfer.
+                </p>
+
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  {(['semester', 'annual'] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setPlanLength(option)}
+                      className={`rounded-lg border p-3 text-left text-sm ${planLength === option ? 'border-primary bg-orange-50' : 'border-border'}`}
+                    >
+                      <p className="font-semibold capitalize">{option === 'annual' ? 'Full year' : 'This semester'}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {duesPrices ? `$${(duesPrices[option] / 100).toFixed(2)}` : 'Loading…'}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+
+                {payingError && <p className="mt-3 text-sm text-red-700">{payingError}</p>}
+
+                <button
+                  onClick={() => void payDues()}
+                  disabled={paying || !duesPrices}
+                  className="portal-button mt-5 w-full justify-center"
+                >
+                  {paying ? 'Redirecting…' : `Pay ${duesPrices ? `$${(duesPrices[planLength] / 100).toFixed(2)}` : ''}`} <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            ) : waiting ? (
               <div className="mt-8 rounded-xl border border-orange-200 bg-orange-50 p-6">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-primary">
                   <BadgeCheck className="h-5 w-5" />

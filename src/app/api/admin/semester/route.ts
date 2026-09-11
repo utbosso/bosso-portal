@@ -6,6 +6,7 @@ import type { EventCategory, UserRole } from '@/types/database.types'
 
 const ROLES: UserRole[] = ['general_member', 'analyst', 'project_manager', 'board_member']
 const CATEGORIES: EventCategory[] = ['membership', 'professional_education', 'social', 'philanthropy']
+const PLAN_LENGTHS = ['semester', 'annual'] as const
 
 function hashCode(code: string) {
   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex')
@@ -24,7 +25,7 @@ export async function GET() {
   if (!isPortalAdminUser(user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const admin = createAdminClient()
-  const [terms, memberships, claims, profiles, codes, rules, groups, groupMembers] = await Promise.all([
+  const [terms, memberships, claims, profiles, codes, rules, groups, groupMembers, prices, checkoutSettings, duesPayments, duesPaymentTerms] = await Promise.all([
     admin.from('academic_terms').select('*').order('starts_on', { ascending: false }),
     admin.from('member_term_memberships').select('*').order('created_at', { ascending: false }),
     admin.from('position_code_claims').select('*').order('created_at', { ascending: false }),
@@ -33,9 +34,13 @@ export async function GET() {
     admin.from('term_point_rules').select('*').order('category'),
     admin.from('term_member_groups').select('*').order('name'),
     admin.from('term_member_group_members').select('*'),
+    admin.from('dues_prices').select('*'),
+    admin.from('dues_checkout_settings').select('*').maybeSingle(),
+    admin.from('dues_payments').select('id, user_id, source').order('created_at', { ascending: false }),
+    admin.from('dues_payment_terms').select('payment_id, term_id'),
   ])
 
-  const firstError = terms.error || memberships.error || claims.error || profiles.error || codes.error || rules.error || groups.error || groupMembers.error
+  const firstError = terms.error || memberships.error || claims.error || profiles.error || codes.error || rules.error || groups.error || groupMembers.error || prices.error || checkoutSettings.error || duesPayments.error || duesPaymentTerms.error
   if (firstError) return NextResponse.json({ error: firstError.message }, { status: 500 })
 
   return NextResponse.json({
@@ -51,6 +56,10 @@ export async function GET() {
         .filter((member) => member.group_id === group.id)
         .map((member) => member.user_id),
     })),
+    prices: prices.data || [],
+    checkoutSettings: checkoutSettings.data || { pass_fee_to_member: false },
+    duesPayments: duesPayments.data || [],
+    duesPaymentTerms: duesPaymentTerms.data || [],
   })
 }
 
@@ -228,6 +237,46 @@ export async function POST(request: Request) {
     if (termError) return NextResponse.json({ error: termError.message }, { status: 500 })
 
     return NextResponse.json({ success: true, status })
+  }
+
+  if (action === 'manage_dues_pricing') {
+    const termId = typeof body?.termId === 'string' ? body.termId : ''
+    const pricesByRole = body?.prices
+    const passFeeToMember = Boolean(body?.passFeeToMember)
+    if (!termId || !pricesByRole || typeof pricesByRole !== 'object') {
+      return NextResponse.json({ error: 'Term and pricing by position are required.' }, { status: 400 })
+    }
+
+    const rows: Array<{ term_id: string; position_role: UserRole; plan_length: (typeof PLAN_LENGTHS)[number]; amount_cents: number; updated_at: string }> = []
+    const now = new Date().toISOString()
+    for (const role of ROLES) {
+      for (const planLength of PLAN_LENGTHS) {
+        const amountNumber = Number(pricesByRole?.[role]?.[planLength])
+        if (!Number.isFinite(amountNumber) || amountNumber < 0) {
+          return NextResponse.json({ error: 'Every dues price must be a non-negative number.' }, { status: 400 })
+        }
+        rows.push({
+          term_id: termId,
+          position_role: role,
+          plan_length: planLength,
+          amount_cents: Math.round(amountNumber * 100),
+          updated_at: now,
+        })
+      }
+    }
+
+    const { error: pricesError } = await admin
+      .from('dues_prices')
+      .upsert(rows, { onConflict: 'term_id,position_role,plan_length' })
+    if (pricesError) return NextResponse.json({ error: pricesError.message }, { status: 500 })
+
+    const { error: settingsError } = await admin
+      .from('dues_checkout_settings')
+      .update({ pass_fee_to_member: passFeeToMember, updated_at: now })
+      .eq('id', true)
+    if (settingsError) return NextResponse.json({ error: settingsError.message }, { status: 500 })
+
+    return NextResponse.json({ success: true })
   }
 
   if (action === 'save_member_group') {

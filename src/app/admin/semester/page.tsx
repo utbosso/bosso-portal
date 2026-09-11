@@ -10,6 +10,7 @@ import {
   Check,
   Clipboard,
   Coins,
+  CreditCard,
   KeyRound,
   Loader2,
   Pencil,
@@ -27,12 +28,21 @@ import type { CommunicationMemberGroup } from '@/lib/communication-recipients'
 import { POINT_CATEGORY_OPTIONS, POSITION_OPTIONS } from '@/lib/semester'
 import type {
   AcademicTerm,
+  DuesPayment,
+  DuesPaymentTerm,
+  DuesPlanLength,
+  DuesPrice,
   EventCategory,
   MemberTermMembership,
   PositionCodeClaim,
   TermPointRule,
   UserRole,
 } from '@/types/database.types'
+
+const PLAN_LENGTH_OPTIONS: Array<{ value: DuesPlanLength; label: string }> = [
+  { value: 'semester', label: 'Semester' },
+  { value: 'annual', label: 'Full year' },
+]
 
 type MemberProfile = { id: string; full_name: string; email: string; role: UserRole }
 type CodeMetadata = {
@@ -52,9 +62,14 @@ type SetupData = {
   codes: CodeMetadata[]
   rules: TermPointRule[]
   groups: Array<CommunicationMemberGroup & { term_id: string }>
+  prices: DuesPrice[]
+  checkoutSettings: { pass_fee_to_member: boolean }
+  duesPayments: Array<Pick<DuesPayment, 'id' | 'user_id' | 'source'>>
+  duesPaymentTerms: Array<Pick<DuesPaymentTerm, 'payment_id' | 'term_id'>>
 }
 type GeneratedCode = { label: string; role: UserRole; code: string }
 type RoleMinimums = Record<UserRole, Record<EventCategory, number>>
+type RoleDuesPrices = Record<UserRole, Record<DuesPlanLength, number>>
 
 function emptyRoleMinimums(): RoleMinimums {
   return Object.fromEntries(
@@ -63,6 +78,56 @@ function emptyRoleMinimums(): RoleMinimums {
       { membership: 0, professional_education: 0, social: 0, philanthropy: 0 },
     ])
   ) as RoleMinimums
+}
+
+function emptyRoleDuesPrices(): RoleDuesPrices {
+  return Object.fromEntries(
+    POSITION_OPTIONS.map((position) => [position.value, { semester: 0, annual: 0 }])
+  ) as RoleDuesPrices
+}
+
+function DuesPricingGrid({ value, onChange }: { value: RoleDuesPrices; onChange: (next: RoleDuesPrices) => void }) {
+  return (
+    <div className="mt-5 overflow-x-auto">
+      <table className="w-full min-w-[480px] text-left text-sm">
+        <thead>
+          <tr className="text-xs uppercase tracking-wider text-muted-foreground">
+            <th className="pb-2 font-medium">Position</th>
+            {PLAN_LENGTH_OPTIONS.map((option) => (
+              <th key={option.value} className="pb-2 pl-3 font-medium">{option.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {POSITION_OPTIONS.map((position) => (
+            <tr key={position.value}>
+              <td className="py-1.5 pr-3 font-medium">{position.label}</td>
+              {PLAN_LENGTH_OPTIONS.map((option) => (
+                <td key={option.value} className="py-1.5 pl-3">
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="portal-input w-full pl-6"
+                      value={value[position.value][option.value]}
+                      onChange={(event) =>
+                        onChange({
+                          ...value,
+                          [position.value]: { ...value[position.value], [option.value]: Number(event.target.value) },
+                        })
+                      }
+                    />
+                  </div>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 const ADMIN_EMAIL = 'internal@txbosso.com'
@@ -109,7 +174,19 @@ function RoleMinimumsGrid({ value, onChange }: { value: RoleMinimums; onChange: 
 
 export default function SemesterSetupPage() {
   const { user } = useAuth()
-  const [data, setData] = useState<SetupData>({ terms: [], memberships: [], claims: [], profiles: [], codes: [], rules: [], groups: [] })
+  const [data, setData] = useState<SetupData>({
+    terms: [],
+    memberships: [],
+    claims: [],
+    profiles: [],
+    codes: [],
+    rules: [],
+    groups: [],
+    prices: [],
+    checkoutSettings: { pass_fee_to_member: false },
+    duesPayments: [],
+    duesPaymentTerms: [],
+  })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
@@ -132,6 +209,9 @@ export default function SemesterSetupPage() {
   const [minimums, setMinimums] = useState<RoleMinimums>(emptyRoleMinimums())
   const [ruleTermId, setRuleTermId] = useState('')
   const [ruleMinimums, setRuleMinimums] = useState<RoleMinimums>(emptyRoleMinimums())
+  const [priceTermId, setPriceTermId] = useState('')
+  const [duesPrices, setDuesPrices] = useState<RoleDuesPrices>(emptyRoleDuesPrices())
+  const [passFeeToMember, setPassFeeToMember] = useState(false)
 
   const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL
 
@@ -144,7 +224,14 @@ export default function SemesterSetupPage() {
     const response = await fetch('/api/admin/semester', { cache: 'no-store' })
     const payload = await response.json()
     if (!response.ok) setError(payload.error || 'Semester setup could not be loaded.')
-    else setData({ ...payload, groups: payload.groups || [] })
+    else setData({
+      ...payload,
+      groups: payload.groups || [],
+      prices: payload.prices || [],
+      checkoutSettings: payload.checkoutSettings || { pass_fee_to_member: false },
+      duesPayments: payload.duesPayments || [],
+      duesPaymentTerms: payload.duesPaymentTerms || [],
+    })
     setLoading(false)
   }, [isAdmin])
 
@@ -209,6 +296,36 @@ export default function SemesterSetupPage() {
     // Reset this editor only when refreshed server data or the selected term changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.rules, data.terms, ruleTermId])
+
+  useEffect(() => {
+    const nextTermId = editableTerms.some((term) => term.id === priceTermId)
+      ? priceTermId
+      : currentTerm?.id || editableTerms[0]?.id || ''
+    if (nextTermId !== priceTermId) setPriceTermId(nextTermId)
+    if (!nextTermId) return
+    const nextPrices = emptyRoleDuesPrices()
+    for (const position of POSITION_OPTIONS) {
+      for (const option of PLAN_LENGTH_OPTIONS) {
+        const price = data.prices.find(
+          (item) => item.term_id === nextTermId && item.position_role === position.value && item.plan_length === option.value
+        )
+        nextPrices[position.value][option.value] = (price?.amount_cents || 0) / 100
+      }
+    }
+    setDuesPrices(nextPrices)
+    setPassFeeToMember(data.checkoutSettings.pass_fee_to_member)
+    // Reset this editor only when refreshed server data or the selected term changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.prices, data.checkoutSettings, data.terms, priceTermId])
+
+  const duesPaymentSourceByUserAndTerm = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const paymentTerm of data.duesPaymentTerms) {
+      const payment = data.duesPayments.find((item) => item.id === paymentTerm.payment_id)
+      if (payment) map.set(`${paymentTerm.term_id}:${payment.user_id}`, payment.source)
+    }
+    return map
+  }, [data.duesPaymentTerms, data.duesPayments])
 
   const postAction = async (payload: Record<string, unknown>, label: string) => {
     setSaving(label)
@@ -277,6 +394,14 @@ export default function SemesterSetupPage() {
     await postAction(
       { action: 'update_point_rules', termId: ruleTermId, minimums: ruleMinimums, status },
       `rules-${status}`
+    )
+  }
+
+  const saveDuesPricing = async () => {
+    if (!priceTermId) return
+    await postAction(
+      { action: 'manage_dues_pricing', termId: priceTermId, prices: duesPrices, passFeeToMember },
+      'dues-pricing'
     )
   }
 
@@ -404,6 +529,19 @@ export default function SemesterSetupPage() {
       </section>
 
       <section className="portal-panel">
+        <div className="portal-panel-header"><div><span className="portal-eyebrow">Stripe dues checkout</span><h2>Set dues pricing</h2><p>Members pay these amounts in the portal by card or bank transfer. Update anytime — it takes effect on the next checkout.</p></div><CreditCard className="h-5 w-5 text-muted-foreground" /></div>
+        {editableTerms.length === 0 ? <p className="text-sm text-muted-foreground">Create a term before setting dues pricing.</p> : <>
+          <label className="block max-w-sm"><span className="portal-label">Term</span><select className="portal-input w-full" value={priceTermId} onChange={(event) => setPriceTermId(event.target.value)}>{editableTerms.map((term) => <option key={term.id} value={term.id}>{term.name}</option>)}</select></label>
+          <DuesPricingGrid value={duesPrices} onChange={setDuesPrices} />
+          <label className="mt-5 flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={passFeeToMember} onChange={(event) => setPassFeeToMember(event.target.checked)} />
+            Pass the card/bank processing fee on to the member (org otherwise absorbs it)
+          </label>
+          <div className="mt-6 flex justify-end"><button type="button" disabled={saving === 'dues-pricing'} onClick={() => void saveDuesPricing()} className="portal-button">{saving === 'dues-pricing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />} Save dues pricing</button></div>
+        </>}
+      </section>
+
+      <section className="portal-panel">
         <div className="portal-panel-header"><div><span className="portal-eyebrow">Step 1</span><h2>Prepare the next term</h2><p>Save dates, draft point minimums, and a fresh code for every position.</p></div><CalendarRange className="h-5 w-5 text-muted-foreground" /></div>
         <form onSubmit={saveTerm}>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
@@ -448,7 +586,7 @@ export default function SemesterSetupPage() {
           filteredCurrentMemberships.length === 0 ? (
             <div className="portal-empty compact"><Search className="h-7 w-7" /><h3>No matching semester members</h3><p>Try another name, email, or position.</p></div>
           ) : (
-            <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead><tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground"><th className="pb-3 font-medium">Member</th><th className="pb-3 font-medium">Position</th><th className="pb-3 font-medium">Dues</th><th className="pb-3 font-medium">Semester access</th><th className="pb-3 text-right font-medium">Actions</th></tr></thead><tbody className="divide-y divide-border">{filteredCurrentMemberships.map((membership) => { const member = profilesById[membership.user_id]; return <tr key={membership.id}><td className="py-4"><p className="font-medium">{member?.full_name || 'Unknown member'}</p><p className="mt-1 text-xs text-muted-foreground">{member?.email}</p></td><td className="py-4 capitalize">{membership.position_role.replaceAll('_', ' ')}</td><td className="py-4 capitalize">{membership.dues_status}</td><td className="py-4">{semesterAccessLabel(membership)}</td><td className="py-4"><div className="flex justify-end gap-2">{membership.dues_status === 'unpaid' && <><button disabled={saving.includes(membership.id)} onClick={() => openDuesPrompt(membership, false)} className="portal-button-secondary small">Semester dues</button><button disabled={saving.includes(membership.id)} onClick={() => openDuesPrompt(membership, true)} className="portal-button-secondary small">Full year</button></>}{membership.dues_status !== 'unpaid' && !['active', 'exempt'].includes(membership.status) && <button disabled={saving.includes(membership.id)} onClick={() => void reviewMembership(membership, 'approve')} className="portal-button small"><Check className="h-3.5 w-3.5" /> Approve</button>}{!['active', 'exempt', 'declined'].includes(membership.status) && <button disabled={saving.includes(membership.id)} onClick={() => void reviewMembership(membership, 'decline')} className="portal-button-ghost small">Decline</button>}</div></td></tr> })}</tbody></table></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead><tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground"><th className="pb-3 font-medium">Member</th><th className="pb-3 font-medium">Position</th><th className="pb-3 font-medium">Dues</th><th className="pb-3 font-medium">Semester access</th><th className="pb-3 text-right font-medium">Actions</th></tr></thead><tbody className="divide-y divide-border">{filteredCurrentMemberships.map((membership) => { const member = profilesById[membership.user_id]; return <tr key={membership.id}><td className="py-4"><p className="font-medium">{member?.full_name || 'Unknown member'}</p><p className="mt-1 text-xs text-muted-foreground">{member?.email}</p></td><td className="py-4 capitalize">{membership.position_role.replaceAll('_', ' ')}</td><td className="py-4 capitalize">{membership.dues_status}{duesPaymentSourceByUserAndTerm.get(`${membership.term_id}:${membership.user_id}`) === 'stripe' && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Stripe</span>}</td><td className="py-4">{semesterAccessLabel(membership)}</td><td className="py-4"><div className="flex justify-end gap-2">{membership.dues_status === 'unpaid' && <><button disabled={saving.includes(membership.id)} onClick={() => openDuesPrompt(membership, false)} className="portal-button-secondary small">Semester dues</button><button disabled={saving.includes(membership.id)} onClick={() => openDuesPrompt(membership, true)} className="portal-button-secondary small">Full year</button></>}{membership.dues_status !== 'unpaid' && !['active', 'exempt'].includes(membership.status) && <button disabled={saving.includes(membership.id)} onClick={() => void reviewMembership(membership, 'approve')} className="portal-button small"><Check className="h-3.5 w-3.5" /> Approve</button>}{!['active', 'exempt', 'declined'].includes(membership.status) && <button disabled={saving.includes(membership.id)} onClick={() => void reviewMembership(membership, 'decline')} className="portal-button-ghost small">Decline</button>}</div></td></tr> })}</tbody></table></div>
           )
         )}
       </section>
