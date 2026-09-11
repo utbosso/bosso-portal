@@ -10,7 +10,11 @@ const supabase = createClient()
 
 export function usePortalAccess(userId: string | null | undefined) {
   const [access, setAccess] = useState<PortalAccessStatus | null>(null)
-  const [loading, setLoading] = useState(Boolean(userId))
+  // Always start true, even if userId is momentarily undefined while auth is
+  // still resolving - otherwise consumers treat "not logged in yet" as
+  // "access check complete, no term_id restriction to apply" and fetch
+  // unfiltered data for an instant before the real term becomes known.
+  const [loading, setLoading] = useState(true)
   const [schemaReady, setSchemaReady] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
