@@ -108,9 +108,9 @@ export const EVENT_TYPES: Record<EventType, {
   },
   workshop_attendance: {
     label: 'Workshop Attendance',
-    points: 10,
+    points: 1,
     category: 'professional_education',
-    description: '10 points per workshop',
+    description: '1 point per workshop',
     isRecurring: true,
   },
   director_board_coffee_chat: {
