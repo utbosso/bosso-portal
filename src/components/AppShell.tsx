@@ -154,7 +154,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { user, profile, loading, signOut } = useAuth()
-  const { access, schemaReady } = usePortalAccess(user?.id)
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
   const isPortalAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   // Track if we've loaded once - after first load, don't show loading spinner
@@ -267,7 +267,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const fetchUnreadCount = async () => {
-      if (!profile) {
+      if (!profile || accessLoading) {
         setUnreadCount(0)
         return
       }
@@ -305,11 +305,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     fetchUnreadCount()
-  }, [profile, pathname, access?.term_id, schemaReady])
+  }, [profile, pathname, access?.term_id, schemaReady, accessLoading])
 
   useEffect(() => {
     const fetchTaskCount = async () => {
-      if (!profile) {
+      if (!profile || accessLoading) {
         setTaskCount(0)
         return
       }
@@ -349,7 +349,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     fetchTaskCount()
-  }, [profile, pathname, access?.term_id, schemaReady])
+  }, [profile, pathname, access?.term_id, schemaReady, accessLoading])
 
   // Search functionality with debouncing
   useEffect(() => {
@@ -360,7 +360,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     const timeoutId = setTimeout(async () => {
-      if (!profile) return
+      if (!profile || accessLoading) return
 
       setSearchLoading(true)
       try {
@@ -515,7 +515,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }, 300) // Debounce for 300ms
 
     return () => clearTimeout(timeoutId)
-  }, [searchQuery, profile, access?.term_id, schemaReady])
+  }, [searchQuery, profile, access?.term_id, schemaReady, accessLoading])
 
   // Keyboard shortcut for search (Cmd/Ctrl + K)
   useEffect(() => {
@@ -538,7 +538,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Fetch notifications
   useEffect(() => {
     const fetchNotifications = async () => {
-      if (!profile) return
+      if (!profile || accessLoading) return
 
       try {
         const allNotifications: any[] = []
@@ -646,7 +646,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     // Refresh every 30 seconds
     const interval = setInterval(fetchNotifications, 30000)
     return () => clearInterval(interval)
-  }, [profile, pathname, access?.term_id, schemaReady])
+  }, [profile, pathname, access?.term_id, schemaReady, accessLoading])
 
   // Don't wrap login/signup with shell
   if (isAuthPage) {
