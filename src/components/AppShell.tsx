@@ -154,7 +154,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { user, profile, loading, signOut } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, loading)
   const isPortalAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
 
   // Track if we've loaded once - after first load, don't show loading spinner

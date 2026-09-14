@@ -30,8 +30,8 @@ import {
 const supabase = createClient()
 
 export default function DashboardPage() {
-  const { user, profile, hasMinimumRole } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, hasMinimumRole, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const router = useRouter()
   const searchParams = useSearchParams()
   const [showDuesSuccess, setShowDuesSuccess] = useState(false)

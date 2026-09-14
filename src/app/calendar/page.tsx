@@ -90,8 +90,8 @@ const emptyForm: EventFormState = {
 }
 
 export default function CalendarPage() {
-  const { user, profile, hasMinimumRole } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, hasMinimumRole, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [events, setEvents] = useState<Event[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])

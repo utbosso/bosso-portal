@@ -70,8 +70,8 @@ const emptyPersonalForm: PersonalDocFormState = {
 }
 
 export default function DocumentsPage() {
-  const { user, profile } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [viewMode, setViewMode] = useState<'org' | 'personal'>('org')
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [accessRows, setAccessRows] = useState<DocumentAccess[]>([])

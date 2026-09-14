@@ -8,17 +8,24 @@ import type { PortalAccessStatus } from '@/types/database.types'
 
 const supabase = createClient()
 
-export function usePortalAccess(userId: string | null | undefined) {
+// authLoading must come from the caller's own useAuth() - userId alone is
+// undefined both while auth is still resolving and once it's confirmed
+// there's no session, so this hook cannot tell those two apart on its own.
+// Treating "no id yet" as "confirmed logged out" was exactly the bug: it
+// flipped loading to false, and access to null/no term_id, before the real
+// session was known, so any consumer gating a term-scoped fetch on this
+// hook's loading flag would fire early and fetch unfiltered data for an
+// instant - showing every semester's content until the real term arrived
+// a moment later and the correct, filtered re-fetch replaced it.
+export function usePortalAccess(userId: string | null | undefined, authLoading: boolean) {
   const [access, setAccess] = useState<PortalAccessStatus | null>(null)
-  // Always start true, even if userId is momentarily undefined while auth is
-  // still resolving - otherwise consumers treat "not logged in yet" as
-  // "access check complete, no term_id restriction to apply" and fetch
-  // unfiltered data for an instant before the real term becomes known.
   const [loading, setLoading] = useState(true)
   const [schemaReady, setSchemaReady] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (authLoading) return
+
     if (!userId) {
       setAccess(null)
       setLoading(false)
@@ -46,7 +53,7 @@ export function usePortalAccess(userId: string | null | undefined) {
     setAccess((data?.[0] as PortalAccessStatus | undefined) || null)
     setError(null)
     setLoading(false)
-  }, [userId])
+  }, [userId, authLoading])
 
   useEffect(() => {
     void refresh()

@@ -22,7 +22,7 @@ const PUBLIC_PATHS = [
 export default function PortalAccessGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { user, loading: authLoading, signOut } = useAuth()
-  const { access, loading, schemaReady, error, refresh } = usePortalAccess(user?.id)
+  const { access, loading, schemaReady, error, refresh } = usePortalAccess(user?.id, authLoading)
   const [code, setCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')

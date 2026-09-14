@@ -98,8 +98,8 @@ function normalizedReferenceLinks(links: TaskReferenceLink[]) {
 }
 
 export default function TasksPage() {
-  const { user, profile } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [tasks, setTasks] = useState<TeamTask[]>([])
   const [personalTasks, setPersonalTasks] = useState<PersonalTask[]>([])
   const [profiles, setProfiles] = useState<CommunicationMember[]>([])

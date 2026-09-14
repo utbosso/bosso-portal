@@ -67,8 +67,8 @@ type EventStats = {
 }
 
 export default function AttendancePage() {
-  const { user, profile } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 

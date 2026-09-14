@@ -30,8 +30,8 @@ import SectionPageHeader from '@/components/SectionPageHeader'
 const supabase = createClient()
 
 export default function FeedbackPage() {
-  const { user, profile, hasMinimumRole } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, hasMinimumRole, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [feedbackList, setFeedbackList] = useState<FeedbackSubmission[]>([])
   const [filteredFeedback, setFilteredFeedback] = useState<FeedbackSubmission[]>([])
   const [loading, setLoading] = useState(true)

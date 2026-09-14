@@ -44,8 +44,8 @@ type AudienceMode = 'role' | 'people'
 
 export default function AnnouncementDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter()
-  const { user, profile, hasMinimumRole } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, hasMinimumRole, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
 
   const [announcement, setAnnouncement] = useState<AnnouncementWithAuthor | null>(null)
   const [loading, setLoading] = useState(true)

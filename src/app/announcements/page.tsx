@@ -43,8 +43,8 @@ type AnnouncementWithAuthor = Announcement & {
 type AudienceMode = 'role' | 'people'
 
 export default function AnnouncementsPage() {
-  const { user, profile, hasMinimumRole } = useAuth()
-  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id)
+  const { user, profile, hasMinimumRole, loading: authLoading } = useAuth()
+  const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [announcements, setAnnouncements] = useState<AnnouncementWithAuthor[]>([])
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
