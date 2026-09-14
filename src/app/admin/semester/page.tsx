@@ -25,14 +25,13 @@ import MemberGroupPicker from '@/components/MemberGroupPicker'
 import SemesterRolloverGuide from '@/components/SemesterRolloverGuide'
 import type { UserOption } from '@/components/UserSearch'
 import type { CommunicationMemberGroup } from '@/lib/communication-recipients'
-import { POINT_CATEGORY_OPTIONS, POSITION_OPTIONS } from '@/lib/semester'
+import { POSITION_OPTIONS } from '@/lib/semester'
 import type {
   AcademicTerm,
   DuesPayment,
   DuesPaymentTerm,
   DuesPlanLength,
   DuesPrice,
-  EventCategory,
   MemberTermMembership,
   PositionCodeClaim,
   TermPointRule,
@@ -68,16 +67,11 @@ type SetupData = {
   duesPaymentTerms: Array<Pick<DuesPaymentTerm, 'payment_id' | 'term_id'>>
 }
 type GeneratedCode = { label: string; role: UserRole; code: string }
-type RoleMinimums = Record<UserRole, Record<EventCategory, number>>
+type RoleMinimums = Record<UserRole, number>
 type RoleDuesPrices = Record<UserRole, Record<DuesPlanLength, number>>
 
 function emptyRoleMinimums(): RoleMinimums {
-  return Object.fromEntries(
-    POSITION_OPTIONS.map((position) => [
-      position.value,
-      { membership: 0, professional_education: 0, social: 0, philanthropy: 0 },
-    ])
-  ) as RoleMinimums
+  return Object.fromEntries(POSITION_OPTIONS.map((position) => [position.value, 0])) as RoleMinimums
 }
 
 function emptyRoleDuesPrices(): RoleDuesPrices {
@@ -135,35 +129,26 @@ const ADMIN_EMAIL = 'internal@txbosso.com'
 function RoleMinimumsGrid({ value, onChange }: { value: RoleMinimums; onChange: (next: RoleMinimums) => void }) {
   return (
     <div className="mt-5 overflow-x-auto">
-      <table className="w-full min-w-[640px] text-left text-sm">
+      <table className="w-full min-w-[360px] text-left text-sm">
         <thead>
           <tr className="text-xs uppercase tracking-wider text-muted-foreground">
             <th className="pb-2 font-medium">Position</th>
-            {POINT_CATEGORY_OPTIONS.map((option) => (
-              <th key={option.value} className="pb-2 pl-3 font-medium">{option.label}</th>
-            ))}
+            <th className="pb-2 pl-3 font-medium">Required points</th>
           </tr>
         </thead>
         <tbody>
           {POSITION_OPTIONS.map((position) => (
             <tr key={position.value}>
               <td className="py-1.5 pr-3 font-medium">{position.label}</td>
-              {POINT_CATEGORY_OPTIONS.map((option) => (
-                <td key={option.value} className="py-1.5 pl-3">
-                  <input
-                    type="number"
-                    min="0"
-                    className="portal-input w-full"
-                    value={value[position.value][option.value]}
-                    onChange={(event) =>
-                      onChange({
-                        ...value,
-                        [position.value]: { ...value[position.value], [option.value]: Number(event.target.value) },
-                      })
-                    }
-                  />
-                </td>
-              ))}
+              <td className="py-1.5 pl-3">
+                <input
+                  type="number"
+                  min="0"
+                  className="portal-input w-full max-w-[160px]"
+                  value={value[position.value]}
+                  onChange={(event) => onChange({ ...value, [position.value]: Number(event.target.value) })}
+                />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -285,12 +270,10 @@ export default function SemesterSetupPage() {
     if (!nextTermId) return
     const nextMinimums = emptyRoleMinimums()
     for (const position of POSITION_OPTIONS) {
-      for (const option of POINT_CATEGORY_OPTIONS) {
-        const rule = data.rules.find(
-          (item) => item.term_id === nextTermId && item.category === option.value && item.position_role === position.value
-        )
-        nextMinimums[position.value][option.value] = Number(rule?.minimum_points || 0)
-      }
+      const total = data.rules
+        .filter((item) => item.term_id === nextTermId && item.position_role === position.value)
+        .reduce((sum, item) => sum + Number(item.minimum_points || 0), 0)
+      nextMinimums[position.value] = total
     }
     setRuleMinimums(nextMinimums)
     // Reset this editor only when refreshed server data or the selected term changes.

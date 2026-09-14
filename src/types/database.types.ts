@@ -494,32 +494,34 @@ export type EventCategory = 'membership' | 'professional_education' | 'social' |
 
 // BOSSO Points System Event Types
 export type EventType =
-  // Membership Events
+  // Fall 2026 event types
+  | 'general_meeting'
+  | 'workshop_attendance'
+  | 'weekly_project_meeting'
+  | 'minor_social'
+  | 'major_social'
+  | 'philanthropy_event'
+  | 'org_wide_volunteering'
+  | 'other'
+  // Retired after Spring 2026 - kept so past-semester events still resolve
   | 'membership_profile_creation'
   | 'on_time_dues_payment'
   | 'resume_book_submission'
   | 'semester_reflection'
   | 'profit_share_participation'
   | 'tabling_recruitment'
-  // Professional / Education Events
-  | 'general_meeting'
-  | 'workshop_attendance'
   | 'director_board_coffee_chat'
   | 'boss_attendance'
   | 'case_competition_participation'
   | 'member_project_participation'
-  // Social Events
   | 'semesterly_org_social'
   | 'project_team_social'
   | 'role_based_social'
   | 'org_wide_social'
-  // Philanthropy Events
   | 'boss_volunteering_shift'
   | 'individual_service_event'
   | 'bosso_service_event'
   | 'multi_org_service_event'
-  // Other
-  | 'other'
 
 export interface Event {
   id: string

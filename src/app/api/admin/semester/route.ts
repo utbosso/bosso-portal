@@ -8,6 +8,29 @@ const ROLES: UserRole[] = ['general_member', 'analyst', 'project_manager', 'boar
 const CATEGORIES: EventCategory[] = ['membership', 'professional_education', 'social', 'philanthropy']
 const PLAN_LENGTHS = ['semester', 'annual'] as const
 
+// BOSSO no longer sets point requirements by category (membership/
+// professional_education/social/philanthropy) - just one semester total per
+// role. term_point_rules still stores one row per category to avoid a
+// schema migration, so every role's total lives under this one category and
+// the other three are kept at zero; dashboard/points already sum all four
+// per role, so this reads back as a single flat total with no other change.
+const TOTAL_POINTS_CATEGORY: EventCategory = 'membership'
+
+function buildPointRuleRows(termId: string, minimumsByRole: Record<UserRole, number>, description: string, updatedAt: string) {
+  return ROLES.flatMap((role) =>
+    CATEGORIES.map((category) => ({
+      term_id: termId,
+      category,
+      position_role: role,
+      label: category === 'professional_education' ? 'Professional / Education' : category.charAt(0).toUpperCase() + category.slice(1),
+      minimum_points: category === TOTAL_POINTS_CATEGORY ? minimumsByRole[role] : 0,
+      target_points: null,
+      description,
+      updated_at: updatedAt,
+    }))
+  )
+}
+
 function hashCode(code: string) {
   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex')
 }
@@ -124,23 +147,10 @@ export async function POST(request: Request) {
     const { data: savedTerm, error: termError } = termResult
     if (termError) return NextResponse.json({ error: termError.message }, { status: 500 })
 
-    const minimumsByRole = body?.minimums || {}
+    const minimumsByRole: Record<UserRole, number> = {} as any
+    for (const role of ROLES) minimumsByRole[role] = Math.max(0, Number(body?.minimums?.[role]) || 0)
     const { error: rulesError } = await admin.from('term_point_rules').upsert(
-      ROLES.flatMap((role) =>
-        CATEGORIES.map((category) => ({
-          term_id: savedTerm.id,
-          category,
-          position_role: role,
-          label:
-            category === 'professional_education'
-              ? 'Professional / Education'
-              : category.charAt(0).toUpperCase() + category.slice(1),
-          minimum_points: Math.max(0, Number(minimumsByRole?.[role]?.[category]) || 0),
-          target_points: null,
-          description: 'Requirements are being finalized for this semester.',
-          updated_at: new Date().toISOString(),
-        }))
-      ),
+      buildPointRuleRows(savedTerm.id, minimumsByRole, 'Requirements are being finalized for this semester.', new Date().toISOString()),
       { onConflict: 'term_id,category,position_role' }
     )
     if (rulesError) return NextResponse.json({ error: rulesError.message }, { status: 500 })
@@ -183,20 +193,14 @@ export async function POST(request: Request) {
     const status = body?.status === 'published' ? 'published' : 'draft'
     const minimumsByRole = body?.minimums
     if (!termId || !minimumsByRole || typeof minimumsByRole !== 'object') {
-      return NextResponse.json({ error: 'Term and category minimums are required.' }, { status: 400 })
+      return NextResponse.json({ error: 'Term and point requirements are required.' }, { status: 400 })
     }
 
-    const normalizedMinimums: Record<UserRole, Record<EventCategory, number>> = {} as any
-    for (const role of ROLES) {
-      normalizedMinimums[role] = Object.fromEntries(
-        CATEGORIES.map((category) => [category, Number(minimumsByRole?.[role]?.[category])])
-      ) as Record<EventCategory, number>
-    }
-    const hasInvalidValue = ROLES.some((role) =>
-      CATEGORIES.some((category) => !Number.isFinite(normalizedMinimums[role][category]) || normalizedMinimums[role][category] < 0)
-    )
+    const normalizedMinimums: Record<UserRole, number> = {} as any
+    for (const role of ROLES) normalizedMinimums[role] = Number(minimumsByRole?.[role])
+    const hasInvalidValue = ROLES.some((role) => !Number.isFinite(normalizedMinimums[role]) || normalizedMinimums[role] < 0)
     if (hasInvalidValue) {
-      return NextResponse.json({ error: 'Every point minimum must be a non-negative number.' }, { status: 400 })
+      return NextResponse.json({ error: 'Every point requirement must be a non-negative number.' }, { status: 400 })
     }
 
     const { data: target } = await admin.from('academic_terms').select('id, status').eq('id', termId).maybeSingle()
@@ -211,21 +215,7 @@ export async function POST(request: Request) {
         ? 'Published semester point requirement.'
         : 'Requirements are being finalized for this semester.'
     const { error: rulesError } = await admin.from('term_point_rules').upsert(
-      ROLES.flatMap((role) =>
-        CATEGORIES.map((category) => ({
-          term_id: termId,
-          category,
-          position_role: role,
-          label:
-            category === 'professional_education'
-              ? 'Professional / Education'
-              : category.charAt(0).toUpperCase() + category.slice(1),
-          minimum_points: normalizedMinimums[role][category],
-          target_points: null,
-          description,
-          updated_at: now,
-        }))
-      ),
+      buildPointRuleRows(termId, normalizedMinimums, description, now),
       { onConflict: 'term_id,category,position_role' }
     )
     if (rulesError) return NextResponse.json({ error: rulesError.message }, { status: 500 })

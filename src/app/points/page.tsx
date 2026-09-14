@@ -52,8 +52,8 @@ type RequestableEvent = {
 }
 
 export default function PointsPage() {
-  const { user, profile } = useAuth()
-  const { access, schemaReady } = usePortalAccess(user?.id)
+  const { user, profile, loading: authLoading } = useAuth()
+  const { access, schemaReady } = usePortalAccess(user?.id, authLoading)
   const [summary, setSummary] = useState<MemberTermPointSummary | null>(null)
   const [rules, setRules] = useState<TermPointRule[]>([])
   const [rulesPublished, setRulesPublished] = useState(false)
@@ -244,22 +244,20 @@ export default function PointsPage() {
   const values = summary || ({ ...EMPTY_POINT_SUMMARY, term_id: activeTermId || '', user_id: user?.id || '' } as MemberTermPointSummary)
   const categoryCards = useMemo(
     () =>
-      POINT_CATEGORY_OPTIONS.map((option) => {
-        const points = Number(values[`${option.value}_points` as keyof MemberTermPointSummary] || 0)
-        const rule = rules.find((item) => item.category === option.value && item.position_role === profile?.role)
-        return { ...option, points, rule }
-      }),
-    [rules, values, profile?.role]
+      POINT_CATEGORY_OPTIONS.map((option) => ({
+        ...option,
+        points: Number(values[`${option.value}_points` as keyof MemberTermPointSummary] || 0),
+      })),
+    [values]
   )
-  const remainingCategoryGoals = useMemo(
-    () =>
-      rulesPublished
-        ? categoryCards.filter(
-            (item) => item.rule && item.points < Number(item.rule.minimum_points)
-          )
-        : [],
-    [categoryCards, rulesPublished]
+  // BOSSO requires one flat semester total, not a minimum per category - sum
+  // this role's rows (term_point_rules still stores one row per category)
+  // into that single number.
+  const requiredPoints = useMemo(
+    () => rules.filter((item) => item.position_role === profile?.role).reduce((sum, item) => sum + Number(item.minimum_points || 0), 0),
+    [rules, profile?.role]
   )
+  const pointsRemaining = rulesPublished ? Math.max(0, requiredPoints - Number(values.total_points)) : 0
 
   const submitRequest = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -422,22 +420,25 @@ export default function PointsPage() {
       <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[1.2fr_repeat(4,1fr)]">
         <div className="portal-stat-card col-span-2 bg-[#221f1c] text-white lg:col-span-1">
           <p className="text-sm text-stone-300">Semester total</p>
-          <p className="mt-5 text-4xl font-semibold">{Number(values.total_points).toLocaleString()}</p>
+          <p className="mt-5 text-4xl font-semibold">
+            {Number(values.total_points).toLocaleString()}
+            {rulesPublished && requiredPoints > 0 && (
+              <span className="text-lg font-normal text-stone-300"> / {requiredPoints.toLocaleString()}</span>
+            )}
+          </p>
+          <p className="mt-2 text-xs text-stone-300">
+            {rulesPublished ? (requiredPoints > 0 ? 'points toward this semester\'s requirement' : 'Requirement being finalized') : 'Requirement being finalized'}
+          </p>
         </div>
         {categoryCards.map((item) => (
           <div key={item.value} className="portal-stat-card">
             <p className="text-sm text-muted-foreground">{item.label}</p>
             <p className="mt-5 text-3xl font-semibold">{item.points.toLocaleString()}</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {rulesPublished && item.rule
-                ? `${item.rule.minimum_points} minimum`
-                : 'Minimum being finalized'}
-            </p>
           </div>
         ))}
       </section>
 
-      {rulesPublished && remainingCategoryGoals.length > 0 && (
+      {rulesPublished && requiredPoints > 0 && pointsRemaining > 0 && (
         <section className="portal-alert-warning p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/70">
@@ -445,15 +446,10 @@ export default function PointsPage() {
             </div>
             <div>
               <h2 className="font-semibold text-foreground">Your next point goal</h2>
-              <p className="mt-1 text-muted-foreground">Only your remaining category gaps are shown.</p>
+              <p className="mt-1 text-muted-foreground">
+                <strong>{pointsRemaining.toLocaleString()}</strong> more point{pointsRemaining === 1 ? '' : 's'} to reach this semester's {requiredPoints.toLocaleString()}-point requirement.
+              </p>
             </div>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {remainingCategoryGoals.map((item) => (
-              <span key={item.value} className="rounded-full border border-current/20 bg-background/70 px-3 py-1.5 font-medium">
-                <strong>{Number(item.rule!.minimum_points) - item.points}</strong> more in {item.label}
-              </span>
-            ))}
           </div>
         </section>
       )}
