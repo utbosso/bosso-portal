@@ -47,8 +47,17 @@ export function useAuth() {
       // Always set the profile first, so pages can access user data
       setProfile(data)
 
-      // Skip email verification check - Google OAuth verifies emails automatically
-      // No need to check email_verified since we trust Google's verification
+      // Email/password accounts are verified manually by an admin (User
+      // Management tab's Verify Email flow) rather than via an automatic
+      // Supabase confirmation email, to avoid per-signup Supabase email
+      // cost. Google accounts are marked verified immediately at signup and
+      // never hit this. Check === false specifically - legacy accounts
+      // predating this field have it null and should not be blocked.
+      if (data.email_verified === false) {
+        console.log('[auth] Email not verified, redirecting to verify-email')
+        router.push('/verify-email?email=' + encodeURIComponent(data.email || ''))
+        return
+      }
 
       // Dues/position review no longer blocks access here - PortalAccessGate
       // already gates the whole app on the real, term-scoped access status

@@ -26,13 +26,11 @@ export default function VerifyEmailPage() {
     // Don't redirect while still loading
     if (authLoading) return
 
-    // Only redirect if we have a profile AND they're verified/active
-    // Don't redirect if profile is null (still loading) or if email_verified is false (needs verification)
-    if (profile) {
-      // If email is verified (true or null) AND account is active (active or null), redirect to dashboard
-      if (profile.email_verified !== false && profile.account_status !== 'pending_approval') {
-        router.push('/dashboard')
-      }
+    // Once email is verified, PortalAccessGate takes over from the dashboard
+    // route and shows whatever's next (Pay Dues, a wait screen, etc.) - no
+    // need to also wait for account_status here.
+    if (profile && profile.email_verified !== false) {
+      router.push('/dashboard')
     }
   }, [profile, router, authLoading])
 
@@ -137,12 +135,20 @@ export default function VerifyEmailPage() {
               Go to Login
             </Link>
           ) : user ? (
-            <button
-              onClick={signOut}
-              className="w-full text-center py-3 border-2 border-primary/30 rounded-lg text-primary hover:bg-primary/10 hover:border-primary/60 transition-all hover-glow"
-            >
-              Sign Out
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full text-center py-3 btn-neon"
+              >
+                Refresh status
+              </button>
+              <button
+                onClick={signOut}
+                className="w-full text-center py-3 border-2 border-primary/30 rounded-lg text-primary hover:bg-primary/10 hover:border-primary/60 transition-all hover-glow"
+              >
+                Sign Out
+              </button>
+            </div>
           ) : (
             <Link
               href="/login"
