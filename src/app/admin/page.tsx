@@ -12,7 +12,6 @@ import {
   FileText,
   MessageSquare,
   ClipboardCheck,
-  TrendingUp,
   Calendar,
   FolderOpen,
   BarChart3,
@@ -95,11 +94,7 @@ export default function AdminDashboard() {
   // State declarations (must be before useEffects that use them)
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
-    totalUsers: 0,
-    totalApplications: 0,
     totalFeedback: 0,
-    pendingFeedback: 0,
-    activeApplications: 0,
     pendingUsers: 0,
   })
   const [recentUsers, setRecentUsers] = useState<Profile[]>([])
@@ -208,11 +203,6 @@ export default function AdminDashboard() {
         .select('*')
         .order('created_at', { ascending: false })
 
-      // Fetch all applications
-      const { data: applications } = await supabase
-        .from('applications')
-        .select('*')
-
       const { data: currentTerm } = await supabase
         .from('academic_terms')
         .select('id')
@@ -244,13 +234,7 @@ export default function AdminDashboard() {
       }
 
       // Calculate stats
-      const totalUsers = users?.length || 0
-      const totalApplications = applications?.length || 0
       const totalFeedback = feedback?.length || 0
-      const pendingFeedback = feedback?.filter((f: any) => f.status === 'new').length || 0
-      const activeApplications = applications?.filter(a =>
-        a.status === 'saved' || a.status === 'applied' || a.status === 'interviewing'
-      ).length || 0
 
       // Count users by role. profiles.role is never reset by a rollover (it's last-known,
       // not current-term), so once the term schema is live this counts approved memberships
@@ -272,11 +256,7 @@ export default function AdminDashboard() {
       }
 
       setStats({
-        totalUsers,
-        totalApplications,
         totalFeedback,
-        pendingFeedback,
-        activeApplications,
         pendingUsers,
       })
       setRecentUsers(users?.slice(0, 5) || [])
@@ -433,50 +413,7 @@ export default function AdminDashboard() {
       {/* Overview Tab Content */}
       {activeTab === 'overview' && (
         <>
-          {/* Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="card-glow p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Users</p>
-              <p className="text-2xl font-bold text-foreground">{stats.totalUsers}</p>
-            </div>
-            <Users className="w-8 h-8 text-blue-400" />
-          </div>
-        </div>
-
-        <div className="card-glow p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Applications</p>
-              <p className="text-2xl font-bold text-foreground">{stats.totalApplications}</p>
-            </div>
-            <ClipboardCheck className="w-8 h-8 text-purple-400" />
-          </div>
-        </div>
-
-        <div className="card-glow p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Active Applications</p>
-              <p className="text-2xl font-bold text-yellow-400">{stats.activeApplications}</p>
-            </div>
-            <TrendingUp className="w-8 h-8 text-yellow-400" />
-          </div>
-        </div>
-
-        <div className="card-glow p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Pending Feedback</p>
-              <p className="text-2xl font-bold text-red-400">{stats.pendingFeedback}</p>
-            </div>
-            <MessageSquare className="w-8 h-8 text-red-400" />
-          </div>
-        </div>
-      </div>
-
-      {/* Users by Role */}
+          {/* Users by Role */}
       <div className="card-glow p-6">
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 className="w-5 h-5 text-primary" />
