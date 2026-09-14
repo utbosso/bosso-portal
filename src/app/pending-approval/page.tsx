@@ -32,7 +32,12 @@ export default function PendingApprovalPage() {
       router.push('/signup?error=no_profile')
       return
     }
-    if (profile?.account_status === 'approved' || profile?.account_status === 'active') {
+    // This screen predates the self-serve Pay Dues flow and nothing links
+    // here anymore, but a stale bookmark could still land someone on it -
+    // send them into the app either way, where PortalAccessGate shows
+    // whatever's actually true (Pay Dues, enter position code, etc.)
+    // instead of this page's now-inaccurate "an admin will review" copy.
+    if (profile) {
       router.push('/dashboard')
     }
   }, [profile, profileLoading, user, router, signOut])

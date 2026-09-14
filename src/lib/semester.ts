@@ -42,7 +42,7 @@ export function isMissingSemesterSchema(error: { code?: string; message?: string
 export function getRenewalMessage(access: PortalAccessStatus | null) {
   switch (access?.reason) {
     case 'dues_required':
-      return 'Your position was received. Access will open after your dues payment is recorded and approved.'
+      return 'Your position was received. Pay your dues below — access opens automatically the moment payment clears.'
     case 'pending_approval':
       return 'Your renewal is ready for administrator review.'
     case 'declined':

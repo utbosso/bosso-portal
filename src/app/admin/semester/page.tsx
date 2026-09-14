@@ -413,7 +413,7 @@ export default function SemesterSetupPage() {
     }
     const coverage = annual
       ? data.terms
-          .filter((term) => term.academic_year === currentTerm?.academic_year && ['current', 'upcoming'].includes(term.status))
+          .filter((term) => term.academic_year === currentTerm?.academic_year && term.status !== 'archived')
           .map((term) => term.id)
       : [membership.term_id]
     const result = await postAction(

@@ -88,12 +88,16 @@ export async function POST(request: Request) {
       .eq('position_role', membership.position_role)
       .eq('plan_length', planLength)
       .maybeSingle(),
+    // Include every non-archived term in the academic year, not just
+    // 'upcoming' ones - a future term often still sits in 'draft' until an
+    // admin gets around to preparing it, and an annual payment should still
+    // cover it once it exists, not silently miss it because of that timing.
     planLength === 'annual'
       ? admin
           .from('academic_terms')
           .select('id')
           .eq('academic_year', term.academic_year)
-          .in('status', ['current', 'upcoming'])
+          .neq('status', 'archived')
           .neq('id', term.id)
       : Promise.resolve({ data: [], error: null }),
   ])

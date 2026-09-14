@@ -32,7 +32,7 @@ import {
   CalendarRange,
   Loader2,
 } from 'lucide-react'
-import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership } from '@/types/database.types'
+import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership, DuesPrice } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import type { UserOption } from '@/components/UserSearch'
@@ -630,6 +630,7 @@ function UserManagementTab() {
   const [currentTerm, setCurrentTerm] = useState<AcademicTerm | null>(null)
   const [termMemberships, setTermMemberships] = useState<Record<string, MemberTermMembership>>({})
   const [fullYearTermIds, setFullYearTermIds] = useState<string[]>([])
+  const [duesPricesByRole, setDuesPricesByRole] = useState<Record<string, { semester: number; annual: number }>>({})
   const [reviewingUser, setReviewingUser] = useState<Profile | null>(null)
 
   useEffect(() => {
@@ -655,21 +656,29 @@ function UserManagementTab() {
       setCurrentTerm((term as AcademicTerm) || null)
 
       if (term) {
-        const [membershipResult, siblingTermsResult] = await Promise.all([
+        const [membershipResult, siblingTermsResult, pricesResult] = await Promise.all([
           supabase.from('member_term_memberships').select('*').eq('term_id', term.id),
           supabase
             .from('academic_terms')
             .select('id')
             .eq('academic_year', term.academic_year)
-            .in('status', ['current', 'upcoming']),
+            .neq('status', 'archived'),
+          supabase.from('dues_prices').select('*').eq('term_id', term.id),
         ])
         setTermMemberships(
           Object.fromEntries(((membershipResult.data || []) as MemberTermMembership[]).map((item) => [item.user_id, item]))
         )
         setFullYearTermIds((siblingTermsResult.data || []).map((item) => item.id))
+        const pricesByRole: Record<string, { semester: number; annual: number }> = {}
+        for (const price of (pricesResult.data || []) as DuesPrice[]) {
+          if (!pricesByRole[price.position_role]) pricesByRole[price.position_role] = { semester: 0, annual: 0 }
+          pricesByRole[price.position_role][price.plan_length] = price.amount_cents
+        }
+        setDuesPricesByRole(pricesByRole)
       } else {
         setTermMemberships({})
         setFullYearTermIds([])
+        setDuesPricesByRole({})
       }
     } catch (error) {
       console.error('Error fetching users:', error)
@@ -1080,29 +1089,34 @@ BOSSO Team`)
   }
 
   const sendDuesPaymentRequest = (user: Profile) => {
-    const subject = encodeURIComponent('BOSSO Portal - Dues Payment Required')
+    // Dues are now paid self-serve in the portal (card or bank transfer via
+    // Stripe), priced by whichever position they claimed with their code -
+    // not the old manual Venmo + reply-to-confirm process.
+    const role = termMemberships[user.id]?.position_role || user.role
+    const roleLabel = role.replaceAll('_', ' ')
+    const prices = duesPricesByRole[role]
+    const pricingLines = prices
+      ? `• Semester: $${(prices.semester / 100).toFixed(2)}\n• Full year: $${(prices.annual / 100).toFixed(2)}`
+      : '• Pricing for your position is still being finalized - check the portal for the current amount.'
+
+    const subject = encodeURIComponent('BOSSO Portal - Pay Your Dues')
     const body = encodeURIComponent(`Hi ${user.full_name},
 
-Thank you for creating a BOSSO Portal account!
+Thanks for signing up with BOSSO! To finish activating your portal access, pay your dues directly in the portal - no need to Venmo anyone or send a confirmation.
 
-Before we can approve your account, we need to confirm that you have paid your membership dues.
+1. Log in to the portal: ${window.location.origin}
+2. You'll land on the "Pay your dues" screen automatically
+3. Choose Semester or Full Year and pay by card or bank transfer
 
-Dues Payment Information:
-• Amount: $
-• Venmo: @hdave7
+Dues for your position (${roleLabel}):
+${pricingLines}
 
-Once you have completed the payment, please reply to this email with:
-1. Confirmation of payment (screenshot or transaction ID)
-2. Date of payment
+Access opens automatically the moment your payment clears.
 
-We will approve your portal account within 24-48 hours of receiving confirmation.
-
-If you have already paid your dues, please reply with your confirmation details and we'll get you approved right away.
-
-If you have any questions about dues or the payment process, feel free to reach out.
+If you run into any trouble, just reply to this email.
 
 Best regards,
-BOSSO@UTAustin`)
+BOSSO Team`)
 
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
     window.open(gmailUrl, '_blank')

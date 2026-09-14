@@ -149,105 +149,23 @@ export default function SignupPage() {
     setError('')
 
     try {
-      const signupData = JSON.stringify({
-        fullName: formData.fullName,
-        registrationCode: formData.registrationCode,
-        intendedRole,
-      })
-      sessionStorage.setItem('signup_data', signupData)
-      localStorage.setItem('signup_data', signupData)
-
-      // New email/password accounts must confirm the automated Supabase email.
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
-        email: email,
-        password: formData.password,
-        options: {
-          data: {
-            full_name: formData.fullName,
-          },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        }
-      })
-
-      if (signUpError) throw signUpError
-      if (!authData.user) throw new Error('No user returned from signup')
-
-      if (!authData.session) {
-        router.push('/verify-email?email=' + encodeURIComponent(email))
-        return
-      }
-
-      // Create or update profile
-      // Check if profile already exists (in case auth trigger created it)
-      console.log('[signup] Checking if profile exists for user:', authData.user.id)
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', authData.user.id)
-        .maybeSingle()
-
-      console.log('[signup] Existing profile:', existingProfile ? 'found' : 'not found')
-      console.log('[signup] Setting up profile with role:', intendedRole)
-
-      if (existingProfile) {
-        // Profile exists (created by auth trigger), update it with correct role
-        console.log('[signup] Profile exists, updating with correct role:', intendedRole)
-        const { data: updatedProfile, error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            full_name: formData.fullName,
-            account_status: 'pending_approval',
-            email_verified: false,
-          })
-          .eq('id', authData.user.id)
-          .select()
-
-        if (updateError) {
-          console.error('[signup] Profile update error:', updateError)
-          throw updateError
-        }
-
-        console.log('[signup] Profile updated successfully:', updatedProfile)
-        console.log('[signup] ROLE CHECK - Expected:', intendedRole, 'Got:', updatedProfile?.[0]?.role)
-      } else {
-        // Profile doesn't exist, create it
-        console.log('[signup] Profile does not exist, creating new profile')
-        const profileData = {
-          id: authData.user.id,
-          email: email,
-          full_name: formData.fullName,
-          account_status: 'pending_approval',
-          role: 'general_member' as const,
-          email_verified: false,
-        }
-        console.log('[signup] Profile data being inserted:', profileData)
-
-        const { data: insertedProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert(profileData)
-          .select()
-
-        if (insertError) {
-          console.error('[signup] Profile insert error:', insertError)
-          throw insertError
-        }
-
-        console.log('[signup] Profile inserted successfully:', insertedProfile)
-        console.log('[signup] ROLE CHECK - Expected:', intendedRole, 'Got:', insertedProfile?.[0]?.role)
-      }
-
-      // The code is claimed after authentication and remains pending until an
-      // administrator approves the new term membership.
-      await fetch('/api/semester/renew', {
+      // Created server-side (service role) rather than via the client SDK's
+      // signUp(), which would trigger Supabase's own automatic confirmation
+      // email for every signup. An admin verifies the email manually instead
+      // (User Management tab) to avoid that per-signup Supabase email cost.
+      const response = await fetch('/api/auth/email-signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: formData.registrationCode }),
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          email,
+          password: formData.password,
+          code: formData.registrationCode,
+        }),
       })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to create account.')
 
-      // Sign out immediately so they need to verify email first
-      await supabase.auth.signOut()
-
-      // Redirect to verify email page
       router.push('/verify-email?email=' + encodeURIComponent(email))
     } catch (err: any) {
       console.error('Signup error:', err)
@@ -324,7 +242,7 @@ export default function SignupPage() {
               </div>
               {codeValidated && (
                 <p className="text-xs text-emerald-700">
-                  Code accepted. Requested position: <span className="font-semibold">{intendedRole.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</span>. An admin will review it before access opens.
+                  Code accepted. Requested position: <span className="font-semibold">{intendedRole.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</span>. Next, create your account below to pay dues and get access.
                 </p>
               )}
             </div>

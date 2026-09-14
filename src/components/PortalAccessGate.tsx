@@ -140,7 +140,7 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
               <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-orange-300">
                 {access?.term_name || 'New semester'}
               </p>
-              <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">Welcome back.</h1>
+              <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">You're almost in.</h1>
             </div>
 
             <p className="mt-10 text-base leading-7 text-stone-300">
@@ -148,7 +148,7 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
             </p>
 
             <div className="mt-10 space-y-4 text-sm text-stone-300">
-              <div className="flex items-center gap-3"><BadgeCheck className="h-5 w-5 text-orange-300" /> No new email verification for returning accounts</div>
+              <div className="flex items-center gap-3"><BadgeCheck className="h-5 w-5 text-orange-300" /> Access opens automatically once dues are paid</div>
               <div className="flex items-center gap-3"><CircleDollarSign className="h-5 w-5 text-orange-300" /> One-semester and full-year dues are supported</div>
             </div>
           </section>
