@@ -1102,7 +1102,7 @@ BOSSO Team`)
     const subject = encodeURIComponent('BOSSO Portal - Pay Your Dues')
     const body = encodeURIComponent(`Hi ${user.full_name},
 
-Thanks for signing up with BOSSO! To finish activating your portal access, pay your dues directly in the portal - no need to Venmo anyone or send a confirmation.
+Thanks for signing up with BOSSO! To finish activating your portal access, pay your dues directly in the portal.
 
 1. Log in to the portal: ${window.location.origin}
 2. You'll land on the "Pay your dues" screen automatically
