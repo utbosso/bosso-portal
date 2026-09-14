@@ -255,11 +255,32 @@ export default function AdminDashboard() {
         })
       }
 
+      // "Recent Users" resets every semester - it should reflect who has
+      // just renewed for the current term, not the org's all-time newest
+      // accounts (which barely change once the org has been running a
+      // while). Old accounts remain fully available in User Management for
+      // temporary-password resets regardless of this.
+      let recentTermUsers: Profile[] = []
+      if (currentTerm?.id) {
+        const { data: recentMemberships } = await supabase
+          .from('member_term_memberships')
+          .select('user_id, claimed_at')
+          .eq('term_id', currentTerm.id)
+          .order('claimed_at', { ascending: false, nullsFirst: false })
+          .limit(5)
+        const usersById = new Map((users || []).map((u) => [u.id, u]))
+        recentTermUsers = (recentMemberships || [])
+          .map((membership) => usersById.get(membership.user_id))
+          .filter((u): u is Profile => Boolean(u))
+      } else {
+        recentTermUsers = users?.slice(0, 5) || []
+      }
+
       setStats({
         totalFeedback,
         pendingUsers,
       })
-      setRecentUsers(users?.slice(0, 5) || [])
+      setRecentUsers(recentTermUsers)
       setRecentFeedback(feedback || [])
       setUsersByRole(roleCount)
     } catch (error) {
@@ -448,13 +469,14 @@ export default function AdminDashboard() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-primary" />
-            <h2 className="text-xl font-semibold text-foreground">Recent Users</h2>
+            <h2 className="text-xl font-semibold text-foreground">Recent Renewals This Semester</h2>
           </div>
           <a href="/admin?tab=users" className="text-sm text-primary hover:underline">
             View all
           </a>
         </div>
         <div className="space-y-2">
+          {recentUsers.length === 0 && <p className="text-sm text-muted-foreground">No renewals yet this semester.</p>}
           {recentUsers.map(user => (
             <div key={user.id} className="flex items-center justify-between p-3 rounded-lg bg-dark-300/50">
               <div>
