@@ -50,12 +50,12 @@ export function useAuth() {
       // Skip email verification check - Google OAuth verifies emails automatically
       // No need to check email_verified since we trust Google's verification
 
-      // If account_status is explicitly 'pending_approval' or 'pending', redirect
-      if (data.account_status === 'pending_approval' || data.account_status === 'pending') {
-        console.log('[auth] Account pending approval, redirecting to pending')
-        router.push('/pending-approval')
-        return
-      }
+      // Dues/position review no longer blocks access here - PortalAccessGate
+      // already gates the whole app on the real, term-scoped access status
+      // (renewal_required/dues_required/pending_approval/active) and shows
+      // the correct screen for each, including a self-serve Pay Dues step.
+      // Redirecting pending accounts away before that gate runs is what
+      // made new members unable to reach that Pay Dues step at all.
 
       // If account_status is explicitly 'rejected', sign out
       if (data.account_status === 'rejected') {

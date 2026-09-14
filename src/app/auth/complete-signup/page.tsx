@@ -62,10 +62,11 @@ export default function CompleteSignupPage() {
 
             console.log('[complete-signup] Profile count check:', count, 'error:', countError)
 
-            // If count is 1 or there's a permission error, profile exists but is pending
+            // If count is 1 or there's a permission error, profile exists but is pending -
+            // send them into the app, where PortalAccessGate shows the right screen.
             if (count === 1 || countError?.code === '42501' || countError?.code === 'PGRST301') {
               console.log('[complete-signup] Permission denied or count=1 - profile exists but is pending')
-              router.push('/pending-approval')
+              router.push('/dashboard')
               return
             }
 
@@ -96,10 +97,15 @@ export default function CompleteSignupPage() {
               .eq('id', user.id)
           }
 
-          if (profile.account_status === 'pending_approval' || profile.account_status === 'pending') {
-            console.log('[complete-signup] Redirecting to pending-approval')
-            router.push('/pending-approval')
-          } else if (profile.account_status === 'approved' || profile.account_status === 'active') {
+          if (
+            profile.account_status === 'pending_approval' ||
+            profile.account_status === 'pending' ||
+            profile.account_status === 'approved' ||
+            profile.account_status === 'active'
+          ) {
+            // PortalAccessGate shows the right screen either way (Pay Dues,
+            // enter position code, or the real dashboard) based on the
+            // member's actual term status - no need to pick here.
             console.log('[complete-signup] Redirecting to dashboard')
             router.push('/dashboard')
           } else {
@@ -193,10 +199,11 @@ export default function CompleteSignupPage() {
           return
         }
 
-        // Success! Redirect to pending approval page
+        // Success! PortalAccessGate takes it from here - it'll show the
+        // Pay Dues screen immediately, since the position code was just claimed.
         setStatus('success')
         setTimeout(() => {
-          router.push('/pending-approval')
+          router.push('/dashboard')
         }, 1500)
 
       } catch (err) {
@@ -239,7 +246,7 @@ export default function CompleteSignupPage() {
           </div>
           <h1 className="text-2xl font-bold text-gradient">Signup Successful!</h1>
           <p className="text-muted-foreground">
-            Your account has been created. Redirecting to pending approval page...
+            Your account has been created. Taking you to pay your dues...
           </p>
         </div>
       </div>
