@@ -34,7 +34,6 @@ import {
 } from 'lucide-react'
 import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
-import { meetsRoleRequirements } from '@/lib/membership-tiers'
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import type { UserOption } from '@/components/UserSearch'
 import MemberGroupPicker from '@/components/MemberGroupPicker'
@@ -59,7 +58,6 @@ type UserPointsBreakdown = {
   philanthropy_points: number
   uncategorized_points: number
   is_active: boolean
-  meets_role_requirements: boolean
   source_breakdown: {
     membership: PointsSourceItem[]
     professional_education: PointsSourceItem[]
@@ -1689,7 +1687,11 @@ function PointsBreakdownTab() {
   const [addPointsSuccess, setAddPointsSuccess] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
   const [requirementsPublished, setRequirementsPublished] = useState(false)
-  const [pointMinimumsByRole, setPointMinimumsByRole] = useState<Record<string, Record<EventCategory, number>>>({})
+  // BOSSO requires one flat semester total per role now, not a minimum per
+  // category - term_point_rules still stores one row per category (each
+  // role's total lives under one category, the other three at zero), so
+  // this sums all of a role's rows into the single number that matters.
+  const [requiredPointsByRole, setRequiredPointsByRole] = useState<Record<string, number>>({})
 
   const getAttendanceCategory = (row: any): EventCategory | null => {
     if (row.event_category) return row.event_category as EventCategory
@@ -1784,16 +1786,13 @@ function PointsBreakdownTab() {
         if (!summariesResult.error && !ledgerResult.error && !rulesResult.error) {
           const summariesByUser = new Map((summariesResult.data || []).map((row) => [row.user_id, row]))
           const sourcesByUser = new Map<string, UserPointsBreakdown['source_breakdown']>()
-          const minimumsByRole: Record<string, Record<EventCategory, number>> = {}
+          const requiredByRole: Record<string, number> = {}
           for (const rule of rulesResult.data || []) {
             const role = (rule as any).position_role as string
-            if (!minimumsByRole[role]) {
-              minimumsByRole[role] = { membership: 0, professional_education: 0, social: 0, philanthropy: 0 }
-            }
-            minimumsByRole[role][rule.category as EventCategory] = Number(rule.minimum_points || 0)
+            requiredByRole[role] = (requiredByRole[role] || 0) + Number(rule.minimum_points || 0)
           }
           setRequirementsPublished(currentTerm.points_rules_status === 'published')
-          setPointMinimumsByRole(minimumsByRole)
+          setRequiredPointsByRole(requiredByRole)
 
           for (const entry of ledgerResult.data || []) {
             const sources = sourcesByUser.get(entry.user_id) || {
@@ -1822,10 +1821,7 @@ function PointsBreakdownTab() {
             }
             const total = Number(summary?.total_points || 0)
             const requirementsPublished = currentTerm.points_rules_status === 'published'
-            const roleMinimums = minimumsByRole[member.role]
-            const meetsPublishedMinimums = (Object.keys(categories) as EventCategory[]).every(
-              (category) => categories[category] >= Number(roleMinimums?.[category] || 0)
-            )
+            const meetsRequirement = total >= (requiredByRole[member.role] || 0)
 
             return {
               user_id: member.id,
@@ -1838,8 +1834,7 @@ function PointsBreakdownTab() {
               social_points: categories.social,
               philanthropy_points: categories.philanthropy,
               uncategorized_points: 0,
-              is_active: requirementsPublished && meetsPublishedMinimums,
-              meets_role_requirements: requirementsPublished && meetsPublishedMinimums,
+              is_active: requirementsPublished && meetsRequirement,
               source_breakdown: sourcesByUser.get(member.id) || {
                 membership: [],
                 professional_education: [],
@@ -1866,12 +1861,11 @@ function PointsBreakdownTab() {
       ])
 
       setRequirementsPublished(true)
-      const flatFallbackMinimums = { membership: 25, professional_education: 25, social: 25, philanthropy: 25 }
-      setPointMinimumsByRole({
-        general_member: flatFallbackMinimums,
-        analyst: flatFallbackMinimums,
-        project_manager: flatFallbackMinimums,
-        board_member: flatFallbackMinimums,
+      setRequiredPointsByRole({
+        general_member: 100,
+        analyst: 100,
+        project_manager: 100,
+        board_member: 100,
       })
 
       if (attendanceResult.error) throw attendanceResult.error
@@ -1957,8 +1951,6 @@ function PointsBreakdownTab() {
           categoryTotals.social >= 25 &&
           categoryTotals.philanthropy >= 25
 
-        const roleRequirement = meetsRoleRequirements(user.role as UserRole, totalPoints, categoryTotals)
-
         return {
           user_id: user.id,
           full_name: user.full_name,
@@ -1971,7 +1963,6 @@ function PointsBreakdownTab() {
           philanthropy_points: categoryTotals.philanthropy,
           uncategorized_points: uncategorizedPoints,
           is_active: isActive,
-          meets_role_requirements: roleRequirement.meets,
           source_breakdown: sourceBreakdownByUser.get(user.id) || {
             membership: [],
             professional_education: [],
@@ -2025,8 +2016,8 @@ function PointsBreakdownTab() {
       'Social',
       'Philanthropy',
       'Other/Uncategorized',
+      'Required This Semester',
       'Requirement Status',
-      'Meets Published Requirements',
     ]
     const rows = filteredAndSortedData.map((user) => [
       user.full_name,
@@ -2038,8 +2029,8 @@ function PointsBreakdownTab() {
       user.social_points,
       user.philanthropy_points,
       user.uncategorized_points,
-      requirementsPublished ? (user.is_active ? 'Meets minimums' : 'Below minimums') : 'Rules in draft',
-      requirementsPublished ? (user.meets_role_requirements ? 'Yes' : 'No') : 'Draft',
+      requiredPointsByRole[user.role] || 0,
+      requirementsPublished ? (user.is_active ? 'Meets requirement' : 'Below requirement') : 'Rules in draft',
     ])
 
     const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
@@ -2250,7 +2241,7 @@ function PointsBreakdownTab() {
                     Role
                   </th>
                   <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Total
+                    Total / Required
                   </th>
                   <th className="px-2 py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     Membership
@@ -2291,43 +2282,24 @@ function PointsBreakdownTab() {
                         </span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <span className="text-xs font-bold text-foreground">{user.total_points}</span>
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <span
-                          className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.membership_points >= Number(pointMinimumsByRole[user.role]?.membership || 0) ? 'text-emerald-700' : 'text-amber-700'
-                          }`}
-                        >
-                          {user.membership_points}
+                        <span className={`text-xs font-bold ${!requirementsPublished ? 'text-foreground' : user.is_active ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {user.total_points}
+                          {requirementsPublished && requiredPointsByRole[user.role] > 0 && (
+                            <span className="font-normal text-muted-foreground"> / {requiredPointsByRole[user.role]}</span>
+                          )}
                         </span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <span
-                          className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.professional_points >= Number(pointMinimumsByRole[user.role]?.professional_education || 0) ? 'text-emerald-700' : 'text-amber-700'
-                          }`}
-                        >
-                          {user.professional_points}
-                        </span>
+                        <span className="text-xs font-medium text-foreground">{user.membership_points}</span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <span
-                          className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.social_points >= Number(pointMinimumsByRole[user.role]?.social || 0) ? 'text-emerald-700' : 'text-amber-700'
-                          }`}
-                        >
-                          {user.social_points}
-                        </span>
+                        <span className="text-xs font-medium text-foreground">{user.professional_points}</span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <span
-                          className={`text-xs font-medium ${
-                            !requirementsPublished ? 'text-foreground' : user.philanthropy_points >= Number(pointMinimumsByRole[user.role]?.philanthropy || 0) ? 'text-emerald-700' : 'text-amber-700'
-                          }`}
-                        >
-                          {user.philanthropy_points}
-                        </span>
+                        <span className="text-xs font-medium text-foreground">{user.social_points}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span className="text-xs font-medium text-foreground">{user.philanthropy_points}</span>
                       </td>
                       <td className="px-2 py-2 text-center">
                         <span
@@ -2339,24 +2311,17 @@ function PointsBreakdownTab() {
                         </span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span
-                            className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap border ${
-                              !requirementsPublished
-                                ? 'border-border bg-muted text-muted-foreground'
-                                : user.is_active
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                  : 'border-amber-200 bg-amber-50 text-amber-800'
-                            }`}
-                          >
-                            {!requirementsPublished ? 'Draft' : user.is_active ? 'Meets minimums' : 'Below minimums'}
-                          </span>
-                          {requirementsPublished && !user.meets_role_requirements && (
-                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
-                              Below req.
-                            </span>
-                          )}
-                        </div>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap border ${
+                            !requirementsPublished
+                              ? 'border-border bg-muted text-muted-foreground'
+                              : user.is_active
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                : 'border-amber-200 bg-amber-50 text-amber-800'
+                          }`}
+                        >
+                          {!requirementsPublished ? 'Draft' : user.is_active ? 'Meets requirement' : 'Below requirement'}
+                        </span>
                       </td>
                       <td className="px-2 py-2 text-center">
                         <button
@@ -2440,18 +2405,16 @@ function PointsBreakdownTab() {
         <h3 className="text-sm font-semibold text-foreground mb-3">Legend</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
           {requirementsPublished ? <>
-            <div className="flex items-center gap-2"><span className="text-emerald-700">●</span><span className="text-muted-foreground">Meets that category's published minimum</span></div>
-            <div className="flex items-center gap-2"><span className="text-amber-700">●</span><span className="text-muted-foreground">Below that category's published minimum</span></div>
+            <div className="flex items-center gap-2"><span className="text-emerald-700">●</span><span className="text-muted-foreground">Meets this semester's published point requirement</span></div>
+            <div className="flex items-center gap-2"><span className="text-amber-700">●</span><span className="text-muted-foreground">Below this semester's published point requirement</span></div>
           </> : <div className="flex items-center gap-2 md:col-span-2"><span className="text-muted-foreground">●</span><span className="text-muted-foreground">Requirements are in draft; totals are shown without pass/fail labels.</span></div>}
           <div className="flex items-center gap-2">
             <span className="text-yellow-400">●</span>
             <span className="text-muted-foreground">Yellow: Uncategorized points (included in total)</span>
           </div>
-          {requirementsPublished && <div className="flex items-center gap-2"><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">Meets minimums</span><span className="text-muted-foreground">Meets all four published category values</span></div>}
-          {requirementsPublished && <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">Below role req.</span>
-            <span className="text-muted-foreground">Doesn't meet minimum points for current role</span>
-          </div>}
+          <div className="flex items-center gap-2 md:col-span-2">
+            <span className="text-muted-foreground">Membership/Prof/Social/Philanthropy columns are informational only - BOSSO requires one flat semester total, not a minimum per category.</span>
+          </div>
         </div>
       </div>
 
