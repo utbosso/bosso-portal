@@ -3,6 +3,8 @@ import type Stripe from 'stripe'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStripeClient } from '@/lib/stripe/server'
 
+export const maxDuration = 30
+
 // ACH bank transfers settle days after checkout, so Stripe marks that session
 // completed before the money has actually cleared. Only activate access once
 // payment_status is 'paid' - immediately for card, or later via

@@ -4,6 +4,11 @@ import { createAdminClient, isPortalAdminUser } from '@/lib/supabase/admin'
 import { getStripeClient } from '@/lib/stripe/server'
 import type { DuesPlanLength } from '@/types/database.types'
 
+// Give this route headroom beyond the several sequential DB round-trips and
+// the Stripe API call, so a cold serverless start doesn't hit a gateway
+// timeout before Stripe responds.
+export const maxDuration = 30
+
 const ROLE_LABELS: Record<string, string> = {
   general_member: 'General member',
   analyst: 'Analyst',
@@ -54,12 +59,18 @@ export async function POST(request: Request) {
   if (termError) return NextResponse.json({ error: termError.message }, { status: 500 })
   if (!term) return NextResponse.json({ error: 'The current semester is not open yet.' }, { status: 409 })
 
-  const { data: membership, error: membershipError } = await admin
-    .from('member_term_memberships')
-    .select('id, dues_status, position_role')
-    .eq('term_id', term.id)
-    .eq('user_id', user.id)
-    .maybeSingle()
+  // These two only depend on term.id, not on each other - run together
+  // instead of back-to-back to cut round-trip latency.
+  const [membershipResult, settingsResult] = await Promise.all([
+    admin
+      .from('member_term_memberships')
+      .select('id, dues_status, position_role')
+      .eq('term_id', term.id)
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    admin.from('dues_checkout_settings').select('pass_fee_to_member').maybeSingle(),
+  ])
+  const { data: membership, error: membershipError } = membershipResult
   if (membershipError) return NextResponse.json({ error: membershipError.message }, { status: 500 })
   if (!membership) {
     return NextResponse.json({ error: 'Enter your position code before paying dues.' }, { status: 409 })
@@ -68,13 +79,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Dues are already recorded for this semester.' }, { status: 409 })
   }
 
-  const { data: price, error: priceError } = await admin
-    .from('dues_prices')
-    .select('amount_cents')
-    .eq('term_id', term.id)
-    .eq('position_role', membership.position_role)
-    .eq('plan_length', planLength)
-    .maybeSingle()
+  // These two only depend on membership/term, not on each other.
+  const [priceResult, yearTermsResult] = await Promise.all([
+    admin
+      .from('dues_prices')
+      .select('amount_cents')
+      .eq('term_id', term.id)
+      .eq('position_role', membership.position_role)
+      .eq('plan_length', planLength)
+      .maybeSingle(),
+    planLength === 'annual'
+      ? admin
+          .from('academic_terms')
+          .select('id')
+          .eq('academic_year', term.academic_year)
+          .in('status', ['current', 'upcoming'])
+          .neq('id', term.id)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  const { data: price, error: priceError } = priceResult
   if (priceError) return NextResponse.json({ error: priceError.message }, { status: 500 })
   if (!price) {
     return NextResponse.json(
@@ -82,20 +105,12 @@ export async function POST(request: Request) {
       { status: 409 }
     )
   }
+  const { data: yearTerms, error: yearTermsError } = yearTermsResult
+  if (yearTermsError) return NextResponse.json({ error: yearTermsError.message }, { status: 500 })
 
-  const termIds = [term.id]
-  if (planLength === 'annual') {
-    const { data: yearTerms, error: yearTermsError } = await admin
-      .from('academic_terms')
-      .select('id')
-      .eq('academic_year', term.academic_year)
-      .in('status', ['current', 'upcoming'])
-      .neq('id', term.id)
-    if (yearTermsError) return NextResponse.json({ error: yearTermsError.message }, { status: 500 })
-    for (const yearTerm of yearTerms || []) termIds.push(yearTerm.id)
-  }
+  const termIds = [term.id, ...(yearTerms || []).map((yearTerm) => yearTerm.id)]
 
-  const { data: settings } = await admin.from('dues_checkout_settings').select('pass_fee_to_member').maybeSingle()
+  const { data: settings } = settingsResult
   const chargeAmountCents = computeChargeAmountCents(price.amount_cents, settings?.pass_fee_to_member ?? false)
   const roleLabel = ROLE_LABELS[membership.position_role] || membership.position_role
 

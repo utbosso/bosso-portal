@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { ArrowRight, BadgeCheck, CircleDollarSign, CreditCard, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowRight, BadgeCheck, CircleDollarSign, CreditCard, Loader2, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
 import { createClient } from '@/lib/supabase/client'
@@ -94,18 +94,31 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
     }
   }
 
+  const requestCheckoutUrl = async () => {
+    const response = await fetch('/api/stripe/checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planLength }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(payload?.error || `Checkout could not be started (${response.status}).`)
+    return payload.url as string
+  }
+
   const payDues = async () => {
     setPaying(true)
     setPayingError('')
     try {
-      const response = await fetch('/api/stripe/checkout-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planLength }),
-      })
-      const payload = await response.json()
-      if (!response.ok) throw new Error(payload.error || 'Checkout could not be started.')
-      window.location.href = payload.url
+      let url: string
+      try {
+        url = await requestCheckoutUrl()
+      } catch {
+        // Cold-start gateway timeouts and auth-cookie races on the first
+        // request after login usually clear up immediately - retry once
+        // silently before bothering the member with an error.
+        url = await requestCheckoutUrl()
+      }
+      window.location.href = url
     } catch (checkoutError) {
       setPayingError(checkoutError instanceof Error ? checkoutError.message : 'Checkout could not be started.')
       setPaying(false)
@@ -182,7 +195,15 @@ export default function PortalAccessGate({ children }: { children: React.ReactNo
                   disabled={paying || !duesPrices}
                   className="portal-button mt-5 w-full justify-center"
                 >
-                  {paying ? 'Redirecting…' : `Pay ${duesPrices ? `$${(duesPrices[planLength] / 100).toFixed(2)}` : ''}`} <ArrowRight className="h-4 w-4" />
+                  {paying ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Taking you to secure checkout…
+                    </>
+                  ) : (
+                    <>
+                      {`Pay ${duesPrices ? `$${(duesPrices[planLength] / 100).toFixed(2)}` : ''}`} <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
                 </button>
               </div>
             ) : waiting ? (
