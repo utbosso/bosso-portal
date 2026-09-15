@@ -396,8 +396,19 @@ export default function SemesterSetupPage() {
     )
   }
 
+  const expectedDuesAmount = (membership: MemberTermMembership, annual: boolean) => {
+    const price = data.prices.find(
+      (p) => p.term_id === membership.term_id && p.position_role === membership.position_role && p.plan_length === (annual ? 'annual' : 'semester')
+    )
+    return price ? price.amount_cents / 100 : null
+  }
+
   const openDuesPrompt = (membership: MemberTermMembership, annual: boolean) => {
-    setDuesAmount('')
+    // Prefill from this term's price for the role actually on the membership
+    // (what their code claimed), not any amount from a role they may have
+    // previously paid at - the admin can still override it.
+    const expected = expectedDuesAmount(membership, annual)
+    setDuesAmount(expected !== null ? String(expected) : '')
     setDuesError('')
     setDuesPrompt({ membership, annual })
   }
@@ -638,8 +649,16 @@ export default function SemesterSetupPage() {
               Record {duesPrompt.annual ? 'full-year' : 'semester'} dues
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {profilesById[duesPrompt.membership.user_id]?.full_name || 'This member'}
+              {profilesById[duesPrompt.membership.user_id]?.full_name || 'This member'} · {duesPrompt.membership.position_role.replaceAll('_', ' ')}
             </p>
+            {(() => {
+              const expected = expectedDuesAmount(duesPrompt.membership, duesPrompt.annual)
+              return expected !== null ? (
+                <p className="mt-1 text-xs text-muted-foreground">Listed price for this position: ${expected.toFixed(2)}</p>
+              ) : (
+                <p className="mt-1 text-xs text-amber-700">No listed price found for this position/term - enter the amount manually.</p>
+              )
+            })()}
             <label className="mt-5 block">
               <span className="portal-label">Payment amount in dollars</span>
               <input

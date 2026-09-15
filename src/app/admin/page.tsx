@@ -95,7 +95,7 @@ export default function AdminDashboard() {
     totalFeedback: 0,
     pendingUsers: 0,
   })
-  const [recentUsers, setRecentUsers] = useState<Profile[]>([])
+  const [recentUsers, setRecentUsers] = useState<Array<Profile & { termPositionRole?: string }>>([])
   const [recentFeedback, setRecentFeedback] = useState<FeedbackSubmission[]>([])
   const [usersByRole, setUsersByRole] = useState<Record<string, number>>({})
 
@@ -258,18 +258,21 @@ export default function AdminDashboard() {
       // accounts (which barely change once the org has been running a
       // while). Old accounts remain fully available in User Management for
       // temporary-password resets regardless of this.
-      let recentTermUsers: Profile[] = []
+      let recentTermUsers: Array<Profile & { termPositionRole?: string }> = []
       if (currentTerm?.id) {
         const { data: recentMemberships } = await supabase
           .from('member_term_memberships')
-          .select('user_id, claimed_at')
+          .select('user_id, claimed_at, position_role')
           .eq('term_id', currentTerm.id)
           .order('claimed_at', { ascending: false, nullsFirst: false })
           .limit(5)
         const usersById = new Map((users || []).map((u) => [u.id, u]))
         recentTermUsers = (recentMemberships || [])
-          .map((membership) => usersById.get(membership.user_id))
-          .filter((u): u is Profile => Boolean(u))
+          .map((membership) => {
+            const profile = usersById.get(membership.user_id)
+            return profile ? { ...profile, termPositionRole: membership.position_role } : undefined
+          })
+          .filter((u): u is Profile & { termPositionRole?: string } => Boolean(u))
       } else {
         recentTermUsers = users?.slice(0, 5) || []
       }
@@ -475,23 +478,29 @@ export default function AdminDashboard() {
         </div>
         <div className="space-y-2">
           {recentUsers.length === 0 && <p className="text-sm text-muted-foreground">No renewals yet this semester.</p>}
-          {recentUsers.map(user => (
+          {recentUsers.map(user => {
+            // Show what they claimed THIS term, not profiles.role - that field is
+            // last-known and only updates on approval, so a not-yet-approved
+            // renewal would otherwise still show last semester's role here.
+            const displayRole = user.termPositionRole || user.role
+            return (
             <div key={user.id} className="flex items-center justify-between p-3 rounded-lg bg-dark-300/50">
               <div>
                 <p className="text-sm font-medium text-foreground">{user.full_name}</p>
                 <p className="text-xs text-muted-foreground">{user.email}</p>
               </div>
               <span className={`px-2 py-1 rounded-full text-xs font-medium border ${
-                user.role === 'admin' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-                user.role === 'board_member' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                user.role === 'project_manager' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
-                user.role === 'analyst' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                displayRole === 'admin' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                displayRole === 'board_member' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                displayRole === 'project_manager' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
+                displayRole === 'analyst' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
                 'bg-gray-500/20 text-gray-400 border-gray-500/30'
               }`}>
-                {user.role.replace('_', ' ')}
+                {displayRole.replace('_', ' ')}
               </span>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -746,6 +755,20 @@ function UserManagementTab() {
       setDuesPromptOpen(null)
       setDuesAmount('')
       await refreshMembership(reviewingUser.id)
+    }
+  }
+
+  const submitPositionCorrection = async (positionRole: string) => {
+    if (!reviewingUser) return
+    const membership = termMemberships[reviewingUser.id]
+    if (!membership || membership.position_role === positionRole) return
+    setReviewSaving('position')
+    setReviewError('')
+    const result = await postSemesterAction({ action: 'update_membership_position', membershipId: membership.id, positionRole })
+    setReviewSaving('')
+    if (result) {
+      await refreshMembership(reviewingUser.id)
+      await fetchUsers()
     }
   }
 
@@ -1610,8 +1633,17 @@ BOSSO Team`)
               <div className="mt-6 space-y-5">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div className="rounded-lg border border-border p-3">
-                    <p className="text-xs text-muted-foreground">Requested position</p>
-                    <p className="mt-1 font-medium capitalize">{getRoleDisplayName(termMemberships[reviewingUser.id].position_role)}</p>
+                    <p className="text-xs text-muted-foreground">Position (from code claimed - correct if wrong)</p>
+                    <select
+                      className="portal-input mt-1 w-full text-sm font-medium"
+                      value={termMemberships[reviewingUser.id].position_role}
+                      disabled={reviewSaving === 'position'}
+                      onChange={(event) => void submitPositionCorrection(event.target.value)}
+                    >
+                      {ALL_ROLES.map((role) => (
+                        <option key={role} value={role}>{getRoleDisplayName(role)}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="rounded-lg border border-border p-3">
                     <p className="text-xs text-muted-foreground">Dues</p>
@@ -1623,13 +1655,37 @@ BOSSO Team`)
 
                 {termMemberships[reviewingUser.id].dues_status === 'unpaid' && !duesPromptOpen && (
                   <div className="flex gap-2">
-                    <button onClick={() => { setDuesAmount(''); setDuesPromptOpen({ annual: false }) }} className="portal-button-secondary small flex-1 justify-center">Record semester dues</button>
-                    <button onClick={() => { setDuesAmount(''); setDuesPromptOpen({ annual: true }) }} className="portal-button-secondary small flex-1 justify-center">Record full year</button>
+                    <button
+                      onClick={() => {
+                        const cents = duesPricesByRole[termMemberships[reviewingUser.id].position_role]?.semester
+                        setDuesAmount(cents ? String(cents / 100) : '')
+                        setDuesPromptOpen({ annual: false })
+                      }}
+                      className="portal-button-secondary small flex-1 justify-center"
+                    >
+                      Record semester dues
+                    </button>
+                    <button
+                      onClick={() => {
+                        const cents = duesPricesByRole[termMemberships[reviewingUser.id].position_role]?.annual
+                        setDuesAmount(cents ? String(cents / 100) : '')
+                        setDuesPromptOpen({ annual: true })
+                      }}
+                      className="portal-button-secondary small flex-1 justify-center"
+                    >
+                      Record full year
+                    </button>
                   </div>
                 )}
 
                 {duesPromptOpen && (
                   <form onSubmit={submitDuesAmount} className="space-y-3 rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Listed price for {getRoleDisplayName(termMemberships[reviewingUser.id].position_role)}: {(() => {
+                        const cents = duesPricesByRole[termMemberships[reviewingUser.id].position_role]?.[duesPromptOpen.annual ? 'annual' : 'semester']
+                        return cents ? `$${(cents / 100).toFixed(2)}` : 'not set for this position/term'
+                      })()}
+                    </p>
                     <label className="block">
                       <span className="portal-label">{duesPromptOpen.annual ? 'Full-year' : 'Semester'} payment amount in dollars</span>
                       <input

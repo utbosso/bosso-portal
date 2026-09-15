@@ -445,6 +445,45 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true })
   }
 
+  if (action === 'update_membership_position') {
+    const membershipId = typeof body?.membershipId === 'string' ? body.membershipId : ''
+    const positionRole = body?.positionRole
+    const allRoles: UserRole[] = [...ROLES, 'admin']
+    if (!membershipId || !allRoles.includes(positionRole)) {
+      return NextResponse.json({ error: 'Membership and a valid position are required.' }, { status: 400 })
+    }
+
+    const { data: membership } = await admin
+      .from('member_term_memberships')
+      .select('user_id, status')
+      .eq('id', membershipId)
+      .maybeSingle()
+    if (!membership) return NextResponse.json({ error: 'Membership not found.' }, { status: 404 })
+
+    // The position a member claimed via their code (last year's leftover code,
+    // a typo, sharing someone else's) isn't proof of their actual current
+    // role - this lets an admin correct it. If they're already approved for
+    // this term, profiles.role was already copied from the old value and
+    // needs the same correction so the rest of the app (pricing, dashboards)
+    // reflects the fix immediately instead of only from the next renewal.
+    const now = new Date().toISOString()
+    const { error: membershipError } = await admin
+      .from('member_term_memberships')
+      .update({ position_role: positionRole, updated_at: now })
+      .eq('id', membershipId)
+    if (membershipError) return NextResponse.json({ error: membershipError.message }, { status: 500 })
+
+    if (['active', 'exempt'].includes(membership.status)) {
+      const { error: profileError } = await admin
+        .from('profiles')
+        .update({ role: positionRole })
+        .eq('id', membership.user_id)
+      if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+  }
+
   if (action === 'review_membership') {
     const membershipId = typeof body?.membershipId === 'string' ? body.membershipId : ''
     const decision = body?.decision
