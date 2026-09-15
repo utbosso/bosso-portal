@@ -101,12 +101,25 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle()
   const coveredByPriorPayment = Boolean(existingCoverage)
-  const duesStatus = existingMembership?.dues_status === 'paid' || coveredByPriorPayment ? 'paid' : 'unpaid'
+
+  // A code claim that changes the member's role (a promotion or demotion)
+  // must not silently inherit "paid" from a payment made under the OLD
+  // role's price - dues_prices varies by position_role, so a General Member
+  // payment does not cover the Analyst rate. Only same-role reclaims and
+  // brand-new claims may use the existing/prior payment signal. Admin-granted
+  // exemptions are role-independent and always carry over.
+  const isRoleChange = Boolean(existingMembership && existingMembership.position_role !== positionCode.intended_role)
+  const duesStatus: 'unpaid' | 'paid' | 'exempt' =
+    existingMembership?.dues_status === 'exempt'
+      ? 'exempt'
+      : !isRoleChange && (existingMembership?.dues_status === 'paid' || coveredByPriorPayment)
+      ? 'paid'
+      : 'unpaid'
 
   const membershipPayload = {
     term_id: term.id,
     user_id: user.id,
-    status: duesStatus === 'paid' ? 'pending_approval' : 'pending_dues',
+    status: ['paid', 'exempt'].includes(duesStatus) ? 'pending_approval' : 'pending_dues',
     dues_status: duesStatus,
     position_role: positionCode.intended_role,
     is_returning: (priorMembershipCount || 0) > 0,
