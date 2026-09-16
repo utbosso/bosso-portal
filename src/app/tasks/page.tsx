@@ -29,7 +29,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
-import { hasMinimumRole } from '@/lib/admin'
+import { hasMinimumRole, getRoleDisplayName } from '@/lib/admin'
 import { POINT_CATEGORY_OPTIONS } from '@/lib/semester'
 import MemberGroupPicker from '@/components/MemberGroupPicker'
 import SectionPageHeader from '@/components/SectionPageHeader'
@@ -45,7 +45,10 @@ import type {
   Task,
   TaskStatusHistory,
   TaskUpdate,
+  UserRole,
 } from '@/types/database.types'
+
+const AUDIENCE_ROLES: UserRole[] = ['general_member', 'analyst', 'project_manager', 'board_member', 'admin']
 
 const supabase = createClient()
 
@@ -125,12 +128,16 @@ export default function TasksPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [showPersonalCreate, setShowPersonalCreate] = useState(false)
   const [extendingTask, setExtendingTask] = useState<TeamTask | null>(null)
+  const [extendMode, setExtendMode] = useState<'people' | 'role'>('people')
   const [extendAssignees, setExtendAssignees] = useState<string[]>([])
+  const [extendRole, setExtendRole] = useState<UserRole | ''>('')
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
     dueDate: '',
+    audienceMode: 'people' as 'people' | 'role',
     assignees: [] as string[],
+    audienceRole: '' as UserRole | '',
     pointValue: '',
     pointsCategory: 'membership' as EventCategory,
     autoApprove: false,
@@ -454,13 +461,40 @@ export default function TasksPage() {
 
   const createTeamTask = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!profile || newTask.assignees.length === 0) return
-    const eligibleIds = new Set(profiles.map((member) => member.id))
-    const assignees = newTask.assignees.filter((id) => eligibleIds.has(id))
-    if (assignees.length === 0) {
-      setError('Select at least one member approved for the current semester.')
-      return
+    if (!profile) return
+
+    let assignees: string[] = []
+    if (newTask.audienceMode === 'role') {
+      if (!newTask.audienceRole || !access?.term_id) return
+      const { data: members, error: membersError } = await supabase
+        .from('member_term_memberships')
+        .select('user_id')
+        .eq('term_id', access.term_id)
+        .eq('position_role', newTask.audienceRole)
+        .in('status', ['active', 'exempt'])
+      if (membersError) {
+        setError(`Could not look up current ${getRoleDisplayName(newTask.audienceRole)}s: ${membersError.message}`)
+        return
+      }
+      assignees = (members || []).map((m) => m.user_id)
+      if (assignees.length === 0) {
+        // A role-targeted task needs at least one real assigned_to row to
+        // anchor the group/role marker future approvals get matched
+        // against - there's no way to register a pure template with zero
+        // current people in that role.
+        setError(`There are no current ${getRoleDisplayName(newTask.audienceRole)}s to assign this to yet, so it can't be created as a role audience. Wait until at least one person holds that role, or assign to specific people instead.`)
+        return
+      }
+    } else {
+      if (newTask.assignees.length === 0) return
+      const eligibleIds = new Set(profiles.map((member) => member.id))
+      assignees = newTask.assignees.filter((id) => eligibleIds.has(id))
+      if (assignees.length === 0) {
+        setError('Select at least one member approved for the current semester.')
+        return
+      }
     }
+
     let referenceLinks: TaskReferenceLink[]
     try {
       referenceLinks = normalizedReferenceLinks(newTask.referenceLinks)
@@ -470,7 +504,10 @@ export default function TasksPage() {
     }
     setError('')
     setSaving('create-team')
-    const groupId = assignees.length > 1 ? crypto.randomUUID() : null
+    // Role audiences always get a group, even with only one current match
+    // (or zero) - it's what lets a newly-approved member later be matched
+    // against this task by role, not just people who existed at creation.
+    const groupId = newTask.audienceMode === 'role' || assignees.length > 1 ? crypto.randomUUID() : null
     const pointValue = newTask.pointValue ? Number(newTask.pointValue) : null
     const payload = assignees.map((assigneeId) => ({
       title: newTask.title.trim(),
@@ -485,10 +522,11 @@ export default function TasksPage() {
       auto_approve: newTask.autoApprove,
       points_awarded: false,
       group_task_id: groupId,
-      assigned_to_role: null,
+      assigned_to_role: newTask.audienceMode === 'role' ? newTask.audienceRole : null,
       reference_links: referenceLinks,
       ...(schemaReady && access?.term_id ? { term_id: access.term_id, archived_at: null } : {}),
     }))
+
     let createResult = await (supabase as any).from('tasks').insert(payload).select('id')
     let linksStoredAsUpdates = false
     if (missingReferenceLinksColumn(createResult.error)) {
@@ -512,7 +550,7 @@ export default function TasksPage() {
         if (linkUpdateError) setError(`The action items were assigned, but their links could not be saved: ${linkUpdateError.message}`)
       }
       setShowCreate(false)
-      setNewTask({ title: '', description: '', dueDate: '', assignees: [], pointValue: '', pointsCategory: 'membership', autoApprove: false, referenceLinks: [] })
+      setNewTask({ title: '', description: '', dueDate: '', audienceMode: 'people', assignees: [], audienceRole: '', pointValue: '', pointsCategory: 'membership', autoApprove: false, referenceLinks: [] })
       await loadTasks()
     }
     setSaving('')
@@ -520,7 +558,9 @@ export default function TasksPage() {
 
   const openExtend = (task: TeamTask) => {
     setExtendingTask(task)
+    setExtendMode('people')
     setExtendAssignees([])
+    setExtendRole('')
   }
 
   const currentGroupAssigneeIds = () =>
@@ -535,10 +575,35 @@ export default function TasksPage() {
   const submitExtend = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!extendingTask) return
+
+    let candidateIds: string[] = []
+    let assignedToRole: UserRole | null = null
+    if (extendMode === 'role') {
+      if (!extendRole || !extendingTask.term_id) return
+      const { data: members, error: membersError } = await supabase
+        .from('member_term_memberships')
+        .select('user_id')
+        .eq('term_id', extendingTask.term_id)
+        .eq('position_role', extendRole)
+        .in('status', ['active', 'exempt'])
+      if (membersError) {
+        setError(`Could not look up current ${getRoleDisplayName(extendRole)}s: ${membersError.message}`)
+        return
+      }
+      candidateIds = (members || []).map((m) => m.user_id)
+      assignedToRole = extendRole
+    } else {
+      candidateIds = extendAssignees
+    }
+
     const already = currentGroupAssigneeIds()
-    const newAssigneeIds = extendAssignees.filter((id) => !already.has(id))
+    const newAssigneeIds = candidateIds.filter((id) => !already.has(id))
     if (newAssigneeIds.length === 0) {
-      setError('Everyone selected is already assigned to this action item.')
+      setError(
+        extendMode === 'role'
+          ? `Everyone currently holding that role is already assigned to this action item.`
+          : 'Everyone selected is already assigned to this action item.'
+      )
       return
     }
     setError('')
@@ -570,7 +635,13 @@ export default function TasksPage() {
       auto_approve: extendingTask.auto_approve ?? false,
       points_awarded: false,
       group_task_id: groupId,
-      assigned_to_role: null,
+      // Tagging these new rows with the role (when extending by role, not
+      // specific people) is what the review_membership approval flow reads
+      // to auto-extend this same group to anyone approved into that role
+      // later - it only needs to find one row in the group with a matching
+      // assigned_to_role, so extending by multiple different roles over
+      // time on the same group works fine too.
+      assigned_to_role: assignedToRole,
       reference_links: extendingTask.reference_links ?? [],
       ...(extendingTask.term_id ? { term_id: extendingTask.term_id } : {}),
     }))
@@ -837,7 +908,9 @@ export default function TasksPage() {
                   <div>
                     <legend className="portal-label">Assignees</legend>
                     <p className="text-xs text-muted-foreground">
-                      {memberTermName
+                      {newTask.audienceMode === 'role'
+                        ? 'Anyone approved into this role, now or later this term, automatically gets this task - not just current holders.'
+                        : memberTermName
                         ? `Everyone approved for ${memberTermName} is available, regardless of point progress.`
                         : 'Everyone approved for the current semester is available, regardless of point progress.'}
                     </p>
@@ -848,7 +921,35 @@ export default function TasksPage() {
                     </span>
                   )}
                 </div>
-                {memberDirectoryError ? (
+                <div className="mb-3 flex gap-2 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => setNewTask((current) => ({ ...current, audienceMode: 'people' }))}
+                    className={newTask.audienceMode === 'people' ? 'portal-button-secondary small' : 'portal-button-ghost small'}
+                  >
+                    Specific people
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewTask((current) => ({ ...current, audienceMode: 'role' }))}
+                    className={newTask.audienceMode === 'role' ? 'portal-button-secondary small' : 'portal-button-ghost small'}
+                  >
+                    Everyone with a role
+                  </button>
+                </div>
+                {newTask.audienceMode === 'role' ? (
+                  <select
+                    value={newTask.audienceRole}
+                    onChange={(event) => setNewTask((current) => ({ ...current, audienceRole: event.target.value as UserRole | '' }))}
+                    className="portal-input w-full"
+                    required
+                  >
+                    <option value="">Select a role...</option>
+                    {AUDIENCE_ROLES.map((role) => (
+                      <option key={role} value={role}>{getRoleDisplayName(role)}</option>
+                    ))}
+                  </select>
+                ) : memberDirectoryError ? (
                   <div className="portal-alert-error">
                     {memberDirectoryError}{' '}
                     <button type="button" onClick={() => void loadMemberDirectory()} className="font-semibold underline">
@@ -903,11 +1004,14 @@ export default function TasksPage() {
             <div className="portal-form-actions">
               <button type="button" onClick={() => setShowCreate(false)} className="portal-button-secondary">Cancel</button>
               <button
-                disabled={saving === 'create-team' || memberDirectoryLoading || newTask.assignees.length === 0}
+                disabled={
+                  saving === 'create-team' ||
+                  (newTask.audienceMode === 'role' ? !newTask.audienceRole : memberDirectoryLoading || newTask.assignees.length === 0)
+                }
                 className="portal-button"
               >
                 {saving === 'create-team' && <Loader2 className="h-4 w-4 animate-spin" />}
-                Assign to {newTask.assignees.length || 0}
+                {newTask.audienceMode === 'role' ? `Assign to ${newTask.audienceRole ? getRoleDisplayName(newTask.audienceRole) : 'role'}` : `Assign to ${newTask.assignees.length || 0}`}
               </button>
             </div>
           </form>
@@ -930,25 +1034,43 @@ export default function TasksPage() {
             <div className="mt-5 space-y-5">
               <label>
                 <span className="portal-label">Add people</span>
-                {memberDirectoryError ? (
-                  <div className="portal-alert-error">{memberDirectoryError} <button type="button" onClick={() => void loadMemberDirectory()} className="font-semibold underline">Try again</button></div>
+                <div className="mb-3 mt-1 flex gap-2 text-sm">
+                  <button type="button" onClick={() => setExtendMode('people')} className={extendMode === 'people' ? 'portal-button-secondary small' : 'portal-button-ghost small'}>Specific people</button>
+                  <button type="button" onClick={() => setExtendMode('role')} className={extendMode === 'role' ? 'portal-button-secondary small' : 'portal-button-ghost small'}>Everyone with a role</button>
+                </div>
+                {extendMode === 'role' ? (
+                  <>
+                    <select value={extendRole} onChange={(event) => setExtendRole(event.target.value as UserRole | '')} className="portal-input w-full" required>
+                      <option value="">Select a role...</option>
+                      {AUDIENCE_ROLES.map((role) => (
+                        <option key={role} value={role}>{getRoleDisplayName(role)}</option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs text-muted-foreground">Current holders of this role get it now; anyone approved into it later this term gets it automatically too.</p>
+                  </>
                 ) : (
-                  <MemberGroupPicker
-                    users={profiles}
-                    groups={memberGroups}
-                    value={extendAssignees}
-                    onChange={setExtendAssignees}
-                    disabled={memberDirectoryLoading}
-                    placeholder="Search approved current-semester members..."
-                  />
+                  <>
+                    {memberDirectoryError ? (
+                      <div className="portal-alert-error">{memberDirectoryError} <button type="button" onClick={() => void loadMemberDirectory()} className="font-semibold underline">Try again</button></div>
+                    ) : (
+                      <MemberGroupPicker
+                        users={profiles}
+                        groups={memberGroups}
+                        value={extendAssignees}
+                        onChange={setExtendAssignees}
+                        disabled={memberDirectoryLoading}
+                        placeholder="Search approved current-semester members..."
+                      />
+                    )}
+                    <p className="mt-2 text-xs text-muted-foreground">Anyone already assigned is skipped automatically if selected again.</p>
+                  </>
                 )}
-                <p className="mt-2 text-xs text-muted-foreground">Anyone already assigned is skipped automatically if selected again.</p>
               </label>
             </div>
             <div className="portal-form-actions">
               <button type="button" onClick={() => setExtendingTask(null)} className="portal-button-secondary justify-center">Cancel</button>
-              <button disabled={saving === 'extend' || memberDirectoryLoading || extendAssignees.length === 0} className="portal-button justify-center">
-                Extend to {extendAssignees.length || 0}
+              <button disabled={saving === 'extend' || (extendMode === 'role' ? !extendRole : memberDirectoryLoading || extendAssignees.length === 0)} className="portal-button justify-center">
+                {extendMode === 'role' ? `Extend to ${extendRole ? getRoleDisplayName(extendRole) : 'role'}` : `Extend to ${extendAssignees.length || 0}`}
               </button>
             </div>
           </form>

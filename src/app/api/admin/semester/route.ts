@@ -530,6 +530,66 @@ export async function POST(request: Request) {
         .update({ role: membership.position_role, account_status: 'approved' })
         .eq('id', membership.user_id)
       if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 })
+
+      // Role-targeted task groups (tasks.assigned_to_role) mark themselves as
+      // an open audience, not a one-time snapshot - anyone newly approved
+      // into that role this term should get the same task everyone else in
+      // that group already has, not just people who held the role when it
+      // was first created/extended.
+      const { data: roleTemplates } = (await admin
+        .from('tasks')
+        .select('group_task_id, title, description, due_at, assigned_by, point_value, points_category, auto_approve')
+        .eq('assigned_to_role', membership.position_role)
+        .eq('term_id', membership.term_id)
+        .not('group_task_id', 'is', null)) as {
+        data:
+          | Array<{
+              group_task_id: string
+              title: string
+              description: string | null
+              due_at: string | null
+              assigned_by: string
+              point_value: number | null
+              points_category: string | null
+              auto_approve: boolean
+            }>
+          | null
+      }
+
+      const uniqueGroups = new Map<string, NonNullable<typeof roleTemplates>[number]>()
+      for (const template of roleTemplates || []) {
+        if (template.group_task_id && !uniqueGroups.has(template.group_task_id)) uniqueGroups.set(template.group_task_id, template)
+      }
+
+      if (uniqueGroups.size > 0) {
+        const { data: existingTasks } = await admin
+          .from('tasks')
+          .select('group_task_id')
+          .eq('assigned_to', membership.user_id)
+          .not('group_task_id', 'is', null)
+        const existingGroupIds = new Set((existingTasks || []).map((t) => t.group_task_id))
+
+        const tasksToCreate = Array.from(uniqueGroups.entries())
+          .filter(([groupId]) => !existingGroupIds.has(groupId))
+          .map(([groupId, template]) => ({
+            title: template.title,
+            description: template.description,
+            due_at: template.due_at,
+            assigned_to: membership.user_id,
+            assigned_by: template.assigned_by,
+            status: 'not_started' as const,
+            assignee_status: 'not_started' as const,
+            point_value: template.point_value,
+            points_category: template.points_category,
+            auto_approve: template.auto_approve,
+            points_awarded: false,
+            group_task_id: groupId,
+            assigned_to_role: membership.position_role,
+            term_id: membership.term_id,
+          }))
+
+        if (tasksToCreate.length > 0) await admin.from('tasks').insert(tasksToCreate)
+      }
     }
 
     return NextResponse.json({ success: true })
