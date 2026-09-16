@@ -43,6 +43,7 @@ import type {
   EventCategory,
   PersonalTask,
   Task,
+  TaskGroupReviewer,
   TaskStatusHistory,
   TaskUpdate,
   UserRole,
@@ -119,6 +120,9 @@ export default function TasksPage() {
   const [updates, setUpdates] = useState<TaskUpdate[]>([])
   const [history, setHistory] = useState<TaskStatusHistory[]>([])
   const [groupTasks, setGroupTasks] = useState<TeamTask[]>([])
+  const [groupReviewers, setGroupReviewers] = useState<TaskGroupReviewer[]>([])
+  const [managingReviewersTask, setManagingReviewersTask] = useState<TeamTask | null>(null)
+  const [newReviewerIds, setNewReviewerIds] = useState<string[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [updateNote, setUpdateNote] = useState('')
   const [updateLink, setUpdateLink] = useState('')
@@ -127,6 +131,7 @@ export default function TasksPage() {
   const [saving, setSaving] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [showPersonalCreate, setShowPersonalCreate] = useState(false)
+  const [reviewerGroupIds, setReviewerGroupIds] = useState<Set<string>>(new Set())
   const [extendingTask, setExtendingTask] = useState<TeamTask | null>(null)
   const [extendMode, setExtendMode] = useState<'people' | 'role'>('people')
   const [extendAssignees, setExtendAssignees] = useState<string[]>([])
@@ -147,6 +152,10 @@ export default function TasksPage() {
 
   const isPortalAdmin = user?.email?.toLowerCase() === 'internal@txbosso.com'
   const canManage = isPortalAdmin || hasMinimumRole(profile?.role, 'project_manager')
+  // True for the group's real assigner, or someone that assigner explicitly
+  // added as a reviewer (task_group_reviewers) - not every project_manager+.
+  const canReviewGroup = (task: TeamTask) =>
+    task.assigned_by === profile?.id || (task.group_task_id ? reviewerGroupIds.has(task.group_task_id) : false)
 
   const loadMemberDirectory = useCallback(async () => {
     if (!canManage) {
@@ -185,6 +194,21 @@ export default function TasksPage() {
     setLoading(true)
     setError('')
 
+    // Groups this member was explicitly granted reviewer access to by the
+    // group's actual assigner (task_group_reviewers) - folded into the same
+    // visibility filter as "assigned to me" / "assigned by me" below. This
+    // only widens what the query asks for; the tasks table's own RLS
+    // (a matching additive policy) is what actually enforces it.
+    const { data: reviewerRows } = await supabase
+      .from('task_group_reviewers')
+      .select('group_task_id')
+      .eq('reviewer_id', profile.id)
+    const reviewerGroupIds = Array.from(new Set((reviewerRows || []).map((r: any) => r.group_task_id).filter(Boolean)))
+    setReviewerGroupIds(new Set(reviewerGroupIds))
+    const visibilityFilter = `assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}${
+      reviewerGroupIds.length ? `,group_task_id.in.(${reviewerGroupIds.join(',')})` : ''
+    }`
+
     const baseCommonSelect = `
       id, title, description, status, assignee_status, priority, due_at,
       assigned_to, assigned_by, created_at, point_value, points_category,
@@ -203,14 +227,14 @@ export default function TasksPage() {
         .select(termSelect)
         .eq('term_id', access.term_id)
         .is('archived_at', null)
-        .or(`assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}`)
+        .or(visibilityFilter)
         .order('due_at', { ascending: true, nullsFirst: false })
         .limit(500)
     } else {
       taskResult = await supabase
         .from('tasks')
         .select(commonSelect)
-        .or(`assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}`)
+        .or(visibilityFilter)
         .order('due_at', { ascending: true, nullsFirst: false })
         .limit(500)
     }
@@ -223,14 +247,14 @@ export default function TasksPage() {
           .select(baseTermSelect)
           .eq('term_id', access.term_id)
           .is('archived_at', null)
-          .or(`assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}`)
+          .or(visibilityFilter)
           .order('due_at', { ascending: true, nullsFirst: false })
           .limit(500)
       } else {
         taskResult = await supabase
           .from('tasks')
           .select(baseCommonSelect)
-          .or(`assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}`)
+          .or(visibilityFilter)
           .order('due_at', { ascending: true, nullsFirst: false })
           .limit(500)
       }
@@ -265,7 +289,7 @@ export default function TasksPage() {
 
   const loadDetails = useCallback(async (task: TeamTask) => {
     setDetailLoading(true)
-    const [updatesResult, historyResult, groupResult] = await Promise.all([
+    const [updatesResult, historyResult, groupResult, reviewersResult] = await Promise.all([
       supabase
         .from('task_updates')
         .select('id, task_id, note, link, created_by, created_at, author:profiles!task_updates_created_by_fkey(id, full_name, role)')
@@ -275,14 +299,26 @@ export default function TasksPage() {
       schemaReady
         ? supabase.from('task_status_history').select('*').eq('task_id', task.id).order('created_at', { ascending: false }).limit(100)
         : Promise.resolve({ data: [], error: null }),
-      task.group_task_id && task.assigned_by === profile?.id
+      task.group_task_id && canReviewGroup(task)
         ? supabase
             .from('tasks')
             .select('id, title, status, assignee_status, assigned_to, assigned_by, due_at, assignee:profiles!tasks_assigned_to_fkey(id, full_name, role)')
             .eq('group_task_id', task.group_task_id)
             .limit(250)
         : Promise.resolve({ data: [], error: null }),
+      task.group_task_id && task.assigned_by === profile?.id
+        ? supabase
+            .from('task_group_reviewers')
+            .select('id, group_task_id, reviewer_id, added_by, reviewer:profiles!task_group_reviewers_reviewer_id_fkey(id, full_name, role)')
+            .eq('group_task_id', task.group_task_id)
+        : Promise.resolve({ data: [], error: null }),
     ])
+    setGroupReviewers(
+      ((reviewersResult.data || []) as any[]).map((row) => ({
+        ...row,
+        reviewer: Array.isArray(row.reviewer) ? row.reviewer[0] || null : row.reviewer,
+      })) as TaskGroupReviewer[]
+    )
 
     if (updatesResult.error) setError(`Updates could not be loaded: ${updatesResult.error.message}`)
     const loadedUpdates = ((updatesResult.data || []) as any[]).map((row) => ({
@@ -314,7 +350,7 @@ export default function TasksPage() {
       })) as TeamTask[]
     )
     setDetailLoading(false)
-  }, [profile?.id, schemaReady])
+  }, [profile?.id, schemaReady, reviewerGroupIds])
 
   useEffect(() => {
     void loadTasks()
@@ -413,7 +449,7 @@ export default function TasksPage() {
     setSaving(`status-${task.id}`)
     setError('')
     const isAssignee = task.assigned_to === profile.id
-    const isReviewer = task.assigned_by === profile.id || canManage
+    const isReviewer = canReviewGroup(task)
     let payload: Record<string, unknown>
 
     if (next === 'todo' && (isAssignee || isReviewer)) payload = { assignee_status: 'not_started', status: 'not_started' }
@@ -661,6 +697,59 @@ export default function TasksPage() {
     setSaving('')
   }
 
+  const openManageReviewers = (task: TeamTask) => {
+    setManagingReviewersTask(task)
+    setNewReviewerIds([])
+  }
+
+  const submitAddReviewers = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!managingReviewersTask || !profile || newReviewerIds.length === 0) return
+    setError('')
+    setSaving('add-reviewers')
+
+    // A task not yet extended to anyone has no group_task_id yet either -
+    // give it one so there is something for the reviewer grant to attach to,
+    // same as the first time it gets extended to more people.
+    let groupId = managingReviewersTask.group_task_id
+    if (!groupId) {
+      groupId = crypto.randomUUID()
+      const { error: groupError } = await supabase.from('tasks').update({ group_task_id: groupId }).eq('id', managingReviewersTask.id)
+      if (groupError) {
+        setError(`Could not add reviewers: ${groupError.message}`)
+        setSaving('')
+        return
+      }
+      setManagingReviewersTask((current) => (current ? { ...current, group_task_id: groupId } : current))
+    }
+
+    const payload = newReviewerIds.map((reviewerId) => ({
+      group_task_id: groupId,
+      reviewer_id: reviewerId,
+      added_by: profile.id,
+    }))
+    const { error: insertError } = await supabase.from('task_group_reviewers').insert(payload)
+    if (insertError) {
+      setError(`Could not add reviewers: ${insertError.message}`)
+    } else {
+      setNewReviewerIds([])
+      await loadTasks()
+      if (selectedTask) await loadDetails(selectedTask)
+    }
+    setSaving('')
+  }
+
+  const removeReviewer = async (reviewer: TaskGroupReviewer) => {
+    setSaving(`remove-reviewer-${reviewer.id}`)
+    const { error: deleteError } = await supabase.from('task_group_reviewers').delete().eq('id', reviewer.id)
+    if (deleteError) setError(`Could not remove reviewer: ${deleteError.message}`)
+    else {
+      await loadTasks()
+      if (selectedTask) await loadDetails(selectedTask)
+    }
+    setSaving('')
+  }
+
   const createPersonalTask = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!profile) return
@@ -794,9 +883,11 @@ export default function TasksPage() {
                 </section>
               )}
 
-              <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'submitted')} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>}{(selectedTask.assigned_by === profile?.id || canManage) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
+              <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'submitted')} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>}{canReviewGroup(selectedTask) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
 
-              {selectedTask.assigned_by === profile?.id && <section>{groupTasks.length > 1 && <><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></>}<button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small mt-3"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button></section>}
+              {canReviewGroup(selectedTask) && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></section>}
+
+              {selectedTask.assigned_by === profile?.id && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Manage this action item</h3></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button><button type="button" onClick={() => openManageReviewers(selectedTask)} className="portal-button-secondary small"><FileCheck2 className="h-3.5 w-3.5" /> Manage reviewers</button></div>{groupReviewers.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Reviewers: {groupReviewers.map((r) => r.reviewer?.full_name || 'Member').join(', ')}</p>}</section>}
 
               <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div><label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{updateFile ? updateFile.name : 'Attach a file (optional) - JPG, PNG, WebP, or PDF, 10 MB max'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setUpdateFile(event.target.files?.[0] || null)} /></label></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p><div className="mt-3 flex flex-wrap gap-4">{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}{attachmentLinks[update.id] && <a href={attachmentLinks[update.id].url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><Paperclip className="h-3.5 w-3.5" /> {attachmentLinks[update.id].name}</a>}</div></article>)}</div>}</section>
 
@@ -1071,6 +1162,65 @@ export default function TasksPage() {
               <button type="button" onClick={() => setExtendingTask(null)} className="portal-button-secondary justify-center">Cancel</button>
               <button disabled={saving === 'extend' || (extendMode === 'role' ? !extendRole : memberDirectoryLoading || extendAssignees.length === 0)} className="portal-button justify-center">
                 {extendMode === 'role' ? `Extend to ${extendRole ? getRoleDisplayName(extendRole) : 'role'}` : `Extend to ${extendAssignees.length || 0}`}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {managingReviewersTask && (
+        <div className="portal-modal-backdrop z-[95]" onMouseDown={() => setManagingReviewersTask(null)}>
+          <form onSubmit={submitAddReviewers} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-lg">
+            <div className="portal-form-header">
+              <div>
+                <p className="portal-eyebrow">Only you can grant this</p>
+                <h2>Reviewers for “{managingReviewersTask.title}”</h2>
+                <p className="text-sm text-muted-foreground">A reviewer can see everyone assigned and approve their work, same as you.</p>
+              </div>
+              <button type="button" onClick={() => setManagingReviewersTask(null)} className="portal-icon-button"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5 space-y-5">
+              {groupReviewers.length > 0 && (
+                <div className="space-y-2">
+                  <span className="portal-label">Current reviewers</span>
+                  <div className="divide-y divide-border rounded-xl border border-border">
+                    {groupReviewers.map((reviewer) => (
+                      <div key={reviewer.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                        <span>{reviewer.reviewer?.full_name || 'Member'}</span>
+                        <button
+                          type="button"
+                          disabled={saving === `remove-reviewer-${reviewer.id}`}
+                          onClick={() => void removeReviewer(reviewer)}
+                          className="portal-icon-button"
+                          aria-label={`Remove ${reviewer.reviewer?.full_name || 'reviewer'}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <label>
+                <span className="portal-label">Add reviewers</span>
+                {memberDirectoryError ? (
+                  <div className="portal-alert-error">{memberDirectoryError} <button type="button" onClick={() => void loadMemberDirectory()} className="font-semibold underline">Try again</button></div>
+                ) : (
+                  <MemberGroupPicker
+                    users={profiles.filter((person) => !groupReviewers.some((reviewer) => reviewer.reviewer_id === person.id))}
+                    groups={memberGroups}
+                    value={newReviewerIds}
+                    onChange={setNewReviewerIds}
+                    disabled={memberDirectoryLoading}
+                    placeholder="Search approved current-semester members..."
+                  />
+                )}
+              </label>
+            </div>
+            <div className="portal-form-actions">
+              <button type="button" onClick={() => setManagingReviewersTask(null)} className="portal-button-secondary justify-center">Done</button>
+              <button disabled={saving === 'add-reviewers' || newReviewerIds.length === 0} className="portal-button justify-center">
+                Add {newReviewerIds.length || 0}
               </button>
             </div>
           </form>

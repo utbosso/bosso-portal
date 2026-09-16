@@ -630,6 +630,15 @@ export interface TaskUpdate {
   author?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
 }
 
+export interface TaskGroupReviewer {
+  id: string
+  group_task_id: string
+  reviewer_id: string
+  added_by: string
+  created_at?: string
+  reviewer?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+}
+
 export interface TaskUpdateAttachment {
   id: string
   update_id: string
