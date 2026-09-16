@@ -742,6 +742,7 @@ export default function TasksPage() {
                   <input
                     type="number"
                     min="0"
+                    step="0.5"
                     value={newTask.pointValue}
                     onChange={(event) => setNewTask({ ...newTask, pointValue: event.target.value })}
                     className="portal-input w-full"

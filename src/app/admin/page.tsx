@@ -2601,8 +2601,9 @@ function PointsBreakdownTab() {
                 <input
                   type="number"
                   min="1"
+                  step="0.5"
                   value={pointsValue}
-                  onChange={(e) => setPointsValue(parseInt(e.target.value) || 0)}
+                  onChange={(e) => setPointsValue(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 bg-dark-100 border border-primary/20 rounded-md text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
                 {selectedEventType && selectedEventType !== 'other' && EVENT_TYPES[selectedEventType].points !== null && (

@@ -762,6 +762,7 @@ export default function AttendancePage() {
               </label>
               <input
                 type="number"
+                step="any"
                 value={adjustmentPoints}
                 onChange={(e) => setAdjustmentPoints(e.target.value)}
                 placeholder={adjustmentType === 'event' ? 'Auto-filled from event' : 'e.g. 5 or -5'}

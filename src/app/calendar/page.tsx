@@ -1630,7 +1630,7 @@ View on portal: ${window.location.origin}/calendar`)
                       <input
                         type="number"
                         min="0"
-                        step="1"
+                        step="0.5"
                         value={form.pointValue}
                         onChange={(e) => setForm((prev) => ({ ...prev, pointValue: e.target.value }))}
                         placeholder="e.g. 5"
