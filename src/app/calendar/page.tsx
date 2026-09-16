@@ -98,6 +98,7 @@ export default function CalendarPage() {
   const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [syncNotice, setSyncNotice] = useState<string | null>(null)
 
   const [currentMonth, setCurrentMonth] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
@@ -637,6 +638,7 @@ export default function CalendarPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSyncNotice(null)
     if (!profile) return
     if (!form.date || !form.startTime) return
     if (form.audienceMode === 'people' && form.selectedUserIds.length === 0) {
@@ -698,6 +700,25 @@ export default function CalendarPage() {
           .update(payload)
           .eq('id', editingId)
         if (error) throw error
+
+        // Check-in copies the event's point value into attendance_records at
+        // that moment (see src/app/dashboard/page.tsx) rather than reading it
+        // live, so correcting the value here otherwise leaves everyone who
+        // already used the code stuck on the old amount. Push the corrected
+        // value onto their records too - a trigger already mirrors
+        // attendance_records into point_ledger on UPDATE, so this is enough
+        // to move their actual point totals, not just the event's listing.
+        if (form.trackAttendance && existingEvent && existingEvent.point_value !== basePayload.point_value) {
+          const { data: synced, error: syncError } = await supabase
+            .from('attendance_records')
+            .update({ points_earned: basePayload.point_value })
+            .eq('event_id', editingId)
+            .select('id')
+          if (syncError) throw syncError
+          if (synced && synced.length > 0) {
+            setSyncNotice(`Updated points for ${synced.length} member${synced.length === 1 ? '' : 's'} who already checked in to this event.`)
+          }
+        }
       } else {
         const repeatCount = Math.max(1, Math.min(52, Number(form.repeatCount || 1)))
         const repeatInterval = Math.max(1, Math.min(12, Number(form.repeatInterval || 1)))
@@ -979,6 +1000,13 @@ View on portal: ${window.location.origin}/calendar`)
 
       {error && (
         <div className="portal-alert-error">{error}</div>
+      )}
+
+      {syncNotice && (
+        <div className="portal-alert-success flex items-start justify-between gap-3">
+          <span>{syncNotice}</span>
+          <button type="button" onClick={() => setSyncNotice(null)} className="portal-icon-button shrink-0"><X className="h-4 w-4" /></button>
+        </div>
       )}
 
       <div className="space-y-6">
