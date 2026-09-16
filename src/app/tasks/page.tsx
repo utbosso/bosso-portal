@@ -124,6 +124,8 @@ export default function TasksPage() {
   const [saving, setSaving] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [showPersonalCreate, setShowPersonalCreate] = useState(false)
+  const [extendingTask, setExtendingTask] = useState<TeamTask | null>(null)
+  const [extendAssignees, setExtendAssignees] = useState<string[]>([])
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
@@ -266,7 +268,7 @@ export default function TasksPage() {
       schemaReady
         ? supabase.from('task_status_history').select('*').eq('task_id', task.id).order('created_at', { ascending: false }).limit(100)
         : Promise.resolve({ data: [], error: null }),
-      task.group_task_id && task.assigned_by === profile?.id
+      task.group_task_id && (task.assigned_by === profile?.id || canManage)
         ? supabase
             .from('tasks')
             .select('id, title, status, assignee_status, assigned_to, assigned_by, due_at, assignee:profiles!tasks_assigned_to_fkey(id, full_name, role)')
@@ -305,7 +307,7 @@ export default function TasksPage() {
       })) as TeamTask[]
     )
     setDetailLoading(false)
-  }, [profile?.id, schemaReady])
+  }, [profile?.id, schemaReady, canManage])
 
   useEffect(() => {
     void loadTasks()
@@ -516,6 +518,78 @@ export default function TasksPage() {
     setSaving('')
   }
 
+  const openExtend = (task: TeamTask) => {
+    setExtendingTask(task)
+    setExtendAssignees([])
+  }
+
+  const currentGroupAssigneeIds = () =>
+    new Set(
+      extendingTask?.group_task_id
+        ? groupTasks.map((task) => task.assigned_to)
+        : extendingTask
+        ? [extendingTask.assigned_to]
+        : []
+    )
+
+  const submitExtend = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!extendingTask) return
+    const already = currentGroupAssigneeIds()
+    const newAssigneeIds = extendAssignees.filter((id) => !already.has(id))
+    if (newAssigneeIds.length === 0) {
+      setError('Everyone selected is already assigned to this action item.')
+      return
+    }
+    setError('')
+    setSaving('extend')
+
+    // A task created for one person/audience has no group_task_id yet - give
+    // it one now so the original assignee and everyone newly added here show
+    // up together in Team progress instead of the extension looking separate.
+    const groupId = extendingTask.group_task_id || crypto.randomUUID()
+    if (!extendingTask.group_task_id) {
+      const { error: groupError } = await supabase.from('tasks').update({ group_task_id: groupId }).eq('id', extendingTask.id)
+      if (groupError) {
+        setError(`Could not extend this action item: ${groupError.message}`)
+        setSaving('')
+        return
+      }
+    }
+
+    const payload = newAssigneeIds.map((assigneeId) => ({
+      title: extendingTask.title,
+      description: extendingTask.description,
+      status: 'not_started' as const,
+      assignee_status: 'not_started' as AssigneeStatus,
+      due_at: extendingTask.due_at,
+      assigned_to: assigneeId,
+      assigned_by: extendingTask.assigned_by,
+      point_value: extendingTask.point_value ?? null,
+      points_category: extendingTask.points_category ?? null,
+      auto_approve: extendingTask.auto_approve ?? false,
+      points_awarded: false,
+      group_task_id: groupId,
+      assigned_to_role: null,
+      reference_links: extendingTask.reference_links ?? [],
+      ...(extendingTask.term_id ? { term_id: extendingTask.term_id } : {}),
+    }))
+    let extendResult = await (supabase as any).from('tasks').insert(payload)
+    if (missingReferenceLinksColumn(extendResult.error)) {
+      const fallbackPayload = payload.map(({ reference_links: _referenceLinks, ...task }) => task)
+      extendResult = await (supabase as any).from('tasks').insert(fallbackPayload)
+    }
+    if (extendResult.error) {
+      setError(`Could not extend this action item: ${extendResult.error.message}`)
+    } else {
+      setExtendingTask(null)
+      setExtendAssignees([])
+      await loadTasks()
+      if (selectedTask) await loadDetails(selectedTask)
+    }
+    setSaving('')
+  }
+
   const createPersonalTask = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!profile) return
@@ -651,7 +725,7 @@ export default function TasksPage() {
 
               <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'submitted')} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>}{(selectedTask.assigned_by === profile?.id || canManage) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
 
-              {selectedTask.assigned_by === profile?.id && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></section>}
+              {(selectedTask.assigned_by === profile?.id || canManage) && <section>{groupTasks.length > 1 && <><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></>}<button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small mt-3"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button></section>}
 
               <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div><label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{updateFile ? updateFile.name : 'Attach a file (optional) - JPG, PNG, WebP, or PDF, 10 MB max'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setUpdateFile(event.target.files?.[0] || null)} /></label></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p><div className="mt-3 flex flex-wrap gap-4">{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}{attachmentLinks[update.id] && <a href={attachmentLinks[update.id].url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><Paperclip className="h-3.5 w-3.5" /> {attachmentLinks[update.id].name}</a>}</div></article>)}</div>}</section>
 
@@ -841,6 +915,45 @@ export default function TasksPage() {
       )}
 
       {showPersonalCreate && <div className="portal-modal-backdrop" onMouseDown={() => setShowPersonalCreate(false)}><form onSubmit={createPersonalTask} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-lg"><div className="portal-form-header"><div><p className="portal-eyebrow">Private to you</p><h2>New personal item</h2></div><button type="button" onClick={() => setShowPersonalCreate(false)} className="portal-icon-button"><X className="h-5 w-5" /></button></div><div className="space-y-5"><label><span className="portal-label">Title</span><input value={newPersonal.title} onChange={(event) => setNewPersonal({ ...newPersonal, title: event.target.value })} className="portal-input w-full" required /></label><label><span className="portal-label">Description</span><textarea value={newPersonal.description} onChange={(event) => setNewPersonal({ ...newPersonal, description: event.target.value })} rows={4} className="portal-input w-full resize-none" /></label><label><span className="portal-label">Due date</span><input type="date" value={newPersonal.dueDate} onChange={(event) => setNewPersonal({ ...newPersonal, dueDate: event.target.value })} className="portal-input w-full" /></label></div><div className="portal-form-actions"><button type="button" onClick={() => setShowPersonalCreate(false)} className="portal-button-secondary justify-center">Cancel</button><button disabled={saving === 'create-personal'} className="portal-button justify-center">Add item</button></div></form></div>}
+
+      {extendingTask && (
+        <div className="portal-modal-backdrop z-[95]" onMouseDown={() => setExtendingTask(null)}>
+          <form onSubmit={submitExtend} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-lg">
+            <div className="portal-form-header">
+              <div>
+                <p className="portal-eyebrow">Same action item, more people</p>
+                <h2>Extend “{extendingTask.title}”</h2>
+                <p className="text-sm text-muted-foreground">Same title, points, due date, and review flow - just for more people.</p>
+              </div>
+              <button type="button" onClick={() => setExtendingTask(null)} className="portal-icon-button"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5 space-y-5">
+              <label>
+                <span className="portal-label">Add people</span>
+                {memberDirectoryError ? (
+                  <div className="portal-alert-error">{memberDirectoryError} <button type="button" onClick={() => void loadMemberDirectory()} className="font-semibold underline">Try again</button></div>
+                ) : (
+                  <MemberGroupPicker
+                    users={profiles}
+                    groups={memberGroups}
+                    value={extendAssignees}
+                    onChange={setExtendAssignees}
+                    disabled={memberDirectoryLoading}
+                    placeholder="Search approved current-semester members..."
+                  />
+                )}
+                <p className="mt-2 text-xs text-muted-foreground">Anyone already assigned is skipped automatically if selected again.</p>
+              </label>
+            </div>
+            <div className="portal-form-actions">
+              <button type="button" onClick={() => setExtendingTask(null)} className="portal-button-secondary justify-center">Cancel</button>
+              <button disabled={saving === 'extend' || memberDirectoryLoading || extendAssignees.length === 0} className="portal-button justify-center">
+                Extend to {extendAssignees.length || 0}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
