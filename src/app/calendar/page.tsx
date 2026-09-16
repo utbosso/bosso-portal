@@ -741,21 +741,24 @@ export default function CalendarPage() {
         if (error) throw error
 
         // Check-in copies the event's point value into attendance_records at
-        // that moment (see src/app/dashboard/page.tsx) rather than reading it
+        // that moment (see /api/attendance/check-in) rather than reading it
         // live, so correcting the value here otherwise leaves everyone who
-        // already used the code stuck on the old amount. Push the corrected
-        // value onto their records too - a trigger already mirrors
-        // attendance_records into point_ledger on UPDATE, so this is enough
-        // to move their actual point totals, not just the event's listing.
+        // already used the code stuck on the old amount. This runs through a
+        // server route under the service role rather than a direct client
+        // update - row-level security does not grant a bulk cross-user
+        // update on attendance_records from a regular session, and that
+        // failure is silent (0 rows matched, no error), which is exactly
+        // what happened the first time this shipped.
         if (form.trackAttendance && existingEvent && existingEvent.point_value !== basePayload.point_value) {
-          const { data: synced, error: syncError } = await supabase
-            .from('attendance_records')
-            .update({ points_earned: basePayload.point_value })
-            .eq('event_id', editingId)
-            .select('id')
-          if (syncError) throw syncError
-          if (synced && synced.length > 0) {
-            setSyncNotice(`Updated points for ${synced.length} member${synced.length === 1 ? '' : 's'} who already checked in to this event.`)
+          const syncResponse = await fetch('/api/events/sync-attendance-points', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId: editingId, pointValue: basePayload.point_value }),
+          })
+          const syncResult = await syncResponse.json().catch(() => null)
+          if (!syncResponse.ok) throw new Error(syncResult?.error || 'Could not update already-checked-in members.')
+          if (syncResult?.updatedCount > 0) {
+            setSyncNotice(`Updated points for ${syncResult.updatedCount} member${syncResult.updatedCount === 1 ? '' : 's'} who already checked in to this event.`)
           }
         }
       } else {
