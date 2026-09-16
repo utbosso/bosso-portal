@@ -63,48 +63,17 @@ export default function DashboardPage() {
     try {
       const code = checkInCode.trim().toUpperCase()
 
-      const { data: event, error: eventError } = await supabase
-        .from('events')
-        .select('id, point_value, attendance_code, code_expires_at, event_category')
-        .eq('attendance_code', code)
-        .eq('track_attendance', true)
-        .single()
+      const response = await fetch('/api/attendance/check-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      })
+      const result = await response.json().catch(() => null)
 
-      if (eventError || !event) {
-        setCheckInError('Invalid check-in code. Please try again.')
+      if (!response.ok) {
+        setCheckInError(result?.error || 'Failed to check in. Please try again.')
         return
       }
-
-      if (event.code_expires_at) {
-        const expiresAt = new Date(event.code_expires_at)
-        if (!Number.isNaN(expiresAt.getTime()) && new Date() > expiresAt) {
-          setCheckInError('This check-in code has expired.')
-          return
-        }
-      }
-
-      const { data: existing } = await supabase
-        .from('attendance_records')
-        .select('id')
-        .eq('event_id', event.id)
-        .eq('user_id', profile.id)
-        .single()
-
-      if (existing) {
-        setCheckInError('You have already checked in to this event.')
-        return
-      }
-
-      const { error: insertError } = await supabase
-        .from('attendance_records')
-        .insert({
-          event_id: event.id,
-          user_id: profile.id,
-          points_earned: event.point_value || 0,
-          event_category: event.event_category,
-        })
-
-      if (insertError) throw insertError
 
       setCheckInSuccess(true)
       setCheckInCode('')

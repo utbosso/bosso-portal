@@ -69,7 +69,9 @@ export const EVENT_TYPES: Record<EventType, {
   },
   workshop_attendance: {
     label: 'Workshop Attendance',
-    points: 2,
+    // 1.5 for showing up + 0.5 for the deliverable (set separately in the
+    // event's deliverable fields) = 2 total, matching every other workshop.
+    points: 1.5,
     category: 'professional_education',
     description: 'Attend a workshop',
     isRecurring: true,

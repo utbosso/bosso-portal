@@ -59,6 +59,11 @@ type EventFormState = {
   eventType: EventType | ''
   customEventType: string
   pointValue: string
+  deliverableEnabled: boolean
+  deliverableTitle: string
+  deliverableDescription: string
+  deliverablePointValue: string
+  deliverableDueDate: string
   repeatEnabled: boolean
   repeatInterval: string
   repeatUnit: 'week' | 'month'
@@ -82,6 +87,11 @@ const emptyForm: EventFormState = {
   eventType: '',
   customEventType: '',
   pointValue: '',
+  deliverableEnabled: false,
+  deliverableTitle: '',
+  deliverableDescription: '',
+  deliverablePointValue: '0.5',
+  deliverableDueDate: '',
   repeatEnabled: false,
   repeatInterval: '1',
   repeatUnit: 'week',
@@ -497,6 +507,11 @@ export default function CalendarPage() {
       eventType: event.event_type ?? '',
       customEventType: event.custom_event_type ?? '',
       pointValue: event.point_value?.toString() ?? '',
+      deliverableEnabled: Boolean(event.deliverable_point_value),
+      deliverableTitle: event.deliverable_title ?? '',
+      deliverableDescription: event.deliverable_description ?? '',
+      deliverablePointValue: event.deliverable_point_value?.toString() ?? '0.5',
+      deliverableDueDate: event.deliverable_due_at ? toDateKey(new Date(event.deliverable_due_at)) : '',
       repeatEnabled: false,
       repeatInterval: '1',
       repeatUnit: 'week',
@@ -606,6 +621,14 @@ export default function CalendarPage() {
       eventType: event.event_type ?? '',
       customEventType: event.custom_event_type ?? '',
       pointValue: event.point_value?.toString() ?? '',
+      deliverableEnabled: Boolean(event.deliverable_point_value),
+      deliverableTitle: event.deliverable_title ?? '',
+      deliverableDescription: event.deliverable_description ?? '',
+      deliverablePointValue: event.deliverable_point_value?.toString() ?? '0.5',
+      // A duplicated event's own date shifts, so a copied absolute due date
+      // would silently point at the wrong week - leave it for the admin to
+      // set again on the new date instead of carrying over a stale one.
+      deliverableDueDate: '',
       repeatEnabled: false,
       repeatInterval: '1',
       repeatUnit: 'week',
@@ -652,6 +675,18 @@ export default function CalendarPage() {
       return
     }
 
+    // The deliverable task is created at check-in time, so it only makes
+    // sense alongside attendance tracking.
+    const deliverableActive = form.trackAttendance && form.deliverableEnabled
+    if (deliverableActive && (!form.deliverablePointValue || isNaN(Number(form.deliverablePointValue)) || Number(form.deliverablePointValue) <= 0)) {
+      setError('Please enter a valid deliverable point value (greater than 0)')
+      return
+    }
+    if (deliverableActive && !form.deliverableDueDate) {
+      setError('Please choose a due date for the deliverable')
+      return
+    }
+
     const start = combineDateTime(form.date, form.startTime)
     const end = form.endTime
       ? combineDateTime(form.date, form.endTime)
@@ -676,6 +711,10 @@ export default function CalendarPage() {
       custom_event_type: (form.eventType === 'other' && form.customEventType) ? form.customEventType : null,
       is_recurring: !editingId && form.repeatEnabled,
       max_occurrences: !editingId && form.repeatEnabled ? Number(form.repeatCount || 1) : null,
+      deliverable_title: deliverableActive ? form.deliverableTitle.trim() || null : null,
+      deliverable_description: deliverableActive ? form.deliverableDescription.trim() || null : null,
+      deliverable_point_value: deliverableActive ? Number(form.deliverablePointValue) : null,
+      deliverable_due_at: deliverableActive ? new Date(`${form.deliverableDueDate}T23:59:00`).toISOString() : null,
       ...(schemaReady && access?.term_id && !editingId ? { term_id: access.term_id, archived_at: null } : {}),
     }
 
@@ -1619,6 +1658,82 @@ View on portal: ${window.location.origin}/calendar`)
                           ? 'Code expires 5 minutes after event end (or 5 minutes from now when reactivating past events).'
                           : 'Code never expires until attendance tracking is turned off.'}
                       </p>
+
+                      <div className="flex items-center gap-3 pt-4 mt-2 border-t border-border/60">
+                        <input
+                          type="checkbox"
+                          id="deliverableEnabled"
+                          checked={form.deliverableEnabled}
+                          onChange={(e) => {
+                            const checked = e.target.checked
+                            setForm((prev) => {
+                              if (!checked) return { ...prev, deliverableEnabled: false }
+                              let defaultDue = prev.deliverableDueDate
+                              if (!defaultDue && prev.date) {
+                                const [y, m, d] = prev.date.split('-').map(Number)
+                                defaultDue = toDateKey(new Date(y, m - 1, d + 7))
+                              }
+                              return { ...prev, deliverableEnabled: true, deliverableDueDate: defaultDue }
+                            })
+                          }}
+                          className="w-4 h-4 rounded border-primary/20 bg-dark-100 text-primary focus:ring-2 focus:ring-primary/20"
+                        />
+                        <label htmlFor="deliverableEnabled" className="text-sm text-foreground font-medium cursor-pointer">
+                          Add a deliverable due after this event
+                        </label>
+                      </div>
+
+                      {form.deliverableEnabled && (
+                        <div className="space-y-3 ml-7">
+                          <p className="text-xs text-muted-foreground">
+                            Given as a task the moment someone checks in - only people who actually attended will get it. It still needs manual review and approval, just like any other task, before points are awarded.
+                          </p>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide">Deliverable title (optional)</label>
+                            <input
+                              type="text"
+                              value={form.deliverableTitle}
+                              onChange={(e) => setForm((prev) => ({ ...prev, deliverableTitle: e.target.value }))}
+                              placeholder={`${form.title || 'Workshop'} - Deliverable`}
+                              className="portal-input w-full"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground uppercase tracking-wide">Instructions (optional)</label>
+                            <textarea
+                              value={form.deliverableDescription}
+                              onChange={(e) => setForm((prev) => ({ ...prev, deliverableDescription: e.target.value }))}
+                              rows={2}
+                              placeholder="What should they submit?"
+                              className="portal-input w-full"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground uppercase tracking-wide">Deliverable points</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={form.deliverablePointValue}
+                                onChange={(e) => setForm((prev) => ({ ...prev, deliverablePointValue: e.target.value }))}
+                                required={form.deliverableEnabled}
+                                className="portal-input w-full"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground uppercase tracking-wide">Due date</label>
+                              <input
+                                type="date"
+                                value={form.deliverableDueDate}
+                                onChange={(e) => setForm((prev) => ({ ...prev, deliverableDueDate: e.target.value }))}
+                                required={form.deliverableEnabled}
+                                className="portal-input w-full"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

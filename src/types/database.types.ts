@@ -541,6 +541,10 @@ export interface Event {
   event_category?: EventCategory | null
   event_type?: EventType | null
   custom_event_type?: string | null
+  deliverable_title?: string | null
+  deliverable_description?: string | null
+  deliverable_point_value?: number | null
+  deliverable_due_at?: string | null
   term_id?: string | null
   archived_at?: string | null
   updated_at?: string
