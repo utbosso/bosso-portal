@@ -14,6 +14,7 @@ import {
   ExternalLink,
   FileCheck2,
   Link2,
+  Paperclip,
   ListChecks,
   Loader2,
   MessageSquarePlus,
@@ -118,6 +119,8 @@ export default function TasksPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [updateNote, setUpdateNote] = useState('')
   const [updateLink, setUpdateLink] = useState('')
+  const [updateFile, setUpdateFile] = useState<File | null>(null)
+  const [attachmentLinks, setAttachmentLinks] = useState<Record<string, { name: string; url: string }>>({})
   const [saving, setSaving] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [showPersonalCreate, setShowPersonalCreate] = useState(false)
@@ -273,12 +276,27 @@ export default function TasksPage() {
     ])
 
     if (updatesResult.error) setError(`Updates could not be loaded: ${updatesResult.error.message}`)
-    setUpdates(
-      ((updatesResult.data || []) as any[]).map((row) => ({
-        ...row,
-        author: Array.isArray(row.author) ? row.author[0] || null : row.author,
-      })) as TaskUpdate[]
-    )
+    const loadedUpdates = ((updatesResult.data || []) as any[]).map((row) => ({
+      ...row,
+      author: Array.isArray(row.author) ? row.author[0] || null : row.author,
+    })) as TaskUpdate[]
+    setUpdates(loadedUpdates)
+
+    if (loadedUpdates.length) {
+      const { data: attachments } = await supabase
+        .from('task_update_attachments')
+        .select('update_id, storage_path, file_name')
+        .in('update_id', loadedUpdates.map((update) => update.id))
+      const nextAttachmentLinks: Record<string, { name: string; url: string }> = {}
+      await Promise.all((attachments || []).map(async (attachment: any) => {
+        const { data: signed } = await supabase.storage.from('task-attachments').createSignedUrl(attachment.storage_path, 900)
+        if (signed?.signedUrl) nextAttachmentLinks[attachment.update_id] = { name: attachment.file_name, url: signed.signedUrl }
+      }))
+      setAttachmentLinks(nextAttachmentLinks)
+    } else {
+      setAttachmentLinks({})
+    }
+
     setHistory((historyResult.data || []) as TaskStatusHistory[])
     setGroupTasks(
       ((groupResult.data || []) as any[]).map((row) => ({
@@ -299,6 +317,12 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (selectedTask) void loadDetails(selectedTask)
+    // A draft note/link/file belongs to whichever person was on screen when
+    // it was typed - switching to someone else (e.g. via Team progress)
+    // must not carry it over and risk posting it under the wrong person.
+    setUpdateNote('')
+    setUpdateLink('')
+    setUpdateFile(null)
   }, [loadDetails, selectedTask?.id])
 
   useEffect(() => {
@@ -522,21 +546,53 @@ export default function TasksPage() {
   const submitUpdate = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!profile || !selectedTask || !updateNote.trim()) return
-    setSaving(`update-${selectedTask.id}`)
-    const { error: updateError } = await supabase.from('task_updates').insert({
-      task_id: selectedTask.id,
-      note: updateNote.trim(),
-      link: updateLink.trim() || null,
-      created_by: profile.id,
-    })
-    if (updateError) setError(updateError.message)
-    else {
-      const recipient = selectedTask.assigned_to === profile.id ? selectedTask.assigned_by : selectedTask.assigned_to
-      await notify(selectedTask, recipient, `${profile.full_name} added an update to “${selectedTask.title}”.`, 'update_submitted')
-      setUpdateNote('')
-      setUpdateLink('')
-      await loadDetails(selectedTask)
+    if (updateFile && (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(updateFile.type) || updateFile.size > 10 * 1024 * 1024)) {
+      setError('Attachments must be a JPG, PNG, WebP, or PDF under 10 MB.')
+      return
     }
+    setSaving(`update-${selectedTask.id}`)
+    const { data: inserted, error: updateError } = await supabase
+      .from('task_updates')
+      .insert({
+        task_id: selectedTask.id,
+        note: updateNote.trim(),
+        link: updateLink.trim() || null,
+        created_by: profile.id,
+      })
+      .select('id')
+      .single()
+    if (updateError) {
+      setError(updateError.message)
+      setSaving('')
+      return
+    }
+
+    if (updateFile && inserted) {
+      const safeName = updateFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
+      const storagePath = `${profile.id}/${inserted.id}/${crypto.randomUUID()}-${safeName}`
+      const { error: uploadError } = await supabase.storage.from('task-attachments').upload(storagePath, updateFile)
+      if (uploadError) {
+        setError(`The update was saved, but the attachment failed to upload: ${uploadError.message}`)
+      } else {
+        const { error: attachmentError } = await supabase.from('task_update_attachments').insert({
+          update_id: inserted.id,
+          task_id: selectedTask.id,
+          user_id: profile.id,
+          storage_path: storagePath,
+          file_name: updateFile.name,
+          mime_type: updateFile.type,
+          file_size_bytes: updateFile.size,
+        })
+        if (attachmentError) setError(`The update was saved, but the attachment could not be linked: ${attachmentError.message}`)
+      }
+    }
+
+    const recipient = selectedTask.assigned_to === profile.id ? selectedTask.assigned_by : selectedTask.assigned_to
+    await notify(selectedTask, recipient, `${profile.full_name} added an update to “${selectedTask.title}”.`, 'update_submitted')
+    setUpdateNote('')
+    setUpdateLink('')
+    setUpdateFile(null)
+    await loadDetails(selectedTask)
     setSaving('')
   }
 
@@ -595,9 +651,9 @@ export default function TasksPage() {
 
               <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'submitted')} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>}{(selectedTask.assigned_by === profile?.id || canManage) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
 
-              {selectedTask.assigned_by === profile?.id && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => <div key={task.id} className="flex items-center justify-between gap-4 p-3 text-sm"><span>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></div>)}</div></section>}
+              {selectedTask.assigned_by === profile?.id && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 divide-y divide-border rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></section>}
 
-              <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p>{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}</article>)}</div>}</section>
+              <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div><label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{updateFile ? updateFile.name : 'Attach a file (optional) - JPG, PNG, WebP, or PDF, 10 MB max'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setUpdateFile(event.target.files?.[0] || null)} /></label></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p><div className="mt-3 flex flex-wrap gap-4">{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}{attachmentLinks[update.id] && <a href={attachmentLinks[update.id].url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><Paperclip className="h-3.5 w-3.5" /> {attachmentLinks[update.id].name}</a>}</div></article>)}</div>}</section>
 
               {history.length > 0 && <section><h3 className="text-sm font-semibold">Status history</h3><div className="mt-3 space-y-3">{history.map((item) => <div key={item.id} className="flex gap-3 text-sm"><div className="mt-1.5 h-2 w-2 rounded-full bg-primary" /><div><p><span className="capitalize">{item.from_status?.replaceAll('_', ' ') || 'Created'}</span> <ArrowRight className="mx-1 inline h-3 w-3" /> <span className="capitalize">{item.to_status.replaceAll('_', ' ')}</span></p><p className="mt-1 text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</p></div></div>)}</div></section>}
             </div>

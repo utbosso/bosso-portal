@@ -630,6 +630,18 @@ export interface TaskUpdate {
   author?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
 }
 
+export interface TaskUpdateAttachment {
+  id: string
+  update_id: string
+  task_id: string
+  user_id: string
+  storage_path: string
+  file_name: string
+  mime_type: string
+  file_size_bytes: number
+  created_at?: string
+}
+
 export interface PersonalTask {
   id: string
   title: string
