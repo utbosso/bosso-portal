@@ -137,23 +137,31 @@ export async function GET(request: Request) {
     const { data: adjustments, error: adjustError } = await adjustmentsQuery.order('created_at', { ascending: false })
     if (adjustError) return NextResponse.json({ error: adjustError.message }, { status: 500 })
 
-    // Task-completion points (award-points route) go straight into
-    // point_ledger with source_type='task' - never attendance_records or
-    // points_adjustments - so without this, approved task points were
-    // completely missing from a member's history here even though the
-    // total_points column (member view, via member_term_point_summary)
-    // already correctly included them.
-    let taskPointsQuery = admin
+    // Task completions (award-points route) and approved point requests
+    // (admin/point-requests route) both go straight into point_ledger -
+    // source_type='task' / 'request' - never attendance_records or
+    // points_adjustments, so without this, both were completely missing
+    // from a member's history here even though total_points (member view,
+    // via member_term_point_summary) already correctly included them.
+    let ledgerExtrasQuery = admin
       .from('point_ledger')
-      .select('id, points, note, occurred_at, voided_at')
+      .select('id, points, note, source_type, occurred_at, voided_at')
       .eq('user_id', userId)
-      .eq('source_type', 'task')
+      .in('source_type', ['task', 'request'])
       .is('voided_at', null)
-    if (termId) taskPointsQuery = taskPointsQuery.eq('term_id', termId)
-    const { data: taskPoints, error: taskPointsError } = await taskPointsQuery.order('occurred_at', { ascending: false })
-    if (taskPointsError) return NextResponse.json({ error: taskPointsError.message }, { status: 500 })
+    if (termId) ledgerExtrasQuery = ledgerExtrasQuery.eq('term_id', termId)
+    const { data: ledgerExtras, error: ledgerExtrasError } = await ledgerExtrasQuery.order('occurred_at', { ascending: false })
+    if (ledgerExtrasError) return NextResponse.json({ error: ledgerExtrasError.message }, { status: 500 })
 
-    return NextResponse.json({ attendance: attendance || [], adjustments: adjustments || [], taskPoints: taskPoints || [] })
+    const taskPoints = (ledgerExtras || []).filter((row) => row.source_type === 'task')
+    const requestPoints = (ledgerExtras || []).filter((row) => row.source_type === 'request')
+
+    return NextResponse.json({
+      attendance: attendance || [],
+      adjustments: adjustments || [],
+      taskPoints,
+      requestPoints,
+    })
   }
 
   if (view === 'event-attendees') {

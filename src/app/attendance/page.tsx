@@ -40,7 +40,7 @@ type PointsAdjustment = {
 
 type AttendanceHistoryItem = {
   id: string
-  type: 'event' | 'adjustment' | 'task'
+  type: 'event' | 'adjustment' | 'task' | 'request'
   title: string
   points: number
   timestamp: string
@@ -145,6 +145,7 @@ export default function AttendancePage() {
       const attendance = result.attendance || []
       const adjustments = result.adjustments || []
       const taskPoints = result.taskPoints || []
+      const requestPoints = result.requestPoints || []
 
       setMemberAttendance((attendance as AttendanceWithEvent[]) || [])
 
@@ -181,6 +182,15 @@ export default function AttendancePage() {
           points: entry.points,
           timestamp: entry.occurred_at,
           reason: null
+        })),
+        // Add approved point requests (point_ledger, source_type='request')
+        ...(requestPoints || []).map((entry: any) => ({
+          id: entry.id,
+          type: 'request' as const,
+          title: entry.note || 'Point Request Approved',
+          points: entry.points,
+          timestamp: entry.occurred_at,
+          reason: null
         }))
       ]
 
@@ -199,6 +209,10 @@ export default function AttendancePage() {
     if (!selectedMember) return
     if (item.type === 'task') {
       setError('Task-awarded points can\'t be removed here - use the task itself (Tasks page) to undo the approval.')
+      return
+    }
+    if (item.type === 'request') {
+      setError('Point request awards can\'t be removed here - review the request itself on the Points page to undo it.')
       return
     }
 
@@ -912,6 +926,11 @@ export default function AttendancePage() {
                             Task
                           </span>
                         )}
+                        {item.type === 'request' && (
+                          <span className="px-2 py-0.5 text-[10px] rounded-full font-medium uppercase tracking-wide bg-primary/20 text-primary">
+                            Request
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {new Date(item.timestamp).toLocaleString()}
@@ -928,7 +947,7 @@ export default function AttendancePage() {
                       }`}>
                         {item.points > 0 ? '+' : ''}{item.points} pts
                       </p>
-                      {item.type !== 'task' && (
+                      {item.type !== 'task' && item.type !== 'request' && (
                         <button
                           onClick={() => handleDeletePointsRecord(item)}
                           disabled={deletingRecordId === item.id}
