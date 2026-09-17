@@ -65,6 +65,40 @@ export async function POST(request: Request) {
       { onConflict: 'term_id,user_id,source_type,source_id' }
     )
     if (ledgerError) return NextResponse.json({ error: ledgerError.message }, { status: 500 })
+
+    // A request tied to an event means the member couldn't check in live
+    // (forgot, code expired) and is getting credit after the fact - without
+    // this, they'd never show up as an attendee anywhere that counts from
+    // attendance_records (Attendance Management's per-event/per-member
+    // views). points_earned is 0 here deliberately: the point_ledger row
+    // above already awarded the real points under source_type='request', and
+    // attendance_records has its own trigger that mirrors into point_ledger
+    // too - a nonzero value here would double-count them.
+    if (pointRequest.event_id) {
+      const { data: existingAttendance } = await admin
+        .from('attendance_records')
+        .select('id')
+        .eq('event_id', pointRequest.event_id)
+        .eq('user_id', pointRequest.user_id)
+        .maybeSingle()
+
+      if (!existingAttendance) {
+        const { data: eventRow } = await admin
+          .from('events')
+          .select('event_category, term_id')
+          .eq('id', pointRequest.event_id)
+          .maybeSingle()
+
+        const { error: attendanceError } = await admin.from('attendance_records').insert({
+          event_id: pointRequest.event_id,
+          user_id: pointRequest.user_id,
+          points_earned: 0,
+          event_category: eventRow?.event_category ?? finalCategory,
+          term_id: eventRow?.term_id ?? pointRequest.term_id,
+        })
+        if (attendanceError) return NextResponse.json({ error: attendanceError.message }, { status: 500 })
+      }
+    }
   }
 
   const { error: updateError } = await admin

@@ -292,30 +292,25 @@ export default function PointsPage() {
 
     setSubmitting(true)
     setError('')
-    const { data: pointRequests, error: requestError } = await supabase
-      .from('point_requests')
-      .insert(beneficiaries.map((beneficiaryId) => ({
-        term_id: activeTermId,
-        user_id: beneficiaryId,
-        submitted_by: user.id,
-        event_id: selectedEventId || null,
-        requested_points: points,
-        suggested_category: category,
+    const response = await fetch('/api/points/submit-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        termId: activeTermId,
+        beneficiaryIds: beneficiaries,
+        eventId: selectedEventId || null,
+        requestedPoints: points,
+        category,
         note: note.trim(),
-        status: 'pending',
-        final_points: null,
-        final_category: null,
-        reviewer_note: null,
-        reviewed_by: null,
-        reviewed_at: null,
-      })))
-      .select('*')
-
-    if (requestError || !pointRequests?.length) {
-      setError(requestError?.message || 'The request could not be created.')
+      }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result?.pointRequests?.length) {
+      setError(result?.error || 'The request could not be created.')
       setSubmitting(false)
       return
     }
+    const pointRequests = result.pointRequests
 
     if (proof) {
       const safeName = proof.name.replace(/[^a-zA-Z0-9._-]/g, '-')
