@@ -1739,6 +1739,10 @@ function PointsBreakdownTab() {
   const { profile } = useAuth()
   const [pointsData, setPointsData] = useState<UserPointsBreakdown[]>([])
   const [loading, setLoading] = useState(true)
+  // fetchPointsData also re-runs from the focus/visibilitychange listeners
+  // below on every tab refocus. Unconditionally showing the loading state
+  // on every one of those blanked this whole tab for an instant each time.
+  const hasLoadedRef = useRef(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'total' | 'active'>('total')
   const [selectedDetailsUser, setSelectedDetailsUser] = useState<UserPointsBreakdown | null>(null)
@@ -1816,7 +1820,7 @@ function PointsBreakdownTab() {
   }, [])
 
   const fetchPointsData = async () => {
-    setLoading(true)
+    if (!hasLoadedRef.current) setLoading(true)
     try {
       const { members, groups } = await fetchCurrentMemberDirectory()
       setMemberGroups(groups)
@@ -2048,6 +2052,7 @@ function PointsBreakdownTab() {
     } catch (error) {
       console.error('Error fetching points data:', error)
     } finally {
+      hasLoadedRef.current = true
       setLoading(false)
     }
   }

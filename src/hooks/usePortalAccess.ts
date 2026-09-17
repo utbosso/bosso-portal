@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { isMissingSemesterSchema } from '@/lib/semester'
@@ -22,6 +22,19 @@ export function usePortalAccess(userId: string | null | undefined, authLoading: 
   const [loading, setLoading] = useState(true)
   const [schemaReady, setSchemaReady] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Tracks whether this userId has completed a load yet. refresh() also
+  // fires from a window-focus listener, a visibilitychange listener, and any
+  // realtime change to the member's own row (further below) - all far more
+  // frequent than an actual access change, e.g. every time the browser tab
+  // regains focus. Unconditionally flipping loading true on every one of
+  // those blanked out (and every consumer gating on this hook's loading
+  // re-rendered/re-fetched) for an instant on each refresh, which is what
+  // made the app feel like data was constantly flashing away and reloading.
+  const hasLoadedRef = useRef(false)
+
+  useEffect(() => {
+    hasLoadedRef.current = false
+  }, [userId])
 
   const refresh = useCallback(async () => {
     if (authLoading) return
@@ -32,7 +45,7 @@ export function usePortalAccess(userId: string | null | undefined, authLoading: 
       return
     }
 
-    setLoading(true)
+    if (!hasLoadedRef.current) setLoading(true)
     const { data, error: accessError } = await supabase.rpc('get_portal_access_status')
 
     if (accessError) {
@@ -45,6 +58,7 @@ export function usePortalAccess(userId: string | null | undefined, authLoading: 
       } else {
         setError(accessError.message)
       }
+      hasLoadedRef.current = true
       setLoading(false)
       return
     }
@@ -52,6 +66,7 @@ export function usePortalAccess(userId: string | null | undefined, authLoading: 
     setSchemaReady(true)
     setAccess((data?.[0] as PortalAccessStatus | undefined) || null)
     setError(null)
+    hasLoadedRef.current = true
     setLoading(false)
   }, [userId, authLoading])
 

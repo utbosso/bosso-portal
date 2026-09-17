@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   BadgeCheck,
@@ -115,6 +115,12 @@ export default function TasksPage() {
   const [tab, setTab] = useState<TaskTab>('mine')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  // loadTasks also re-runs from the window-focus listener and realtime
+  // subscriptions further below, on every tab refocus or any tasks/
+  // task_updates/task_status_history change. Unconditionally showing the
+  // loading state on every one of those blanked the whole list (all tabs)
+  // for an instant each time.
+  const hasLoadedTasksRef = useRef(false)
   const [error, setError] = useState('')
   const [selectedTask, setSelectedTask] = useState<TeamTask | null>(null)
   const [updates, setUpdates] = useState<TaskUpdate[]>([])
@@ -191,7 +197,7 @@ export default function TasksPage() {
 
   const loadTasks = useCallback(async () => {
     if (!profile || accessLoading) return
-    setLoading(true)
+    if (!hasLoadedTasksRef.current) setLoading(true)
     setError('')
 
     // Groups this member was explicitly granted reviewer access to by the
@@ -277,6 +283,7 @@ export default function TasksPage() {
     const firstError = taskResult.error || personalResult.error
     if (firstError) {
       setError(`Failed to load action items: ${firstError.message}`)
+      hasLoadedTasksRef.current = true
       setLoading(false)
       return
     }
@@ -292,6 +299,7 @@ export default function TasksPage() {
     setTasks(normalized)
     setPersonalTasks((personalResult.data || []) as PersonalTask[])
     setSelectedTask((current) => (current ? normalized.find((item) => item.id === current.id) || null : null))
+    hasLoadedTasksRef.current = true
     setLoading(false)
   }, [access?.term_id, profile, schemaReady, accessLoading])
 
@@ -359,6 +367,10 @@ export default function TasksPage() {
     )
     setDetailLoading(false)
   }, [profile?.id, schemaReady, reviewerGroupIds])
+
+  useEffect(() => {
+    hasLoadedTasksRef.current = false
+  }, [access?.term_id])
 
   useEffect(() => {
     void loadTasks()

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BadgeCheck,
   Camera,
@@ -83,6 +83,16 @@ export default function PointsPage() {
 
   const isPortalAdmin = user?.email?.toLowerCase() === PORTAL_ADMIN_EMAIL
   const activeTermId = access?.term_id
+  // loadPoints also re-runs from a window-focus listener and realtime
+  // subscriptions further below (any point_ledger/point_requests change),
+  // both far more frequent than this page's own data actually changing.
+  // Unconditionally showing the loading state on every one of those blanked
+  // the whole page for an instant on every tab refocus.
+  const hasLoadedRef = useRef(false)
+
+  useEffect(() => {
+    hasLoadedRef.current = false
+  }, [activeTermId])
 
   const loadPoints = useCallback(async () => {
     if (!user || !activeTermId || !schemaReady) {
@@ -90,7 +100,7 @@ export default function PointsPage() {
       return
     }
 
-    setLoading(true)
+    if (!hasLoadedRef.current) setLoading(true)
     setError('')
 
     const [summaryResult, rulesResult, ledgerResult, requestResult, termResult] = await Promise.all([
@@ -124,6 +134,7 @@ export default function PointsPage() {
     const firstError = summaryResult.error || rulesResult.error || ledgerResult.error || requestResult.error || termResult.error
     if (firstError) {
       setError(firstError.message)
+      hasLoadedRef.current = true
       setLoading(false)
       return
     }
@@ -167,6 +178,7 @@ export default function PointsPage() {
       setEventTitles({})
     }
 
+    hasLoadedRef.current = true
     setLoading(false)
   }, [activeTermId, isPortalAdmin, schemaReady, user])
 
