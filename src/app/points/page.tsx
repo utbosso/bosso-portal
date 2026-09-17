@@ -497,7 +497,7 @@ export default function PointsPage() {
         <section className="portal-panel">
           <div className="portal-panel-header"><div><h2>{isPortalAdmin ? 'Review queue' : 'Point requests'}</h2>{!isPortalAdmin && <p>Track requests you submitted or that someone submitted for you.</p>}</div></div>
           {isPortalAdmin && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mb-5 mt-3 flex flex-wrap gap-2">
               {statusFilterTabs.map((tab) => (
                 <button
                   key={tab.value}
