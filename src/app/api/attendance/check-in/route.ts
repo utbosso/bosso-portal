@@ -52,6 +52,7 @@ export async function POST(request: Request) {
   const { error: attendanceError } = await admin.from('attendance_records').insert({
     event_id: event.id,
     user_id: user.id,
+    term_id: event.term_id,
     points_earned: event.point_value || 0,
     event_category: event.event_category,
   })

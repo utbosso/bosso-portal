@@ -2131,6 +2131,11 @@ function PointsBreakdownTab() {
     setAddPointsSuccess(null)
 
     try {
+      // Without term_id, a manual adjustment doesn't show up anywhere that
+      // filters points_adjustments by term - the Attendance Management tab's
+      // "View Details" and events/rate columns, for one.
+      const { data: currentTerm } = await supabase.from('academic_terms').select('id').eq('status', 'current').maybeSingle()
+
       // Manual awards are stored as point adjustments, not event attendance.
       const adjustments = selectedUsers.map((userId) => ({
         user_id: userId,
@@ -2140,6 +2145,7 @@ function PointsBreakdownTab() {
           selectedEventType === 'other'
             ? `${customEventType.trim()} (${selectedCategory})`
             : `${selectedEventType} (${selectedCategory})`,
+        ...(currentTerm?.id ? { term_id: currentTerm.id } : {}),
       }))
 
       const { error } = await supabase.from('points_adjustments').insert(adjustments)

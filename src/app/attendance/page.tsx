@@ -248,7 +248,7 @@ export default function AttendancePage() {
     try {
       let eventsQuery: any = supabase
         .from('events')
-        .select('id, title, start_at, point_value, track_attendance, event_category')
+        .select('id, title, start_at, point_value, track_attendance, event_category, term_id')
       if (schemaReady && access?.term_id) {
         eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
       }
@@ -319,6 +319,7 @@ export default function AttendancePage() {
             user_id: adjustmentUser,
             points_earned: points,
             event_category: selectedEvent.event_category || null,
+            term_id: (selectedEvent as any).term_id ?? null,
           })
 
         if (attendanceError) throw attendanceError
@@ -331,6 +332,7 @@ export default function AttendancePage() {
             adjusted_by: profile.id,
             points,
             reason: `${adjustmentReason.trim()} (${adjustmentCategory})`,
+            ...(access?.term_id ? { term_id: access.term_id } : {}),
           })
 
         if (error) throw error
