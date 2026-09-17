@@ -39,6 +39,14 @@ const statusStyles: Record<PointRequest['status'], string> = {
   declined: 'bg-stone-100 text-stone-700 border-stone-200',
 }
 
+const statusFilterTabs: { value: PointRequestStatus | 'all'; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'pending', label: 'Requested' },
+  { value: 'needs_info', label: 'Need more info' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'declined', label: 'Denied' },
+]
+
 function categoryLabel(category: EventCategory) {
   return POINT_CATEGORY_OPTIONS.find((option) => option.value === category)?.label || category
 }
@@ -80,6 +88,7 @@ export default function PointsPage() {
   const [reviewFinalCategory, setReviewFinalCategory] = useState<EventCategory>('membership')
   const [reviewNote, setReviewNote] = useState('')
   const [reviewError, setReviewError] = useState('')
+  const [statusFilter, setStatusFilter] = useState<PointRequestStatus | 'all'>('all')
 
   const isPortalAdmin = user?.email?.toLowerCase() === PORTAL_ADMIN_EMAIL
   const activeTermId = access?.term_id
@@ -270,6 +279,10 @@ export default function PointsPage() {
     [rules, profile?.role]
   )
   const pointsRemaining = rulesPublished ? Math.max(0, requiredPoints - Number(values.total_points)) : 0
+  const displayedRequests = useMemo(
+    () => (isPortalAdmin && statusFilter !== 'all' ? requests.filter((request) => request.status === statusFilter) : requests),
+    [isPortalAdmin, requests, statusFilter]
+  )
 
   const submitRequest = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -423,26 +436,28 @@ export default function PointsPage() {
 
       {error && <div className="portal-alert-error">{error}</div>}
 
-      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[1.2fr_repeat(4,1fr)]">
-        <div className="portal-stat-card col-span-2 bg-[#221f1c] text-white lg:col-span-1">
-          <p className="text-sm text-stone-300">Semester total</p>
-          <p className="mt-5 text-4xl font-semibold">
-            {Number(values.total_points).toLocaleString()}
-            {rulesPublished && requiredPoints > 0 && (
-              <span className="text-lg font-normal text-stone-300"> / {requiredPoints.toLocaleString()}</span>
-            )}
-          </p>
-          <p className="mt-2 text-xs text-stone-300">
-            {rulesPublished ? (requiredPoints > 0 ? 'points toward this semester\'s requirement' : 'Requirement being finalized') : 'Requirement being finalized'}
-          </p>
-        </div>
-        {categoryCards.map((item) => (
-          <div key={item.value} className="portal-stat-card">
-            <p className="text-sm text-muted-foreground">{item.label}</p>
-            <p className="mt-5 text-3xl font-semibold">{item.points.toLocaleString()}</p>
+      {!isPortalAdmin && (
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[1.2fr_repeat(4,1fr)]">
+          <div className="portal-stat-card col-span-2 bg-[#221f1c] text-white lg:col-span-1">
+            <p className="text-sm text-stone-300">Semester total</p>
+            <p className="mt-5 text-4xl font-semibold">
+              {Number(values.total_points).toLocaleString()}
+              {rulesPublished && requiredPoints > 0 && (
+                <span className="text-lg font-normal text-stone-300"> / {requiredPoints.toLocaleString()}</span>
+              )}
+            </p>
+            <p className="mt-2 text-xs text-stone-300">
+              {rulesPublished ? (requiredPoints > 0 ? 'points toward this semester\'s requirement' : 'Requirement being finalized') : 'Requirement being finalized'}
+            </p>
           </div>
-        ))}
-      </section>
+          {categoryCards.map((item) => (
+            <div key={item.value} className="portal-stat-card">
+              <p className="text-sm text-muted-foreground">{item.label}</p>
+              <p className="mt-5 text-3xl font-semibold">{item.points.toLocaleString()}</p>
+            </div>
+          ))}
+        </section>
+      )}
 
       {rulesPublished && requiredPoints > 0 && pointsRemaining > 0 && (
         <section className="portal-alert-warning p-5">
@@ -460,28 +475,46 @@ export default function PointsPage() {
         </section>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+      <div className={isPortalAdmin ? 'grid gap-6' : 'grid gap-6 xl:grid-cols-[1.25fr_0.75fr]'}>
+        {!isPortalAdmin && (
+          <section className="portal-panel">
+            <div className="portal-panel-header"><div><h2>Point history</h2><p>Every approved source for this semester.</p></div><button onClick={() => void loadPoints()} className="portal-icon-button" aria-label="Refresh"><RefreshCw className="h-4 w-4" /></button></div>
+            {loading ? <div className="portal-loading"><Loader2 className="animate-spin" /> Loading points…</div> : ledger.length === 0 ? (
+              <div className="portal-empty compact"><FileText className="h-7 w-7" /><h3>No points yet</h3><p>Your new semester starts at zero. Prior semesters remain archived.</p></div>
+            ) : (
+              <div className="divide-y divide-border">
+                {ledger.map((entry) => (
+                  <div key={entry.id} className="flex items-center gap-4 py-4">
+                    <div className="min-w-0 flex-1"><p className="truncate font-medium">{entry.note || categoryLabel(entry.category)}</p><p className="mt-1 text-xs text-muted-foreground">{categoryLabel(entry.category)} · {new Date(entry.occurred_at).toLocaleDateString()}</p></div>
+                    <span className={`font-semibold ${Number(entry.points) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{Number(entry.points) > 0 ? '+' : ''}{entry.points}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="portal-panel">
-          <div className="portal-panel-header"><div><h2>Point history</h2><p>Every approved source for this semester.</p></div><button onClick={() => void loadPoints()} className="portal-icon-button" aria-label="Refresh"><RefreshCw className="h-4 w-4" /></button></div>
-          {loading ? <div className="portal-loading"><Loader2 className="animate-spin" /> Loading points…</div> : ledger.length === 0 ? (
-            <div className="portal-empty compact"><FileText className="h-7 w-7" /><h3>No points yet</h3><p>Your new semester starts at zero. Prior semesters remain archived.</p></div>
-          ) : (
-            <div className="divide-y divide-border">
-              {ledger.map((entry) => (
-                <div key={entry.id} className="flex items-center gap-4 py-4">
-                  <div className="min-w-0 flex-1"><p className="truncate font-medium">{entry.note || categoryLabel(entry.category)}</p><p className="mt-1 text-xs text-muted-foreground">{categoryLabel(entry.category)} · {new Date(entry.occurred_at).toLocaleDateString()}</p></div>
-                  <span className={`font-semibold ${Number(entry.points) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{Number(entry.points) > 0 ? '+' : ''}{entry.points}</span>
-                </div>
+          <div className="portal-panel-header"><div><h2>{isPortalAdmin ? 'Review queue' : 'Point requests'}</h2>{!isPortalAdmin && <p>Track requests you submitted or that someone submitted for you.</p>}</div></div>
+          {isPortalAdmin && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {statusFilterTabs.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.value)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                    statusFilter === tab.value ? 'border-foreground bg-foreground text-background' : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {tab.label} {tab.value === 'all' ? `(${requests.length})` : `(${requests.filter((request) => request.status === tab.value).length})`}
+                </button>
               ))}
             </div>
           )}
-        </section>
-
-        <section className="portal-panel">
-          <div className="portal-panel-header"><div><h2>{isPortalAdmin ? 'Review queue' : 'Point requests'}</h2><p>{isPortalAdmin ? 'Review the beneficiary, submitter, and proof before awarding points.' : 'Track requests you submitted or that someone submitted for you.'}</p></div></div>
-          {requests.length === 0 ? <div className="portal-empty compact"><BadgeCheck className="h-7 w-7" /><h3>All clear</h3><p>{isPortalAdmin ? 'There are no point requests to review.' : 'No requests have been submitted by you or for you.'}</p></div> : (
+          {displayedRequests.length === 0 ? <div className="portal-empty compact"><BadgeCheck className="h-7 w-7" /><h3>All clear</h3><p>{isPortalAdmin ? 'There are no point requests to review.' : 'No requests have been submitted by you or for you.'}</p></div> : (
             <div className="space-y-3">
-              {requests.map((request) => (
+              {displayedRequests.map((request) => (
                 <article key={request.id} className="rounded-xl border border-border p-4">
                   <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between"><div><p className="font-medium">For {memberNames[request.user_id] || (request.user_id === user?.id ? 'you' : 'Member')}</p><p className="mt-1 text-sm text-muted-foreground">{request.status === 'approved' ? request.final_points : request.requested_points} {request.status === 'approved' ? 'awarded' : 'requested'} · {categoryLabel(request.status === 'approved' && request.final_category ? request.final_category : request.suggested_category)}</p>{request.event_id && <p className="mt-1 text-xs text-muted-foreground">Event: {eventTitles[request.event_id] || 'Loading…'}</p>}{request.submitted_by && request.submitted_by !== request.user_id && <p className="mt-1 text-xs text-muted-foreground">Submitted by {memberNames[request.submitted_by] || (request.submitted_by === user?.id ? 'you' : 'another member')}</p>}</div><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[request.status]}`}>{request.status.replace('_', ' ')}</span></div>
                   <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">{request.note}</p>
