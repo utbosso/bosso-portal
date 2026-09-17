@@ -1837,92 +1837,22 @@ function PointsBreakdownTab() {
         email: emailById.get(member.id) || '',
       }))
 
-      // Canonical term ledger. Every member and admin view derives from these
-      // same rows; the legacy calculation below is only a pre-migration fallback.
-      const { data: currentTerm, error: currentTermError } = await supabase
-        .from('academic_terms')
-        .select('id, points_rules_status')
-        .eq('status', 'current')
-        .maybeSingle()
-
-      if (!currentTermError && currentTerm) {
-        const [summariesResult, ledgerResult, rulesResult] = await Promise.all([
-          supabase.from('member_term_point_summary').select('*').eq('term_id', currentTerm.id),
-          supabase
-            .from('point_ledger')
-            .select('*')
-            .eq('term_id', currentTerm.id)
-            .is('voided_at', null)
-            .order('occurred_at', { ascending: false }),
-          supabase.from('term_point_rules').select('*').eq('term_id', currentTerm.id),
-        ])
-
-        if (!summariesResult.error && !ledgerResult.error && !rulesResult.error) {
-          const summariesByUser = new Map((summariesResult.data || []).map((row) => [row.user_id, row]))
-          const sourcesByUser = new Map<string, UserPointsBreakdown['source_breakdown']>()
-          const requiredByRole: Record<string, number> = {}
-          for (const rule of rulesResult.data || []) {
-            const role = (rule as any).position_role as string
-            requiredByRole[role] = (requiredByRole[role] || 0) + Number(rule.minimum_points || 0)
-          }
-          setRequirementsPublished(currentTerm.points_rules_status === 'published')
-          setRequiredPointsByRole(requiredByRole)
-
-          for (const entry of ledgerResult.data || []) {
-            const sources = sourcesByUser.get(entry.user_id) || {
-              membership: [],
-              professional_education: [],
-              social: [],
-              philanthropy: [],
-              uncategorized: [],
-            }
-            sources[entry.category as EventCategory].push({
-              id: entry.id,
-              title: entry.note || entry.source_type.replaceAll('_', ' '),
-              points: Number(entry.points || 0),
-              timestamp: entry.occurred_at,
-            })
-            sourcesByUser.set(entry.user_id, sources)
-          }
-
-          const canonicalBreakdown: UserPointsBreakdown[] = users.map((member) => {
-            const summary = summariesByUser.get(member.id)
-            const categories = {
-              membership: Number(summary?.membership_points || 0),
-              professional_education: Number(summary?.professional_education_points || 0),
-              social: Number(summary?.social_points || 0),
-              philanthropy: Number(summary?.philanthropy_points || 0),
-            }
-            const total = Number(summary?.total_points || 0)
-            const requirementsPublished = currentTerm.points_rules_status === 'published'
-            const meetsRequirement = total >= (requiredByRole[member.role] || 0)
-
-            return {
-              user_id: member.id,
-              full_name: member.full_name,
-              email: member.email,
-              role: member.role,
-              total_points: total,
-              membership_points: categories.membership,
-              professional_points: categories.professional_education,
-              social_points: categories.social,
-              philanthropy_points: categories.philanthropy,
-              uncategorized_points: 0,
-              is_active: requirementsPublished && meetsRequirement,
-              source_breakdown: sourcesByUser.get(member.id) || {
-                membership: [],
-                professional_education: [],
-                social: [],
-                philanthropy: [],
-                uncategorized: [],
-              },
-            }
-          })
-
-          setPointsData(canonicalBreakdown)
-          setLastUpdatedAt(new Date())
-          return
-        }
+      // Canonical term ledger, fetched server-side under the service role.
+      // This used to run as direct client queries against
+      // member_term_point_summary/point_ledger with no user_id filter -
+      // correct only if RLS grants this admin session broad read access
+      // across every member's rows, which is not something to assume from
+      // the client. Server-side sidesteps the question entirely; the legacy
+      // calculation below is now only a fallback if this route itself fails
+      // (e.g. no current term configured yet).
+      const breakdownResponse = await fetch('/api/admin/points-breakdown')
+      if (breakdownResponse.ok) {
+        const result = await breakdownResponse.json()
+        setRequirementsPublished(Boolean(result.requirementsPublished))
+        setRequiredPointsByRole(result.requiredPointsByRole || {})
+        setPointsData((result.pointsData || []) as UserPointsBreakdown[])
+        setLastUpdatedAt(new Date())
+        return
       }
 
       const [attendanceResult, adjustmentsResult] = await Promise.all([
