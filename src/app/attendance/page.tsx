@@ -108,92 +108,10 @@ export default function AttendancePage() {
     setError(null)
 
     try {
-      const { members } = await fetchCurrentMemberDirectory()
-      const eligibleMembers = members.filter((member) => member.role !== 'admin')
-      const eligibleIds = eligibleMembers.map((member) => member.id)
-      if (eligibleIds.length === 0) {
-        setMemberStats([])
-        return
-      }
-
-      const { data: profileEmails, error: usersError } = await supabase
-        .from('profiles')
-        .select('id, email')
-        .in('id', eligibleIds)
-
-      if (usersError) throw new Error(`Failed to fetch member emails: ${usersError.message}`)
-      const emailById = new Map((profileEmails || []).map((member) => [member.id, member.email]))
-
-      // Fetch all attendance records
-      let allAttendanceQuery: any = supabase
-        .from('attendance_records')
-        .select('user_id, points_earned')
-      if (schemaReady && access?.term_id) allAttendanceQuery = allAttendanceQuery.eq('term_id', access.term_id)
-      const { data: allAttendance, error: attendanceError } = await allAttendanceQuery
-
-      if (attendanceError) {
-        console.error('Error fetching attendance:', attendanceError)
-        throw new Error(`Failed to fetch attendance: ${attendanceError.message}`)
-      }
-
-      // Fetch all adjustments
-      let allAdjustmentsQuery: any = supabase
-        .from('points_adjustments')
-        .select('user_id, points')
-      if (schemaReady && access?.term_id) allAdjustmentsQuery = allAdjustmentsQuery.eq('term_id', access.term_id)
-      const { data: allAdjustments, error: adjustError } = await allAdjustmentsQuery
-
-      if (adjustError) {
-        console.error('Error fetching adjustments:', adjustError)
-        throw new Error(`Failed to fetch adjustments: ${adjustError.message}`)
-      }
-
-      // Fetch total events with attendance tracking
-      let trackedEventsQuery: any = supabase
-        .from('events')
-        .select('id')
-        .eq('track_attendance', true)
-      if (schemaReady && access?.term_id) trackedEventsQuery = trackedEventsQuery.eq('term_id', access.term_id).is('archived_at', null)
-      const { data: events, error: eventsError } = await trackedEventsQuery
-
-      if (eventsError) {
-        console.error('Error fetching events:', eventsError)
-        throw new Error(`Failed to fetch events: ${eventsError.message}`)
-      }
-
-      const totalEvents = events?.length || 0
-
-      const summaryByUser = new Map<string, number>()
-      if (schemaReady && access?.term_id) {
-        const { data: summaries } = await supabase
-          .from('member_term_point_summary')
-          .select('user_id, total_points')
-          .eq('term_id', access.term_id)
-        for (const summary of summaries || []) summaryByUser.set(summary.user_id, Number(summary.total_points || 0))
-      }
-
-      // Calculate attendance rates and use the canonical ledger for totals.
-      const stats: MemberStats[] = eligibleMembers.map(user => {
-        const userAttendance = ((allAttendance || []) as any[]).filter((a: any) => a.user_id === user.id)
-        const userAdjustments = ((allAdjustments || []) as any[]).filter((a: any) => a.user_id === user.id)
-
-        const attendancePoints = userAttendance.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0)
-        const adjustmentPoints = userAdjustments.reduce((sum: number, a: any) => sum + a.points, 0)
-        const eventsAttended = userAttendance.length
-        const attendanceRate = totalEvents > 0 ? (eventsAttended / totalEvents) * 100 : 0
-
-        return {
-          user_id: user.id,
-          full_name: user.full_name,
-          email: emailById.get(user.id) || '',
-          role: user.role,
-          total_points: summaryByUser.has(user.id) ? summaryByUser.get(user.id)! : attendancePoints + adjustmentPoints,
-          events_attended: eventsAttended,
-          attendance_rate: attendanceRate,
-        }
-      })
-
-      setMemberStats(stats)
+      const response = await fetch('/api/admin/attendance?view=members')
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to load attendance data.')
+      setMemberStats(result.memberStats || [])
     } catch (err: any) {
       console.error('Error fetching admin data:', err)
       setError(err.message || 'Failed to load attendance data.')
@@ -207,52 +125,10 @@ export default function AttendancePage() {
     setError(null)
 
     try {
-      // Fetch all events with attendance tracking
-      let eventsQuery: any = supabase
-        .from('events')
-        .select('id, title, start_at, point_value')
-        .eq('track_attendance', true)
-      if (schemaReady && access?.term_id) {
-        eventsQuery = eventsQuery.eq('term_id', access.term_id).is('archived_at', null)
-      }
-      const { data: events, error: eventsError } = await eventsQuery.order('start_at', { ascending: false })
-
-      if (eventsError) {
-        console.error('Error fetching events:', eventsError)
-        throw new Error(`Failed to fetch events: ${eventsError.message}`)
-      }
-
-      // Fetch all attendance records with user info
-      let allAttendanceQuery: any = supabase
-        .from('attendance_records')
-        .select(`
-          event_id,
-          user:profiles(full_name)
-        `)
-      if (schemaReady && access?.term_id) allAttendanceQuery = allAttendanceQuery.eq('term_id', access.term_id)
-      const { data: allAttendance, error: attendanceError } = await allAttendanceQuery
-
-      if (attendanceError) {
-        console.error('Error fetching attendance:', attendanceError)
-        throw new Error(`Failed to fetch attendance: ${attendanceError.message}`)
-      }
-
-      // Calculate stats for each event
-      const stats: EventStats[] = (events || []).map((event: any) => {
-        const attendees = (allAttendance || []).filter((a: any) => a.event_id === event.id)
-        const attendeeNames = attendees.map((a: any) => a.user?.full_name || 'Unknown').filter(Boolean)
-
-        return {
-          event_id: event.id,
-          title: event.title,
-          start_at: event.start_at,
-          point_value: event.point_value || 0,
-          total_attendees: attendees.length,
-          attendee_names: attendeeNames,
-        }
-      })
-
-      setEventStats(stats)
+      const response = await fetch('/api/admin/attendance?view=events')
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to load event stats.')
+      setEventStats(result.eventStats || [])
     } catch (err: any) {
       console.error('Error fetching event stats:', err)
       setError(err.message || 'Failed to load event stats.')
@@ -263,30 +139,13 @@ export default function AttendancePage() {
 
   const fetchMemberAttendance = async (userId: string) => {
     try {
-      // Fetch attendance records
-      let attendanceQuery: any = supabase
-        .from('attendance_records')
-        .select(`
-          *,
-          event:events(id, title, start_at, point_value)
-        `)
-        .eq('user_id', userId)
-      if (schemaReady && access?.term_id) attendanceQuery = attendanceQuery.eq('term_id', access.term_id)
-      const { data: attendance, error: attendanceError } = await attendanceQuery.order('checked_in_at', { ascending: false })
-
-      if (attendanceError) throw attendanceError
+      const response = await fetch(`/api/admin/attendance?view=member-history&userId=${encodeURIComponent(userId)}`)
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to load member attendance.')
+      const attendance = result.attendance || []
+      const adjustments = result.adjustments || []
 
       setMemberAttendance((attendance as AttendanceWithEvent[]) || [])
-
-      // Fetch manual adjustments
-      let adjustmentsQuery: any = supabase
-        .from('points_adjustments')
-        .select('*')
-        .eq('user_id', userId)
-      if (schemaReady && access?.term_id) adjustmentsQuery = adjustmentsQuery.eq('term_id', access.term_id)
-      const { data: adjustments, error: adjustError } = await adjustmentsQuery.order('created_at', { ascending: false })
-
-      if (adjustError) throw adjustError
 
       // Create combined history
       const history: AttendanceHistoryItem[] = [
@@ -334,29 +193,10 @@ export default function AttendancePage() {
 
     setDeletingRecordId(item.id)
     try {
-      if (item.type === 'event') {
-        const { data, error } = await supabase
-          .from('attendance_records')
-          .delete()
-          .eq('id', item.id)
-          .select('id')
-
-        if (error) throw error
-        if (!data || data.length === 0) {
-          throw new Error('Delete blocked by permissions or record not found.')
-        }
-      } else {
-        const { data, error } = await supabase
-          .from('points_adjustments')
-          .delete()
-          .eq('id', item.id)
-          .select('id')
-
-        if (error) throw error
-        if (!data || data.length === 0) {
-          throw new Error('Delete blocked by permissions or record not found. Run the points_adjustments delete policy migration.')
-        }
-      }
+      const type = item.type === 'event' ? 'attendance' : 'adjustment'
+      const response = await fetch(`/api/admin/attendance?type=${type}&id=${encodeURIComponent(item.id)}`, { method: 'DELETE' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Delete blocked by permissions or record not found.')
 
       await fetchAdminData()
       await fetchMemberAttendance(selectedMember)
@@ -376,16 +216,9 @@ export default function AttendancePage() {
 
     setDeletingRecordId(attendanceRecordId)
     try {
-      const { data, error } = await supabase
-        .from('attendance_records')
-        .delete()
-        .eq('id', attendanceRecordId)
-        .select('id')
-
-      if (error) throw error
-      if (!data || data.length === 0) {
-        throw new Error('Delete blocked by permissions or record not found.')
-      }
+      const response = await fetch(`/api/admin/attendance?type=attendance&id=${encodeURIComponent(attendanceRecordId)}`, { method: 'DELETE' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Delete blocked by permissions or record not found.')
 
       await fetchAdminData()
       await fetchEventStats()
@@ -400,18 +233,10 @@ export default function AttendancePage() {
 
   const fetchEventAttendees = async (eventId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('attendance_records')
-        .select(`
-          *,
-          user:profiles(id, full_name, email, role)
-        `)
-        .eq('event_id', eventId)
-        .order('checked_in_at', { ascending: false })
-
-      if (error) throw error
-
-      setEventAttendees(data || [])
+      const response = await fetch(`/api/admin/attendance?view=event-attendees&eventId=${encodeURIComponent(eventId)}`)
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to load event attendees.')
+      setEventAttendees(result.attendees || [])
     } catch (err: any) {
       console.error('Error fetching event attendees:', err)
       setError('Failed to load event attendees.')
