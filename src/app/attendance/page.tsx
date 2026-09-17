@@ -40,7 +40,7 @@ type PointsAdjustment = {
 
 type AttendanceHistoryItem = {
   id: string
-  type: 'event' | 'adjustment'
+  type: 'event' | 'adjustment' | 'task'
   title: string
   points: number
   timestamp: string
@@ -144,6 +144,7 @@ export default function AttendancePage() {
       if (!response.ok) throw new Error(result.error || 'Failed to load member attendance.')
       const attendance = result.attendance || []
       const adjustments = result.adjustments || []
+      const taskPoints = result.taskPoints || []
 
       setMemberAttendance((attendance as AttendanceWithEvent[]) || [])
 
@@ -170,6 +171,16 @@ export default function AttendancePage() {
           points: adj.points,
           timestamp: adj.created_at,
           reason: adj.reason
+        })),
+        // Add approved task completions (point_ledger, source_type='task' -
+        // this is where they actually land now, not points_adjustments)
+        ...(taskPoints || []).map((entry: any) => ({
+          id: entry.id,
+          type: 'task' as const,
+          title: entry.note || 'Task Points Awarded',
+          points: entry.points,
+          timestamp: entry.occurred_at,
+          reason: null
         }))
       ]
 
@@ -186,6 +197,10 @@ export default function AttendancePage() {
   const handleDeletePointsRecord = async (item: AttendanceHistoryItem) => {
     if (!isUserAdmin) return
     if (!selectedMember) return
+    if (item.type === 'task') {
+      setError('Task-awarded points can\'t be removed here - use the task itself (Tasks page) to undo the approval.')
+      return
+    }
 
     const label = item.type === 'event' ? 'attendance record' : 'points adjustment'
     const confirmed = window.confirm(`Delete this ${label}? This will remove its points impact.`)
@@ -892,6 +907,11 @@ export default function AttendancePage() {
                             Manual
                           </span>
                         )}
+                        {item.type === 'task' && (
+                          <span className="px-2 py-0.5 text-[10px] rounded-full font-medium uppercase tracking-wide bg-primary/20 text-primary">
+                            Task
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {new Date(item.timestamp).toLocaleString()}
@@ -908,14 +928,16 @@ export default function AttendancePage() {
                       }`}>
                         {item.points > 0 ? '+' : ''}{item.points} pts
                       </p>
-                      <button
-                        onClick={() => handleDeletePointsRecord(item)}
-                        disabled={deletingRecordId === item.id}
-                        className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        {deletingRecordId === item.id ? 'Removing...' : 'Remove'}
-                      </button>
+                      {item.type !== 'task' && (
+                        <button
+                          onClick={() => handleDeletePointsRecord(item)}
+                          disabled={deletingRecordId === item.id}
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          {deletingRecordId === item.id ? 'Removing...' : 'Remove'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))

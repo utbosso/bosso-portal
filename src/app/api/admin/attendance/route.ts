@@ -137,7 +137,23 @@ export async function GET(request: Request) {
     const { data: adjustments, error: adjustError } = await adjustmentsQuery.order('created_at', { ascending: false })
     if (adjustError) return NextResponse.json({ error: adjustError.message }, { status: 500 })
 
-    return NextResponse.json({ attendance: attendance || [], adjustments: adjustments || [] })
+    // Task-completion points (award-points route) go straight into
+    // point_ledger with source_type='task' - never attendance_records or
+    // points_adjustments - so without this, approved task points were
+    // completely missing from a member's history here even though the
+    // total_points column (member view, via member_term_point_summary)
+    // already correctly included them.
+    let taskPointsQuery = admin
+      .from('point_ledger')
+      .select('id, points, note, occurred_at, voided_at')
+      .eq('user_id', userId)
+      .eq('source_type', 'task')
+      .is('voided_at', null)
+    if (termId) taskPointsQuery = taskPointsQuery.eq('term_id', termId)
+    const { data: taskPoints, error: taskPointsError } = await taskPointsQuery.order('occurred_at', { ascending: false })
+    if (taskPointsError) return NextResponse.json({ error: taskPointsError.message }, { status: 500 })
+
+    return NextResponse.json({ attendance: attendance || [], adjustments: adjustments || [], taskPoints: taskPoints || [] })
   }
 
   if (view === 'event-attendees') {
