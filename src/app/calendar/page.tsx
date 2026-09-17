@@ -1016,7 +1016,6 @@ View on portal: ${window.location.origin}/calendar`)
       <SectionPageHeader
         eyebrow="Organization"
         title="Events & Calendar"
-        description="See semester events, deadlines, attendance points, and assigned work in one schedule."
         note={(
           <span className="inline-flex items-start gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 font-medium text-foreground">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />

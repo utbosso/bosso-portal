@@ -277,7 +277,6 @@ export default function LearningHubPage() {
       <SectionPageHeader
         eyebrow="Career"
         title="Learning hub"
-        description="Find practical guides, tools, courses, and templates shared by BOSSO members."
         icon={BookOpen}
         actions={<button
           onClick={() => setShowForm(true)}

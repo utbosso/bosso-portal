@@ -155,7 +155,6 @@ export default function OpportunitiesPage() {
       <SectionPageHeader
         eyebrow="Career"
         title="Opportunities"
-        description="Discover roles shared by the BOSSO community and move the right ones into your application pipeline."
         icon={Briefcase}
         actions={<Link href="/applications" className="portal-button-secondary">View my pipeline</Link>}
       />

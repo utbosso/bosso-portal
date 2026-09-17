@@ -417,7 +417,6 @@ export default function PointsPage() {
         <div>
           <p className="portal-eyebrow">{access?.term_name || 'Current semester'}</p>
           <h1 className="portal-title">Points</h1>
-          <p className="portal-subtitle">One total, one breakdown, and a complete review history.</p>
         </div>
         <button onClick={() => setShowRequestForm(true)} className="portal-button w-full justify-center sm:w-auto"><Plus className="h-4 w-4" /> Request points</button>
       </header>

@@ -516,7 +516,6 @@ export default function DocumentsPage() {
       <SectionPageHeader
         eyebrow="Organization"
         title="Internal docs"
-        description="A term-scoped home for shared organization resources and your private working files."
         icon={Folder}
         actions={viewMode === 'org' ? (
           (isBoard || isUserAdmin) && (

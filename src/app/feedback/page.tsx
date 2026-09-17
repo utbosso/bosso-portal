@@ -287,7 +287,6 @@ export default function FeedbackPage() {
       <SectionPageHeader
         eyebrow="Member tools"
         title="Feedback"
-        description="Share ideas, event feedback, and concerns with the BOSSO team. Anonymous submissions stay anonymous."
         icon={MessageSquare}
         actions={<>
           {isAdmin && filteredFeedback.length > 0 && (

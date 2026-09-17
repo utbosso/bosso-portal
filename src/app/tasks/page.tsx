@@ -941,7 +941,6 @@ export default function TasksPage() {
       <SectionPageHeader
         eyebrow="Organization"
         title="Action items"
-        description="A focused queue for assigned work, progress updates, submission, and approval."
         icon={ListChecks}
         actions={<><button onClick={() => setShowPersonalCreate(true)} className="portal-button-secondary"><UserRound className="h-4 w-4" /> Personal item</button>{canManage && <button onClick={() => setShowCreate(true)} className="portal-button"><Plus className="h-4 w-4" /> Assign item</button>}</>}
       />

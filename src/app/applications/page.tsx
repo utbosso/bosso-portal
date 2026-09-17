@@ -394,7 +394,6 @@ export default function ApplicationsPage() {
       <SectionPageHeader
         eyebrow="Career"
         title="My applications"
-        description="Track every opportunity from saved lead through interview and offer, with your working documents close by."
         icon={ClipboardCheck}
         actions={<button
           type="button"

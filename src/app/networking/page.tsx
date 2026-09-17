@@ -292,7 +292,6 @@ export default function NetworkingPage() {
       <SectionPageHeader
         eyebrow="Career"
         title="Networking & alumni"
-        description="Build a consent-based directory of alumni, recruiters, mentors, and industry contacts."
         icon={Users}
         actions={<button
           onClick={() => setShowForm(true)}

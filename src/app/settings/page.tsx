@@ -95,7 +95,7 @@ export default function SettingsPage() {
 
   return (
     <div className="portal-page max-w-4xl space-y-6">
-      <SectionPageHeader eyebrow="Account" title="Settings" description="Manage your profile, appearance, and account security." icon={SettingsIcon} />
+      <SectionPageHeader eyebrow="Account" title="Settings" icon={SettingsIcon} />
 
       {/* Profile Information */}
       <div className="portal-panel space-y-4">

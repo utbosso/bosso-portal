@@ -507,7 +507,6 @@ export default function SemesterSetupPage() {
             <h1 className="portal-title">Semester setup</h1>
             <SemesterRolloverGuide />
           </div>
-          <p className="portal-subtitle">A repeatable rollover workflow for access, dues, positions, content, and points.</p>
         </div>
         <button onClick={() => void loadSetup()} className="portal-button-secondary"><RefreshCw className="h-4 w-4" /> Refresh</button>
       </header>

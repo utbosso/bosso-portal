@@ -444,7 +444,6 @@ export default function AttendancePage() {
       <SectionPageHeader
         eyebrow="Admin"
         title="Attendance management"
-        description="Review attendance records, export results, and make documented point adjustments."
         icon={ClipboardCheck}
         actions={<>
           <button

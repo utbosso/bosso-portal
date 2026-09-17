@@ -6,7 +6,7 @@ import type { LucideIcon } from 'lucide-react'
 type SectionPageHeaderProps = {
   eyebrow: string
   title: string
-  description: string
+  description?: string
   note?: ReactNode
   icon: LucideIcon
   actions?: ReactNode
@@ -33,7 +33,7 @@ export default function SectionPageHeader({
             <p className="portal-eyebrow">{eyebrow}</p>
             <h1 className="portal-title break-words">{title}</h1>
             <div className="mt-5 flex flex-col gap-4 sm:mt-6 sm:flex-row sm:items-end sm:justify-between">
-              <p className="min-w-0 text-sm leading-6 text-muted-foreground sm:text-base sm:leading-7">{description}</p>
+              {description && <p className="min-w-0 text-sm leading-6 text-muted-foreground sm:text-base sm:leading-7">{description}</p>}
               {actions && (
                 <div className="flex w-full shrink-0 flex-wrap gap-2 [&>*]:flex-1 sm:w-auto sm:justify-end sm:[&>*]:flex-none">
                   {actions}
@@ -56,7 +56,7 @@ export default function SectionPageHeader({
           <div>
             <p className="portal-eyebrow">{eyebrow}</p>
             <h1 className="portal-title">{title}</h1>
-            <p className="portal-subtitle">{description}</p>
+            {description && <p className="portal-subtitle">{description}</p>}
             {note && <div className="mt-2 text-xs leading-5 text-muted-foreground">{note}</div>}
           </div>
         </div>

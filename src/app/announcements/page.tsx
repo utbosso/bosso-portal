@@ -366,7 +366,6 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
       <SectionPageHeader
         eyebrow="Organization"
         title="Announcements"
-        description="A focused semester feed for decisions, deadlines, and member updates."
         icon={Megaphone}
         actions={canPost ? (
           <button
