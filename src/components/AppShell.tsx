@@ -34,6 +34,7 @@ import {
   Instagram,
   Slack,
   Shield,
+  X,
 } from 'lucide-react'
 
 const supabase = createClient()
@@ -543,6 +544,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       try {
         const allNotifications: any[] = []
 
+        const { data: dismissedRows } = await supabase
+          .from('dismissed_notifications')
+          .select('notification_key')
+          .eq('user_id', profile.id)
+        const dismissedKeys = new Set((dismissedRows ?? []).map((row: any) => row.notification_key))
+
         // 1. Unread announcements
         let notificationAnnouncementQuery: any = supabase
           .from('announcements')
@@ -628,15 +635,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           })
         }
 
+        const visibleNotifications = allNotifications.filter((n) => !dismissedKeys.has(n.id))
+
         // Sort by time (newest first) and unread status
-        allNotifications.sort((a, b) => {
+        visibleNotifications.sort((a, b) => {
           if (a.unread && !b.unread) return -1
           if (!a.unread && b.unread) return 1
           return b.time.getTime() - a.time.getTime()
         })
 
-        setNotifications(allNotifications)
-        setNotificationCount(allNotifications.filter(n => n.unread).length)
+        setNotifications(visibleNotifications)
+        setNotificationCount(visibleNotifications.filter(n => n.unread).length)
       } catch (error) {
         console.error('Error fetching notifications:', error)
       }
@@ -647,6 +656,58 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const interval = setInterval(fetchNotifications, 30000)
     return () => clearInterval(interval)
   }, [profile, pathname, access?.term_id, schemaReady, accessLoading])
+
+  const dismissNotification = async (notif: any) => {
+    if (!profile) return
+    setNotifications((prev) => prev.filter((n) => n.id !== notif.id))
+    if (notif.unread) setNotificationCount((prev) => Math.max(0, prev - 1))
+
+    await supabase
+      .from('dismissed_notifications')
+      .upsert({ user_id: profile.id, notification_key: notif.id }, { onConflict: 'user_id,notification_key' })
+
+    // Keep the separate places that independently track "unread" (the task
+    // count badge, the Announcements nav badge) in sync with the dismissal,
+    // so they don't disagree with what the bell dropdown just showed.
+    if (notif.type === 'task' && notif.notificationId) {
+      await supabase.from('task_notifications').update({ is_read: true }).eq('id', notif.notificationId)
+      if (notif.unread) setTaskCount((prev) => Math.max(0, prev - 1))
+    } else if (notif.type === 'announcement') {
+      const announcementId = notif.id.replace('announcement-', '')
+      await supabase
+        .from('announcement_reads')
+        .upsert({ announcement_id: announcementId, user_id: profile.id, read_at: new Date().toISOString() }, { onConflict: 'announcement_id,user_id' })
+      setUnreadCount((prev) => Math.max(0, prev - 1))
+    }
+  }
+
+  const dismissAllNotifications = async () => {
+    if (!profile || notifications.length === 0) return
+    const toDismiss = [...notifications]
+    setNotifications([])
+    setNotificationCount(0)
+
+    await supabase
+      .from('dismissed_notifications')
+      .upsert(toDismiss.map((n) => ({ user_id: profile.id, notification_key: n.id })), { onConflict: 'user_id,notification_key' })
+
+    const taskNotificationIds = toDismiss.filter((n) => n.type === 'task' && n.notificationId).map((n) => n.notificationId)
+    if (taskNotificationIds.length) {
+      await supabase.from('task_notifications').update({ is_read: true }).in('id', taskNotificationIds)
+      setTaskCount((prev) => Math.max(0, prev - taskNotificationIds.length))
+    }
+
+    const announcementIds = toDismiss.filter((n) => n.type === 'announcement').map((n) => n.id.replace('announcement-', ''))
+    if (announcementIds.length) {
+      await supabase
+        .from('announcement_reads')
+        .upsert(
+          announcementIds.map((id) => ({ announcement_id: id, user_id: profile.id, read_at: new Date().toISOString() })),
+          { onConflict: 'announcement_id,user_id' }
+        )
+      setUnreadCount((prev) => Math.max(0, prev - announcementIds.length))
+    }
+  }
 
   // Don't wrap login/signup with shell
   if (isAuthPage) {
@@ -1080,13 +1141,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {/* Notifications Dropdown */}
             {showNotifications && (
               <div className="fixed inset-x-4 top-16 z-50 mt-2 flex max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-lg border border-primary/20 bg-dark-100 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:max-h-[600px] sm:w-96">
-                <div className="p-4 border-b border-primary/20 flex items-center justify-between">
+                <div className="p-4 border-b border-primary/20 flex items-center justify-between gap-3">
                   <h3 className="text-lg font-semibold text-foreground">Notifications</h3>
-                  {notificationCount > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {notificationCount} unread
-                    </span>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {notificationCount > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {notificationCount} unread
+                      </span>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void dismissAllNotifications()}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="overflow-y-auto flex-1">
@@ -1102,44 +1174,60 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         const timeAgo = getTimeAgo(notif.time)
 
                         return (
-                          <Link
+                          <div
                             key={notif.id}
-                            href={notif.href}
-                            onClick={async () => {
-                              setShowNotifications(false)
-
-                              // Mark task notification as read
-                              if (notif.type === 'task' && notif.notificationId && notif.unread) {
-                                await supabase
-                                  .from('task_notifications')
-                                  .update({ is_read: true })
-                                  .eq('id', notif.notificationId)
-                              }
-                            }}
-                            className={`flex gap-3 p-3 rounded-lg hover:bg-primary/10 transition-colors ${
+                            className={`group relative flex gap-3 rounded-lg transition-colors hover:bg-primary/10 ${
                               notif.unread ? 'bg-primary/5 border border-primary/20' : ''
                             }`}
                           >
-                            <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                              notif.unread ? 'text-primary' : 'text-muted-foreground'
-                            }`} />
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-medium truncate ${
-                                notif.unread ? 'text-foreground' : 'text-muted-foreground'
-                              }`}>
-                                {notif.title}
-                              </p>
-                              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                                {notif.message}
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {timeAgo}
-                              </p>
-                            </div>
-                            {notif.unread && (
-                              <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2" />
-                            )}
-                          </Link>
+                            <Link
+                              href={notif.href}
+                              onClick={async () => {
+                                setShowNotifications(false)
+
+                                // Mark task notification as read
+                                if (notif.type === 'task' && notif.notificationId && notif.unread) {
+                                  await supabase
+                                    .from('task_notifications')
+                                    .update({ is_read: true })
+                                    .eq('id', notif.notificationId)
+                                }
+                              }}
+                              className="flex flex-1 min-w-0 gap-3 p-3 pr-9"
+                            >
+                              <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                                notif.unread ? 'text-primary' : 'text-muted-foreground'
+                              }`} />
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium truncate ${
+                                  notif.unread ? 'text-foreground' : 'text-muted-foreground'
+                                }`}>
+                                  {notif.title}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                                  {notif.message}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {timeAgo}
+                                </p>
+                              </div>
+                              {notif.unread && (
+                                <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2" />
+                              )}
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void dismissNotification(notif)
+                              }}
+                              aria-label="Dismiss notification"
+                              className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-primary/20 hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         )
                       })}
                     </div>

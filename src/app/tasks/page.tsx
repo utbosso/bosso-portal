@@ -752,8 +752,15 @@ export default function TasksPage() {
         setSaving('')
         return
       }
-      setManagingReviewersTask((current) => (current ? { ...current, group_task_id: groupId } : current))
     }
+    // Built locally rather than read back from managingReviewersTask/
+    // selectedTask state - both are stale within this same call (state
+    // updates from setManagingReviewersTask/setSelectedTask don't apply
+    // until the next render), and loadDetails needs the real group_task_id
+    // right now to know to fetch the reviewer list at all. Without this,
+    // the very first reviewer added to a task that had no group yet loaded
+    // an empty reviewer list, since loadDetails read the old (null) id.
+    const updatedTask: TeamTask = { ...managingReviewersTask, group_task_id: groupId }
 
     const payload = newReviewerIds.map((reviewerId) => ({
       group_task_id: groupId,
@@ -765,8 +772,10 @@ export default function TasksPage() {
       setError(`Could not add reviewers: ${insertError.message}`)
     } else {
       setNewReviewerIds([])
+      setManagingReviewersTask(updatedTask)
+      setSelectedTask((current) => (current && current.id === updatedTask.id ? { ...current, group_task_id: groupId } : current))
       await loadTasks()
-      if (selectedTask) await loadDetails(selectedTask)
+      await loadDetails(updatedTask)
     }
     setSaving('')
   }
@@ -777,7 +786,7 @@ export default function TasksPage() {
     if (deleteError) setError(`Could not remove reviewer: ${deleteError.message}`)
     else {
       await loadTasks()
-      if (selectedTask) await loadDetails(selectedTask)
+      if (managingReviewersTask) await loadDetails(managingReviewersTask)
     }
     setSaving('')
   }
