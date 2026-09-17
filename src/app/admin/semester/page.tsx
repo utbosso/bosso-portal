@@ -144,6 +144,7 @@ function RoleMinimumsGrid({ value, onChange }: { value: RoleMinimums; onChange: 
                 <input
                   type="number"
                   min="0"
+                  step="0.5"
                   className="portal-input w-full max-w-[160px]"
                   value={value[position.value]}
                   onChange={(event) => onChange({ ...value, [position.value]: Number(event.target.value) })}

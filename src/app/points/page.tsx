@@ -541,7 +541,7 @@ export default function PointsPage() {
               <p className="mt-2 text-xs text-muted-foreground">Picking an event fills in the points and category below from that event's settings — you can still adjust them.</p>
             </label>
             <div className="mt-5 grid gap-5 sm:grid-cols-2">
-              <label><span className="portal-label">Points requested</span><input type="number" min="1" max="1000" step="0.5" value={requestedPoints} onChange={(event) => setRequestedPoints(event.target.value)} className="portal-input w-full" required /></label>
+              <label><span className="portal-label">Points requested</span><input type="number" min="0.5" max="1000" step="0.5" value={requestedPoints} onChange={(event) => setRequestedPoints(event.target.value)} className="portal-input w-full" required /></label>
               <label><span className="portal-label">Suggested category</span><select value={category} onChange={(event) => setCategory(event.target.value as EventCategory)} className="portal-input w-full">{POINT_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             </div>
             <label className="mt-5 block"><span className="portal-label">What did they complete?</span><textarea value={note} onChange={(event) => setNote(event.target.value)} minLength={3} maxLength={4000} rows={5} className="portal-input w-full resize-none" placeholder="Include the event, date, contribution, and any context the reviewer needs." required /></label>
@@ -570,7 +570,7 @@ export default function PointsPage() {
                   <span className="portal-label">Final points</span>
                   <input
                     type="number"
-                    min="1"
+                    min="0.5"
                     max="1000"
                     step="0.5"
                     autoFocus

@@ -767,7 +767,13 @@ export default function TasksPage() {
       reviewer_id: reviewerId,
       added_by: profile.id,
     }))
-    const { error: insertError } = await supabase.from('task_group_reviewers').insert(payload)
+    // Upsert rather than insert - re-selecting someone who's already a
+    // reviewer (e.g. the picker's exclusion list hadn't loaded yet, or the
+    // same person got picked twice) should be a harmless no-op, not a raw
+    // unique-constraint error surfaced to the admin.
+    const { error: insertError } = await supabase
+      .from('task_group_reviewers')
+      .upsert(payload, { onConflict: 'group_task_id,reviewer_id', ignoreDuplicates: true })
     if (insertError) {
       setError(`Could not add reviewers: ${insertError.message}`)
     } else {

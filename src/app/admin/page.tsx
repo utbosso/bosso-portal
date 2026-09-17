@@ -2535,7 +2535,7 @@ function PointsBreakdownTab() {
                 </label>
                 <input
                   type="number"
-                  min="1"
+                  min="0.5"
                   step="0.5"
                   value={pointsValue}
                   onChange={(e) => setPointsValue(parseFloat(e.target.value) || 0)}
