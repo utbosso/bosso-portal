@@ -883,9 +883,7 @@ export default function CalendarPage() {
 Event: ${event.title}
 Location: ${event.location || 'TBA'}
 Time: ${startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}
-
-${event.description || ''}
-
+${event.description ? `\nNotes: ${event.description}\n` : ''}
 Add to your calendar: ${calendarUrl}
 
 View on portal: ${window.location.origin}/calendar`)
