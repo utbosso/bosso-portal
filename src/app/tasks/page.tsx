@@ -325,16 +325,30 @@ export default function TasksPage() {
       task.group_task_id && task.assigned_by === profile?.id
         ? supabase
             .from('task_group_reviewers')
-            .select('id, group_task_id, reviewer_id, added_by, reviewer:profiles!task_group_reviewers_reviewer_id_fkey(id, full_name, role)')
+            .select('id, group_task_id, reviewer_id, added_by')
             .eq('group_task_id', task.group_task_id)
         : Promise.resolve({ data: [], error: null }),
     ])
-    setGroupReviewers(
-      ((reviewersResult.data || []) as any[]).map((row) => ({
-        ...row,
-        reviewer: Array.isArray(row.reviewer) ? row.reviewer[0] || null : row.reviewer,
-      })) as TaskGroupReviewer[]
-    )
+    if (reviewersResult.error) setError(`Reviewers could not be loaded: ${reviewersResult.error.message}`)
+    const reviewerRows = (reviewersResult.data || []) as any[]
+    // Plain fetch + separate profile lookup rather than an embedded
+    // relationship select - reviewer_id references auth.users, and guessing
+    // the wrong constraint name for that hop (task_group_reviewers had none
+    // of the tasks/task_updates tables' relationships already proven to
+    // work) silently returned an error that was never surfaced, so an
+    // added reviewer never showed up anywhere despite the row existing.
+    if (reviewerRows.length > 0) {
+      const { data: reviewerProfiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .in('id', reviewerRows.map((row) => row.reviewer_id))
+      const profileById = new Map((reviewerProfiles || []).map((p: any) => [p.id, p]))
+      setGroupReviewers(
+        reviewerRows.map((row) => ({ ...row, reviewer: profileById.get(row.reviewer_id) || null })) as TaskGroupReviewer[]
+      )
+    } else {
+      setGroupReviewers([])
+    }
 
     if (updatesResult.error) setError(`Updates could not be loaded: ${updatesResult.error.message}`)
     const loadedUpdates = ((updatesResult.data || []) as any[]).map((row) => ({
