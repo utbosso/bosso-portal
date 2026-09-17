@@ -89,6 +89,10 @@ export default function PointsPage() {
   const [reviewNote, setReviewNote] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [statusFilter, setStatusFilter] = useState<PointRequestStatus | 'all'>('all')
+  const [followUpPrompt, setFollowUpPrompt] = useState<PointRequest | null>(null)
+  const [followUpNote, setFollowUpNote] = useState('')
+  const [followUpError, setFollowUpError] = useState('')
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false)
 
   const isPortalAdmin = user?.email?.toLowerCase() === PORTAL_ADMIN_EMAIL
   const activeTermId = access?.term_id
@@ -416,6 +420,37 @@ export default function PointsPage() {
     await loadPoints()
   }
 
+  const openFollowUp = (request: PointRequest) => {
+    setFollowUpError('')
+    setFollowUpNote('')
+    setFollowUpPrompt(request)
+  }
+
+  const submitFollowUp = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!followUpPrompt) return
+    if (followUpNote.trim().length < 3) {
+      setFollowUpError('Add the information the reviewer asked for.')
+      return
+    }
+
+    setFollowUpSubmitting(true)
+    setFollowUpError('')
+    const response = await fetch('/api/points/respond-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: followUpPrompt.id, note: followUpNote.trim() }),
+    })
+    const payload = await response.json().catch(() => null)
+    setFollowUpSubmitting(false)
+    if (!response.ok) {
+      setFollowUpError(payload?.error || 'The follow-up could not be saved.')
+      return
+    }
+    setFollowUpPrompt(null)
+    await loadPoints()
+  }
+
   if (!schemaReady) {
     return (
       <div className="portal-page">
@@ -520,6 +555,9 @@ export default function PointsPage() {
                   <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">{request.note}</p>
                   {proofLinks[request.id] && <a href={proofLinks[request.id].url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-primary"><FileText className="h-3.5 w-3.5" /> View proof: {proofLinks[request.id].name}</a>}
                   {request.reviewer_note && <p className="mt-3 rounded-lg bg-muted p-3 text-xs">Admin: {request.reviewer_note}</p>}
+                  {!isPortalAdmin && request.status === 'needs_info' && (request.user_id === user?.id || request.submitted_by === user?.id) && (
+                    <div className="mt-4"><button onClick={() => openFollowUp(request)} className="portal-button-secondary small">Add more info</button></div>
+                  )}
                   {isPortalAdmin && ['pending', 'needs_info'].includes(request.status) && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button disabled={reviewingId === request.id} onClick={() => openReviewPrompt(request, 'approved')} className="portal-button small">Approve</button>
@@ -638,6 +676,45 @@ export default function PointsPage() {
               <button disabled={reviewingId === reviewPrompt.request.id} className="portal-button justify-center">
                 {reviewingId === reviewPrompt.request.id && <Loader2 className="h-4 w-4 animate-spin" />}
                 {reviewPrompt.status === 'approved' ? 'Approve & award points' : reviewPrompt.status === 'declined' ? 'Decline' : 'Send request'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {followUpPrompt && (
+        <div className="portal-modal-backdrop" onMouseDown={() => setFollowUpPrompt(null)}>
+          <form onSubmit={submitFollowUp} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-md">
+            <div className="portal-form-header">
+              <div>
+                <p className="portal-eyebrow">Respond to reviewer</p>
+                <h2>Add more info</h2>
+              </div>
+              <button type="button" onClick={() => setFollowUpPrompt(null)} className="portal-icon-button"><X className="h-5 w-5" /></button>
+            </div>
+
+            {followUpPrompt.reviewer_note && <p className="mt-4 rounded-lg bg-muted p-3 text-xs">Admin asked: {followUpPrompt.reviewer_note}</p>}
+
+            <label className="mt-5 block">
+              <span className="portal-label">Your follow-up</span>
+              <textarea
+                value={followUpNote}
+                onChange={(event) => setFollowUpNote(event.target.value)}
+                rows={4}
+                autoFocus
+                className="portal-input w-full resize-none"
+                required
+              />
+            </label>
+            <p className="mt-2 text-xs text-muted-foreground">This is added to your original request and moves it back to the review queue.</p>
+
+            {followUpError && <p className="mt-3 text-sm text-red-700">{followUpError}</p>}
+
+            <div className="portal-form-actions">
+              <button type="button" onClick={() => setFollowUpPrompt(null)} className="portal-button-secondary justify-center">Cancel</button>
+              <button disabled={followUpSubmitting} className="portal-button justify-center">
+                {followUpSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Send follow-up
               </button>
             </div>
           </form>
