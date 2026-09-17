@@ -886,10 +886,6 @@ Time: ${startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short
 
 ${event.description || ''}
 
-Audience: ${getRoleScopeLabel(event.audience_scope, event.audience_scope_mode)}
-Semester: ${termName}
-Recipients: ${recipients.length} current portal member(s)
-
 Add to your calendar: ${calendarUrl}
 
 View on portal: ${window.location.origin}/calendar`)
