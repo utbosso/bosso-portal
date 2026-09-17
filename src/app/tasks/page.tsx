@@ -204,7 +204,15 @@ export default function TasksPage() {
       .select('group_task_id')
       .eq('reviewer_id', profile.id)
     const reviewerGroupIds = Array.from(new Set((reviewerRows || []).map((r: any) => r.group_task_id).filter(Boolean)))
-    setReviewerGroupIds(new Set(reviewerGroupIds))
+    // Only replace the Set reference when membership actually changed -
+    // loadDetails (a useCallback) depends on this, and a fresh Set every
+    // refresh (including the window-focus refresh below, which fires right
+    // after the native file picker closes) was giving loadDetails a new
+    // identity on every refresh regardless of whether anything changed.
+    setReviewerGroupIds((prev) => {
+      if (prev.size === reviewerGroupIds.length && reviewerGroupIds.every((id) => prev.has(id))) return prev
+      return new Set(reviewerGroupIds)
+    })
     const visibilityFilter = `assigned_to.eq.${profile.id},assigned_by.eq.${profile.id}${
       reviewerGroupIds.length ? `,group_task_id.in.(${reviewerGroupIds.join(',')})` : ''
     }`
@@ -362,13 +370,25 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (selectedTask) void loadDetails(selectedTask)
+    // The draft reset below deliberately isn't combined into this same
+    // effect - loadDetails is a useCallback whose identity changes whenever
+    // reviewerGroupIds gets a new Set reference (loadTasks rebuilds it on
+    // every refresh, including the window focus listener further down,
+    // which fires right after the native file picker closes). A combined
+    // effect re-running the draft reset on every one of those was wiping
+    // out a file the member had just attached, well before they submitted.
+  }, [loadDetails, selectedTask?.id])
+
+  useEffect(() => {
     // A draft note/link/file belongs to whichever person was on screen when
     // it was typed - switching to someone else (e.g. via Team progress)
     // must not carry it over and risk posting it under the wrong person.
+    // Keyed only on the id itself so an unrelated background refresh can't
+    // trigger this.
     setUpdateNote('')
     setUpdateLink('')
     setUpdateFile(null)
-  }, [loadDetails, selectedTask?.id])
+  }, [selectedTask?.id])
 
   useEffect(() => {
     if (!profile) return
