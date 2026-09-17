@@ -452,19 +452,25 @@ export default function TasksPage() {
     if (!profile) return { mine: 0, review: 0, assigned: 0, personal: 0, completed: 0 }
     return {
       mine: tasks.filter((task) => task.assigned_to === profile.id && getWorkflowStatus(task) !== 'approved').length,
-      review: tasks.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) === 'submitted').length,
+      // A granted reviewer (task_group_reviewers) needs to find submitted
+      // work here too, not just the task's literal assigner - canReviewGroup
+      // already covers both. The fetch itself (loadTasks' visibilityFilter)
+      // already includes their reviewed groups; this tab filter was the one
+      // place still checking assigned_by alone, so those tasks were fetched
+      // but invisible in every tab.
+      review: tasks.filter((task) => canReviewGroup(task) && getWorkflowStatus(task) === 'submitted').length,
       assigned: tasks.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) !== 'approved').length,
       personal: personalTasks.filter((task) => task.status !== 'completed').length,
       completed:
         tasks.filter((task) => getWorkflowStatus(task) === 'approved').length,
     }
-  }, [personalTasks, profile, tasks])
+  }, [personalTasks, profile, tasks, reviewerGroupIds])
 
   const filteredTasks = useMemo(() => {
     if (!profile || tab === 'personal') return []
     let result = tasks
     if (tab === 'mine') result = result.filter((task) => task.assigned_to === profile.id && getWorkflowStatus(task) !== 'approved')
-    if (tab === 'review') result = result.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) === 'submitted')
+    if (tab === 'review') result = result.filter((task) => canReviewGroup(task) && getWorkflowStatus(task) === 'submitted')
     if (tab === 'assigned') result = result.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) !== 'approved')
     if (tab === 'completed') result = result.filter((task) => getWorkflowStatus(task) === 'approved')
     if (query.trim()) {
@@ -477,7 +483,7 @@ export default function TasksPage() {
       )
     }
     return result
-  }, [profile, query, tab, tasks])
+  }, [profile, query, tab, tasks, reviewerGroupIds])
 
   const filteredPersonal = useMemo(() => {
     let result = [...personalTasks]
