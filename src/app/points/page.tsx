@@ -71,7 +71,8 @@ export default function PointsPage() {
   const [eventTitles, setEventTitles] = useState<Record<string, string>>({})
   const [requestMemberOptions, setRequestMemberOptions] = useState<UserOption[]>([])
   const [requestableEvents, setRequestableEvents] = useState<RequestableEvent[]>([])
-  const [proofLinks, setProofLinks] = useState<Record<string, { name: string; url: string }>>({})
+  const [attachmentMeta, setAttachmentMeta] = useState<Record<string, { storagePath: string; fileName: string }>>({})
+  const [viewingProofId, setViewingProofId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showRequestForm, setShowRequestForm] = useState(false)
@@ -159,19 +160,22 @@ export default function PointsPage() {
     const nextRequests = (requestResult.data || []) as PointRequest[]
     setRequests(nextRequests)
 
+    // Signed URLs are generated on demand (see viewProof) instead of eagerly
+    // for every attachment on every load - with dozens of requests, that was
+    // firing a burst of parallel storage/DB round trips on every single
+    // loadPoints() call (including every realtime-triggered reload), which
+    // piled onto the database's connection pool and slowed everything else
+    // down, especially while rapidly approving several requests in a row.
     if (nextRequests.length) {
       const { data: attachments } = await supabase
         .from('point_request_attachments')
         .select('request_id, storage_path, file_name')
         .in('request_id', nextRequests.slice(0, 500).map((request) => request.id))
-      const nextProofLinks: Record<string, { name: string; url: string }> = {}
-      await Promise.all((attachments || []).map(async (attachment) => {
-        const { data: signed } = await supabase.storage.from('point-request-proof').createSignedUrl(attachment.storage_path, 900)
-        if (signed?.signedUrl) nextProofLinks[attachment.request_id] = { name: attachment.file_name, url: signed.signedUrl }
-      }))
-      setProofLinks(nextProofLinks)
+      setAttachmentMeta(
+        Object.fromEntries((attachments || []).map((attachment) => [attachment.request_id, { storagePath: attachment.storage_path, fileName: attachment.file_name }]))
+      )
     } else {
-      setProofLinks({})
+      setAttachmentMeta({})
     }
 
     if (nextRequests.length) {
@@ -250,17 +254,28 @@ export default function PointsPage() {
 
   useEffect(() => {
     if (!activeTermId || !user || !schemaReady) return
+
+    // A single approve/decline touches both point_ledger and point_requests,
+    // each of which independently re-fires this subscription - without
+    // coalescing, one click was triggering 2-3 concurrent full reloads.
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleReload = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => void loadPoints(), 400)
+    }
+
     const channel = supabase
       .channel(`points-page:${activeTermId}:${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'academic_terms', filter: `id=eq.${activeTermId}` }, () => void loadPoints())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'term_point_rules', filter: `term_id=eq.${activeTermId}` }, () => void loadPoints())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'point_ledger' }, () => void loadPoints())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'point_requests' }, () => void loadPoints())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'academic_terms', filter: `id=eq.${activeTermId}` }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'term_point_rules', filter: `term_id=eq.${activeTermId}` }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'point_ledger' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'point_requests' }, scheduleReload)
       .subscribe()
 
     const refresh = () => void loadPoints()
     window.addEventListener('focus', refresh)
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
       window.removeEventListener('focus', refresh)
       void supabase.removeChannel(channel)
     }
@@ -451,6 +466,23 @@ export default function PointsPage() {
     await loadPoints()
   }
 
+  const viewProof = async (requestId: string) => {
+    const meta = attachmentMeta[requestId]
+    if (!meta) return
+    // Open the tab synchronously on the click so popup blockers don't kill
+    // it while we await the signed URL, then fill it in once it resolves.
+    const newTab = window.open('', '_blank')
+    setViewingProofId(requestId)
+    const { data: signed, error: signedError } = await supabase.storage.from('point-request-proof').createSignedUrl(meta.storagePath, 900)
+    setViewingProofId(null)
+    if (signed?.signedUrl && newTab) {
+      newTab.location.href = signed.signedUrl
+    } else {
+      newTab?.close()
+      setError(signedError?.message || 'The proof file could not be opened.')
+    }
+  }
+
   if (!schemaReady) {
     return (
       <div className="portal-page">
@@ -553,7 +585,17 @@ export default function PointsPage() {
                 <article key={request.id} className="rounded-xl border border-border p-4">
                   <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between"><div><p className="font-medium">For {memberNames[request.user_id] || (request.user_id === user?.id ? 'you' : 'Member')}</p><p className="mt-1 text-sm text-muted-foreground">{request.status === 'approved' ? request.final_points : request.requested_points} {request.status === 'approved' ? 'awarded' : 'requested'} · {categoryLabel(request.status === 'approved' && request.final_category ? request.final_category : request.suggested_category)}</p>{request.event_id && <p className="mt-1 text-xs text-muted-foreground">Event: {eventTitles[request.event_id] || 'Loading…'}</p>}{request.submitted_by && request.submitted_by !== request.user_id && <p className="mt-1 text-xs text-muted-foreground">Submitted by {memberNames[request.submitted_by] || (request.submitted_by === user?.id ? 'you' : 'another member')}</p>}</div><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[request.status]}`}>{request.status.replace('_', ' ')}</span></div>
                   <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">{request.note}</p>
-                  {proofLinks[request.id] && <a href={proofLinks[request.id].url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-primary"><FileText className="h-3.5 w-3.5" /> View proof: {proofLinks[request.id].name}</a>}
+                  {attachmentMeta[request.id] && (
+                    <button
+                      type="button"
+                      disabled={viewingProofId === request.id}
+                      onClick={() => void viewProof(request.id)}
+                      className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-primary disabled:opacity-60"
+                    >
+                      {viewingProofId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                      {viewingProofId === request.id ? 'Opening…' : `View proof: ${attachmentMeta[request.id].fileName}`}
+                    </button>
+                  )}
                   {request.reviewer_note && <p className="mt-3 rounded-lg bg-muted p-3 text-xs">Admin: {request.reviewer_note}</p>}
                   {!isPortalAdmin && request.status === 'needs_info' && (request.user_id === user?.id || request.submitted_by === user?.id) && (
                     <div className="mt-4"><button onClick={() => openFollowUp(request)} className="portal-button-secondary small">Add more info</button></div>
