@@ -20,6 +20,7 @@ import {
   type ReferenceLink,
 } from '@/lib/reference-links'
 import { announcementBodyToPlainText } from '@/lib/announcement-rich-text'
+import SendEmailModal, { type SendEmailRequest } from '@/components/SendEmailModal'
 import {
   canAccessAudience,
   getRoleScopeLabel,
@@ -28,7 +29,6 @@ import {
 } from '@/lib/role-scope'
 import {
   fetchCurrentMemberDirectory,
-  resolveCommunicationRecipients,
   type CommunicationMemberGroup,
 } from '@/lib/communication-recipients'
 
@@ -47,6 +47,7 @@ export default function AnnouncementsPage() {
   const { access, schemaReady, loading: accessLoading } = usePortalAccess(user?.id, authLoading)
   const [announcements, setAnnouncements] = useState<AnnouncementWithAuthor[]>([])
   const [loading, setLoading] = useState(true)
+  const [emailRequest, setEmailRequest] = useState<SendEmailRequest | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -320,46 +321,7 @@ export default function AnnouncementsPage() {
     return announcement.created_by === profile.id
   }
 
-  const sendAnnouncementEmail = async (announcement: AnnouncementWithAuthor) => {
-    try {
-      const { recipients, termName } = await resolveCommunicationRecipients({
-        roleScope: announcement.role_scope,
-        roleScopeMode: announcement.role_scope_mode,
-        targetUserIds: announcement.target_user_ids,
-      })
-      if (recipients.length === 0) {
-        alert('No approved members in the current semester match this audience.')
-        return
-      }
-
-      // Get list of email addresses for BCC
-      const bccEmails = recipients.map((recipient) => recipient.email).join(',')
-
-      // Create email subject and body
-      const subject = encodeURIComponent(`BOSSO Announcement: ${announcement.title}`)
-      const emailLinks = (announcement.reference_links || []).map((link) => `${link.label}: ${link.url}`).join('\n')
-      const emailBody = encodeURIComponent(`${announcementBodyToPlainText(announcement.body)}${emailLinks ? `\n\nLinks:\n${emailLinks}` : ''}
-
----
-Posted by: ${announcement.author?.full_name || 'BOSSO Team'}
-Target Audience: ${announcement.target_user_ids?.length
-  ? `${announcement.target_user_ids.length} selected member(s)`
-  : getRoleScopeLabel(announcement.role_scope, announcement.role_scope_mode)}
-Semester: ${termName}
-Recipients: ${recipients.length} current portal member(s)
-Date: ${new Date(announcement.created_at).toLocaleString()}
-
-View on portal: ${window.location.origin}/announcements/${announcement.id}`)
-
-      // Open Gmail compose with BCC
-      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails)}&su=${subject}&body=${emailBody}`
-
-      window.open(gmailUrl, '_blank')
-    } catch (error) {
-      console.error('Error preparing announcement email:', error)
-      alert(error instanceof Error ? error.message : 'Failed to prepare email. Please try again.')
-    }
-  }
+  const sendAnnouncementEmail = (announcement: AnnouncementWithAuthor) => setEmailRequest({ kind: 'announcement', id: announcement.id })
 
   return (
     <div className="portal-page space-y-7">
@@ -522,6 +484,7 @@ View on portal: ${window.location.origin}/announcements/${announcement.id}`)
           </div>
         ))}
       </div>
+      <SendEmailModal request={emailRequest} onClose={() => setEmailRequest(null)} />
     </div>
   )
 }

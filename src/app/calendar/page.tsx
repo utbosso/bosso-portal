@@ -8,6 +8,7 @@ import type { Event, EventCategory, EventType, Task } from '@/types/database.typ
 import type { UserOption } from '@/components/UserSearch'
 import MemberGroupPicker from '@/components/MemberGroupPicker'
 import SectionPageHeader from '@/components/SectionPageHeader'
+import SendEmailModal, { type SendEmailRequest } from '@/components/SendEmailModal'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
 import {
   CalendarDays,
@@ -35,7 +36,6 @@ import {
 } from '@/lib/role-scope'
 import {
   fetchCurrentMemberDirectory,
-  resolveCommunicationRecipients,
   type CommunicationMemberGroup,
 } from '@/lib/communication-recipients'
 
@@ -107,6 +107,7 @@ export default function CalendarPage() {
   const [peopleOptions, setPeopleOptions] = useState<UserOption[]>([])
   const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [loading, setLoading] = useState(true)
+  const [emailRequest, setEmailRequest] = useState<SendEmailRequest | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncNotice, setSyncNotice] = useState<string | null>(null)
 
@@ -847,56 +848,7 @@ export default function CalendarPage() {
     window.open(googleCalendarUrl, '_blank')
   }
 
-  const sendCalendarInvites = async (eventId: string) => {
-    const event = events.find(e => e.id === eventId)
-    if (!event) return
-
-    try {
-      const { recipients, termName } = await resolveCommunicationRecipients({
-        roleScope: event.audience_scope,
-        roleScopeMode: event.audience_scope_mode,
-        targetUserIds: event.target_user_ids,
-      })
-      if (recipients.length === 0) {
-        alert('No approved members in the current semester match this audience.')
-        return
-      }
-
-      // Get list of email addresses for BCC
-      const bccEmails = recipients.map((recipient) => recipient.email).join(',')
-
-      // Format dates for Google Calendar link
-      const startDate = new Date(event.start_at)
-      const endDate = new Date(event.end_at)
-      const googleCalendarTitle = /^bosso\b/i.test(event.title) ? event.title : `BOSSO ${event.title}`
-
-      const formatGoogleDate = (date: Date) => {
-        return date.toISOString().replace(/-|:|\.\d+/g, '')
-      }
-
-      const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(googleCalendarTitle)}&dates=${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}&details=${encodeURIComponent(event.description || '')}&location=${encodeURIComponent(event.location || '')}`
-
-      // Create email subject and body
-      const subject = encodeURIComponent(`BOSSO Event: ${event.title}`)
-      const emailBody = encodeURIComponent(`Come join us at our BOSSO event!
-
-Event: ${event.title}
-Location: ${event.location || 'TBA'}
-Time: ${startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}
-${event.description ? `\nNotes: ${event.description}\n` : ''}
-Add to your calendar: ${calendarUrl}
-
-View on portal: ${window.location.origin}/calendar`)
-
-      // Open Gmail compose with BCC
-      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bccEmails)}&su=${subject}&body=${emailBody}`
-
-      window.open(gmailUrl, '_blank')
-    } catch (error) {
-      console.error('Error preparing calendar invite email:', error)
-      alert(error instanceof Error ? error.message : 'Failed to prepare calendar invite. Please try again.')
-    }
-  }
+  const sendCalendarInvites = (eventId: string) => setEmailRequest({ kind: 'event', id: eventId })
 
   const renderEventDetailCard = (event: Event, showTitle = true) => (
     <article key={event.id} className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -1843,6 +1795,7 @@ View on portal: ${window.location.origin}/calendar`)
           )}
         </div>
       </div>
+      <SendEmailModal request={emailRequest} onClose={() => setEmailRequest(null)} />
     </div>
   )
 }

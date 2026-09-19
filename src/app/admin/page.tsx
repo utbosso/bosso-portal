@@ -37,6 +37,7 @@ import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bo
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import type { UserOption } from '@/components/UserSearch'
 import MemberGroupPicker from '@/components/MemberGroupPicker'
+import SendEmailModal, { type SendEmailRequest } from '@/components/SendEmailModal'
 import {
   fetchCurrentMemberDirectory,
   type CommunicationMemberGroup,
@@ -631,6 +632,7 @@ function UserManagementTab() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'active' | 'rejected'>('pending')
   const [processingUserId, setProcessingUserId] = useState<string | null>(null)
   const [recentlyApproved, setRecentlyApproved] = useState<Set<string>>(new Set())
+  const [emailRequest, setEmailRequest] = useState<SendEmailRequest | null>(null)
   const [tempResetUserId, setTempResetUserId] = useState('')
   const [tempPassword, setTempPassword] = useState('')
   const [settingTempPassword, setSettingTempPassword] = useState(false)
@@ -1088,61 +1090,21 @@ BOSSO Team`)
   }
 
   const sendApprovalEmail = (user: Profile) => {
-    const subject = encodeURIComponent('Welcome to BOSSO Portal - Account Approved!')
-    const body = encodeURIComponent(`Hi ${user.full_name},
-
-Great news! Your BOSSO Portal account has been approved and is now active.
-
-You can now access the full portal at: https://bosso-portal.vercel.app/login
-
-Your Account Details:
-• Name: ${user.full_name}
-• Email: ${user.email}
-• Role: ${user.role.replace('_', ' ')}
-
-If you have any questions or need assistance, feel free to reach out to the board.
-
-Welcome to the team!
-
-Best regards,
-BOSSO Team`)
-
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
-    window.open(gmailUrl, '_blank')
+    setEmailRequest({ kind: 'approval', userId: user.id, role: termMemberships[user.id]?.position_role || user.role })
   }
 
   const sendDuesPaymentRequest = (user: Profile) => {
-    // Dues are now paid self-serve in the portal (card or bank transfer via
-    // Stripe), priced by whichever position they claimed with their code -
-    // not the old manual Venmo + reply-to-confirm process.
+    // Dues are paid self-serve in the portal (card or bank transfer via
+    // Stripe), priced by whichever position they claimed with their code.
     const role = termMemberships[user.id]?.position_role || user.role
-    const roleLabel = role.replaceAll('_', ' ')
     const prices = duesPricesByRole[role]
-    const pricingLines = prices
-      ? `• Semester: $${(prices.semester / 100).toFixed(2)}\n• Full year: $${(prices.annual / 100).toFixed(2)}`
-      : '• Pricing for your position is still being finalized - check the portal for the current amount.'
-
-    const subject = encodeURIComponent('BOSSO Portal - Pay Your Dues')
-    const body = encodeURIComponent(`Hi ${user.full_name},
-
-Thanks for signing up with BOSSO! To finish activating your portal access, pay your dues directly in the portal.
-
-1. Log in to the portal: ${window.location.origin}
-2. You'll land on the "Pay your dues" screen automatically
-3. Choose Semester or Full Year and pay by card or bank transfer
-
-Dues for your position (${roleLabel}):
-${pricingLines}
-
-Access opens automatically the moment your payment clears.
-
-If you run into any trouble, just reply to this email.
-
-Best regards,
-BOSSO Team`)
-
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
-    window.open(gmailUrl, '_blank')
+    setEmailRequest({
+      kind: 'dues',
+      userId: user.id,
+      role,
+      semesterPrice: prices ? `$${(prices.semester / 100).toFixed(2)}` : null,
+      annualPrice: prices ? `$${(prices.annual / 100).toFixed(2)}` : null,
+    })
   }
 
   const generateTempPassword = () => {
@@ -1158,27 +1120,7 @@ BOSSO Team`)
   const selectedResetUser = users.find((user) => user.id === tempResetUserId) || null
 
   const openTempPasswordEmailDraft = (user: Profile, password: string) => {
-    const subject = encodeURIComponent('BOSSO Portal - Temporary Password')
-    const body = encodeURIComponent(`Hi ${user.full_name},
-
-We reset your BOSSO Portal password.
-
-Temporary Password:
-${password}
-
-Please do the following:
-1. Go to https://bosso-portal.vercel.app/login
-2. Sign in with your email and the temporary password above
-3. Go to Settings -> Security
-4. Set your own new password immediately
-
-If you have trouble logging in, reply to this email and we will help.
-
-Best regards,
-BOSSO Team`)
-
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(user.email)}&su=${subject}&body=${body}`
-    window.open(gmailUrl, '_blank')
+    setEmailRequest({ kind: 'password', userId: user.id, password })
   }
 
   const setTemporaryPassword = async () => {
@@ -1377,7 +1319,7 @@ BOSSO Team`)
             className="px-4 py-2 bg-primary/20 border border-primary/30 text-primary rounded-lg hover:bg-primary/30 transition-all font-medium text-sm flex items-center gap-2"
           >
             <Mail className="w-4 h-4" />
-            Open Email Draft
+            Email temporary password
           </button>
         </div>
       </div>
@@ -1730,6 +1672,7 @@ BOSSO Team`)
           </div>
         </div>
       )}
+      <SendEmailModal request={emailRequest} onClose={() => setEmailRequest(null)} />
     </div>
   )
 }
