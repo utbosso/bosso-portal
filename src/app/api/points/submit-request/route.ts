@@ -63,6 +63,26 @@ export async function POST(request: Request) {
     }
   }
 
+  if (eventId) {
+    const { data: openRequests, error: openError } = await admin
+      .from('point_requests')
+      .select('user_id')
+      .eq('event_id', eventId)
+      .in('user_id', beneficiaryIds)
+      .in('status', ['pending', 'needs_info', 'approved'])
+    if (openError) return NextResponse.json({ error: openError.message }, { status: 500 })
+
+    if (openRequests && openRequests.length > 0) {
+      const openIds = new Set(openRequests.map((row) => row.user_id))
+      const { data: names } = await admin.from('profiles').select('id, full_name').in('id', Array.from(openIds))
+      const nameList = (names || []).map((n) => n.full_name).join(', ') || 'Someone in this request'
+      return NextResponse.json(
+        { error: `${nameList} already has a request for this event that is pending or approved. Remove them from this request to avoid duplicate points.` },
+        { status: 409 }
+      )
+    }
+  }
+
   const { data: pointRequests, error: insertError } = await admin
     .from('point_requests')
     .insert(

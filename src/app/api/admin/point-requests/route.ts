@@ -57,6 +57,21 @@ export async function POST(request: Request) {
         .gt('points_earned', 0)
         .limit(1)
         .maybeSingle()
+      const { data: alreadyApproved } = await admin
+        .from('point_requests')
+        .select('id')
+        .eq('event_id', pointRequest.event_id)
+        .eq('user_id', pointRequest.user_id)
+        .eq('status', 'approved')
+        .neq('id', pointRequest.id)
+        .limit(1)
+        .maybeSingle()
+      if (alreadyApproved) {
+        return NextResponse.json(
+          { error: 'This member already has an approved request for this event. Decline this one as a duplicate instead.' },
+          { status: 409 }
+        )
+      }
       if (checkedIn) {
         return NextResponse.json(
           { error: 'This member already checked in to this event and earned its points. Decline this request as a duplicate instead.' },
