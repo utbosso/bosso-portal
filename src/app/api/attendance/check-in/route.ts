@@ -49,6 +49,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'You have already checked in to this event.' }, { status: 409 })
   }
 
+  // A member credited for this event through an approved point request has
+  // already been awarded its points - checking in as well would pay twice.
+  const { data: creditedRequest } = await admin
+    .from('point_requests')
+    .select('id')
+    .eq('event_id', event.id)
+    .eq('user_id', user.id)
+    .eq('status', 'approved')
+    .limit(1)
+    .maybeSingle()
+  if (creditedRequest) {
+    return NextResponse.json(
+      { error: 'You were already credited for this event through an approved point request, so no check-in is needed.' },
+      { status: 409 }
+    )
+  }
+
   const { error: attendanceError } = await admin.from('attendance_records').insert({
     event_id: event.id,
     user_id: user.id,

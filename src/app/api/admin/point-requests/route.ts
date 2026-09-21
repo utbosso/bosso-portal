@@ -48,6 +48,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Approved points and a final category are required.' }, { status: 400 })
     }
 
+    if (pointRequest.event_id) {
+      const { data: checkedIn } = await admin
+        .from('attendance_records')
+        .select('id, points_earned')
+        .eq('event_id', pointRequest.event_id)
+        .eq('user_id', pointRequest.user_id)
+        .gt('points_earned', 0)
+        .limit(1)
+        .maybeSingle()
+      if (checkedIn) {
+        return NextResponse.json(
+          { error: 'This member already checked in to this event and earned its points. Decline this request as a duplicate instead.' },
+          { status: 409 }
+        )
+      }
+    }
+
     const { error: ledgerError } = await admin.from('point_ledger').upsert(
       {
         term_id: pointRequest.term_id,
