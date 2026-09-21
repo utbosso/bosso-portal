@@ -999,19 +999,21 @@ export default function AttendancePage() {
                         {record.user?.email} • {record.user?.role?.replace('_', ' ')}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Checked in: {new Date(record.checked_in_at).toLocaleString()}
+                        {record.from_request ? 'Credited via approved point request' : 'Checked in'}: {new Date(record.checked_in_at).toLocaleString()}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold text-primary">+{record.points_earned} pts</p>
-                      <button
-                        onClick={() => handleRemoveEventAttendee(record.id)}
-                        disabled={deletingRecordId === record.id}
-                        className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        {deletingRecordId === record.id ? 'Removing...' : 'Remove'}
-                      </button>
+                      {!record.from_request && (
+                        <button
+                          onClick={() => handleRemoveEventAttendee(record.id)}
+                          disabled={deletingRecordId === record.id}
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          {deletingRecordId === record.id ? 'Removing...' : 'Remove'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))

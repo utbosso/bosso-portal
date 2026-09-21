@@ -99,13 +99,33 @@ export async function GET(request: Request) {
     const { data: events, error: eventsError } = await eventsQuery.order('start_at', { ascending: false })
     if (eventsError) return NextResponse.json({ error: eventsError.message }, { status: 500 })
 
-    let attendanceQuery = admin.from('attendance_records').select('event_id, user:profiles(full_name)')
+    let attendanceQuery = admin.from('attendance_records').select('event_id, user_id, user:profiles(full_name)')
     if (termId) attendanceQuery = attendanceQuery.eq('term_id', termId)
     const { data: allAttendance, error: attendanceError } = await attendanceQuery
     if (attendanceError) return NextResponse.json({ error: attendanceError.message }, { status: 500 })
 
+    // Members credited through an approved point request for an event count as
+    // attendees too, even when they never have a check-in row.
+    let requestQuery = admin
+      .from('point_requests')
+      .select('user_id, event_id')
+      .eq('status', 'approved')
+      .not('event_id', 'is', null)
+    if (termId) requestQuery = requestQuery.eq('term_id', termId)
+    const { data: approvedRequestRows, error: requestsError } = await requestQuery
+    if (requestsError) return NextResponse.json({ error: requestsError.message }, { status: 500 })
+    const requestUserIds = Array.from(new Set((approvedRequestRows || []).map((r: any) => r.user_id)))
+    const { data: requestProfiles } = requestUserIds.length
+      ? await admin.from('profiles').select('id, full_name').in('id', requestUserIds)
+      : { data: [] as any[] }
+    const requestNameById = new Map((requestProfiles || []).map((p: any) => [p.id, p.full_name]))
+    const approvedRequests = (approvedRequestRows || []).map((r: any) => ({ ...r, user: { full_name: requestNameById.get(r.user_id) } }))
+
     const eventStats = (events || []).map((event: any) => {
-      const attendees = ((allAttendance || []) as any[]).filter((a) => a.event_id === event.id)
+      const checkedIn = ((allAttendance || []) as any[]).filter((a) => a.event_id === event.id)
+      const checkedInIds = new Set(checkedIn.map((a) => a.user_id))
+      const requestOnly = ((approvedRequests || []) as any[]).filter((r) => r.event_id === event.id && !checkedInIds.has(r.user_id))
+      const attendees = [...checkedIn, ...requestOnly]
       const attendeeNames = attendees.map((a) => (Array.isArray(a.user) ? a.user[0]?.full_name : a.user?.full_name) || 'Unknown').filter(Boolean)
       return {
         event_id: event.id,
@@ -175,7 +195,55 @@ export async function GET(request: Request) {
       .order('checked_in_at', { ascending: false })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ attendees: data || [] })
+    // Approved point requests for this event award their points through the
+    // ledger (source_type 'request'), not through attendance_records, so a
+    // request-credited member shows 0 pts here or is missing entirely. Fold
+    // those points in for display only - nothing is written.
+    const { data: approvedRequests } = await admin
+      .from('point_requests')
+      .select('id, user_id, reviewed_at')
+      .eq('event_id', eventId)
+      .eq('status', 'approved')
+    const requestRows = (approvedRequests || []) as any[]
+    const { data: requestProfiles } = requestRows.length
+      ? await admin.from('profiles').select('id, full_name, email, role').in('id', requestRows.map((r) => r.user_id))
+      : { data: [] as any[] }
+    const profileById = new Map((requestProfiles || []).map((p: any) => [p.id, p]))
+    const requestPoints = new Map<string, number>()
+    if (requestRows.length > 0) {
+      const { data: ledgerRows } = await admin
+        .from('point_ledger')
+        .select('source_id, points')
+        .eq('source_type', 'request')
+        .is('voided_at', null)
+        .in('source_id', requestRows.map((r) => r.id))
+      const pointsByRequest = new Map((ledgerRows || []).map((row: any) => [row.source_id, Number(row.points)]))
+      requestRows.forEach((r) => {
+        requestPoints.set(r.user_id, (requestPoints.get(r.user_id) || 0) + (pointsByRequest.get(r.id) || 0))
+      })
+    }
+
+    const attendees = (data || []).map((row: any) => ({
+      ...row,
+      points_earned: Number(row.points_earned || 0) + (requestPoints.get(row.user_id) || 0),
+      includes_request_points: requestPoints.has(row.user_id),
+    }))
+    const checkedInIds = new Set(attendees.map((row: any) => row.user_id))
+    requestRows
+      .filter((r) => !checkedInIds.has(r.user_id))
+      .forEach((r) => {
+        attendees.push({
+          id: `request-${r.id}`,
+          event_id: eventId,
+          user_id: r.user_id,
+          points_earned: requestPoints.get(r.user_id) || 0,
+          checked_in_at: r.reviewed_at,
+          user: profileById.get(r.user_id) || null,
+          from_request: true,
+        } as any)
+      })
+
+    return NextResponse.json({ attendees })
   }
 
   return NextResponse.json({ error: 'Unknown view.' }, { status: 400 })
