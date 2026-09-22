@@ -2653,6 +2653,33 @@ function MembershipInterestTab() {
     }
   }
 
+  const exportCsv = () => {
+    const columns: Array<[string, (s: MembershipInterestSubmission) => string]> = [
+      ['Full name', (s) => s.full_name],
+      ['Email', (s) => s.email],
+      ['Phone', (s) => s.phone],
+      ['UT EID', (s) => s.eid || ''],
+      ['Graduation year', (s) => s.graduation_year || ''],
+      ['Major', (s) => s.major || ''],
+      ['How heard', (s) => s.how_heard || ''],
+      ['Note', (s) => s.note || ''],
+      ['Status', (s) => s.status],
+      ['Submitted at', (s) => new Date(s.created_at).toLocaleString()],
+    ]
+    const escapeCell = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const rows = [columns.map(([header]) => escapeCell(header)).join(',')]
+    submissions.forEach((submission) => {
+      rows.push(columns.map(([, getValue]) => escapeCell(getValue(submission))).join(','))
+    })
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `bosso-join-submissions-${filter}-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   const mailtoFor = (submission: MembershipInterestSubmission) => {
     const subject = encodeURIComponent('Join BOSSO - your general member code')
     const body = encodeURIComponent(`Hi ${submission.full_name.split(' ')[0]},
@@ -2688,9 +2715,18 @@ BOSSO Team`)
             </button>
           ))}
         </div>
-        <button onClick={() => void load()} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={exportCsv}
+            disabled={submissions.length === 0}
+            className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" /> Export CSV
+          </button>
+          <button onClick={() => void load()} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
