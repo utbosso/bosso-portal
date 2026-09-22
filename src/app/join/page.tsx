@@ -7,6 +7,7 @@ const emptyForm = {
   fullName: '',
   email: '',
   phone: '',
+  eid: '',
   graduationYear: '',
   major: '',
   howHeard: '',
@@ -94,8 +95,8 @@ export default function JoinPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label htmlFor="phone" className="text-sm font-medium text-foreground">Phone <span className="text-muted-foreground">(optional)</span></label>
-                  <input id="phone" value={form.phone} onChange={set('phone')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="(512) 555-0100" />
+                  <label htmlFor="phone" className="text-sm font-medium text-foreground">Phone</label>
+                  <input id="phone" type="tel" required value={form.phone} onChange={set('phone')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="(512) 555-0100" />
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="graduationYear" className="text-sm font-medium text-foreground">Grad year <span className="text-muted-foreground">(optional)</span></label>
@@ -103,9 +104,15 @@ export default function JoinPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="major" className="text-sm font-medium text-foreground">Major <span className="text-muted-foreground">(optional)</span></label>
-                <input id="major" value={form.major} onChange={set('major')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="Finance" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="major" className="text-sm font-medium text-foreground">Major <span className="text-muted-foreground">(optional)</span></label>
+                  <input id="major" value={form.major} onChange={set('major')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="Finance" />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="eid" className="text-sm font-medium text-foreground">UT EID <span className="text-muted-foreground">(optional)</span></label>
+                  <input id="eid" value={form.eid} onChange={set('eid')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="abc1234" />
+                </div>
               </div>
 
               <div className="space-y-2">

@@ -23,6 +23,7 @@ export async function POST(request: Request) {
   const fullName = clean(body.fullName, 120)
   const email = clean(body.email, 200).toLowerCase()
   const phone = clean(body.phone, 40)
+  const eid = clean(body.eid, 20)
   const graduationYear = clean(body.graduationYear, 20)
   const major = clean(body.major, 120)
   const howHeard = clean(body.howHeard, 120)
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
 
   if (fullName.length < 2) return NextResponse.json({ error: 'Enter your full name.' }, { status: 400 })
   if (!EMAIL_RE.test(email)) return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 })
+  if (phone.length < 7) return NextResponse.json({ error: 'Enter a valid phone number.' }, { status: 400 })
 
   const admin = createAdminClient()
 
@@ -46,7 +48,8 @@ export async function POST(request: Request) {
   const { error } = await admin.from('membership_interest_submissions').insert({
     full_name: fullName,
     email,
-    phone: phone || null,
+    phone,
+    eid: eid || null,
     graduation_year: graduationYear || null,
     major: major || null,
     how_heard: howHeard || null,
