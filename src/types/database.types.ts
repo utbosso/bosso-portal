@@ -408,6 +408,12 @@ export type Database = {
         Update: Partial<SemesterRollover>
         Relationships: []
       }
+      membership_interest_submissions: {
+        Row: MembershipInterestSubmission
+        Insert: Omit<MembershipInterestSubmission, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<MembershipInterestSubmission>
+        Relationships: []
+      }
     }
     Views: {
       member_term_point_summary: {
@@ -949,6 +955,23 @@ export interface PointRequest {
   reviewed_at: string | null
   created_at: string
   updated_at: string
+}
+
+export type MembershipInterestStatus = 'new' | 'contacted' | 'dismissed'
+
+export interface MembershipInterestSubmission {
+  id: string
+  full_name: string
+  email: string
+  phone: string | null
+  graduation_year: string | null
+  major: string | null
+  how_heard: string | null
+  note: string | null
+  status: MembershipInterestStatus
+  contacted_by: string | null
+  contacted_at: string | null
+  created_at: string
 }
 
 export interface PointRequestAttachment {

@@ -32,7 +32,7 @@ import {
   CalendarRange,
   Loader2,
 } from 'lucide-react'
-import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership, DuesPrice } from '@/types/database.types'
+import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership, DuesPrice, MembershipInterestSubmission } from '@/types/database.types'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import type { UserOption } from '@/components/UserSearch'
@@ -45,7 +45,7 @@ import {
 
 const supabase = createClient()
 
-type TabType = 'overview' | 'users' | 'points'
+type TabType = 'overview' | 'users' | 'points' | 'interest'
 
 type UserPointsBreakdown = {
   user_id: string
@@ -83,7 +83,7 @@ export default function AdminDashboard() {
 
   // Get active tab from URL, default to 'overview'
   const tabFromUrl = searchParams.get('tab') as TabType | null
-  const activeTab: TabType = tabFromUrl && ['overview', 'users', 'points'].includes(tabFromUrl) ? tabFromUrl : 'overview'
+  const activeTab: TabType = tabFromUrl && ['overview', 'users', 'points', 'interest'].includes(tabFromUrl) ? tabFromUrl : 'overview'
 
   // Ref to track scroll position through re-renders
   const scrollPositionRef = useRef<number>(0)
@@ -99,6 +99,7 @@ export default function AdminDashboard() {
   const [recentUsers, setRecentUsers] = useState<Array<Profile & { termPositionRole?: string }>>([])
   const [recentFeedback, setRecentFeedback] = useState<FeedbackSubmission[]>([])
   const [usersByRole, setUsersByRole] = useState<Record<string, number>>({})
+  const [newInterestCount, setNewInterestCount] = useState(0)
 
   // Update URL when tab changes (without full page reload)
   const setActiveTab = (tab: TabType) => {
@@ -106,6 +107,23 @@ export default function AdminDashboard() {
     params.set('tab', tab)
     router.replace(`/admin?${params.toString()}`, { scroll: false })
   }
+
+  useEffect(() => {
+    if (!isPortalAdmin) return
+    let cancelled = false
+    const loadInterestCount = async () => {
+      const response = await fetch('/api/admin/membership-interest?status=new')
+      if (!response.ok || cancelled) return
+      const { submissions } = await response.json()
+      if (!cancelled) setNewInterestCount((submissions || []).length)
+    }
+    void loadInterestCount()
+    const interval = setInterval(loadInterestCount, 30000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [isPortalAdmin, activeTab])
 
   // Save and restore scroll position when switching browser tabs
   useEffect(() => {
@@ -408,6 +426,26 @@ export default function AdminDashboard() {
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('interest')}
+          className={`px-4 py-2 text-sm font-medium transition-all relative ${
+            activeTab === 'interest'
+              ? 'text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            Interest
+            {newInterestCount > 0 && (
+              <span className="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
+                {newInterestCount}
+              </span>
+            )}
+          </div>
+          {activeTab === 'interest' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
       </div>
 
       {/* Alert for pending users - Only show on Overview tab */}
@@ -616,6 +654,11 @@ export default function AdminDashboard() {
       {/* Points Breakdown Tab Content */}
       {activeTab === 'points' && (
         <PointsBreakdownTab />
+      )}
+
+      {/* Membership Interest Tab Content */}
+      {activeTab === 'interest' && (
+        <MembershipInterestTab />
       )}
     </div>
   )
@@ -2543,6 +2586,168 @@ function PointsBreakdownTab() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Membership Interest Tab Component - "join BOSSO" submissions from the
+// public website form (src/app/join/page.tsx -> /api/membership-interest)
+const INTEREST_FILTERS: Array<{ value: 'new' | 'contacted' | 'dismissed' | 'all'; label: string }> = [
+  { value: 'new', label: 'New' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'dismissed', label: 'Dismissed' },
+  { value: 'all', label: 'All' },
+]
+
+function MembershipInterestTab() {
+  const [submissions, setSubmissions] = useState<MembershipInterestSubmission[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [filter, setFilter] = useState<'new' | 'contacted' | 'dismissed' | 'all'>('new')
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+
+  const load = async () => {
+    setError('')
+    try {
+      const response = await fetch(`/api/admin/membership-interest${filter === 'all' ? '' : `?status=${filter}`}`)
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Submissions could not be loaded.')
+      setSubmissions(payload.submissions || [])
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Submissions could not be loaded.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    setLoading(true)
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
+
+  const updateStatus = async (id: string, status: 'contacted' | 'dismissed' | 'new') => {
+    setUpdatingId(id)
+    try {
+      const response = await fetch('/api/admin/membership-interest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'The submission could not be updated.')
+      await load()
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'The submission could not be updated.')
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const mailtoFor = (submission: MembershipInterestSubmission) => {
+    const subject = encodeURIComponent('Join BOSSO - your general member code')
+    const body = encodeURIComponent(`Hi ${submission.full_name.split(' ')[0]},
+
+Thanks for your interest in BOSSO! To join as a general member, sign up for the portal here:
+
+https://bosso-portal.vercel.app/signup
+
+Then enter this position code when prompted: [PASTE GENERAL MEMBER CODE]
+
+Let us know if you run into any trouble.
+
+Best,
+BOSSO Team`)
+    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(submission.email)}&su=${subject}&body=${body}`
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {INTEREST_FILTERS.map((item) => (
+            <button
+              key={item.value}
+              onClick={() => setFilter(item.value)}
+              className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                filter === item.value
+                  ? 'bg-primary/20 border-primary/40 text-primary'
+                  : 'border-primary/10 text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => void load()} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-destructive/20 border border-destructive/50 text-destructive px-4 py-3 rounded-lg text-sm">{error}</div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-12 text-muted-foreground">Loading submissions...</div>
+      ) : submissions.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">No {filter === 'all' ? '' : filter} submissions.</div>
+      ) : (
+        <div className="space-y-3">
+          {submissions.map((submission) => (
+            <div key={submission.id} className="card-glow p-5 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-foreground">{submission.full_name}</p>
+                  <p className="text-sm text-muted-foreground">{submission.email}{submission.phone ? ` • ${submission.phone}` : ''}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Submitted {new Date(submission.created_at).toLocaleString()}</p>
+                </div>
+                <span
+                  className={`px-2.5 py-1 text-xs rounded-full border ${
+                    submission.status === 'new'
+                      ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                      : submission.status === 'contacted'
+                      ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                      : 'bg-muted text-muted-foreground border-primary/10'
+                  }`}
+                >
+                  {submission.status}
+                </span>
+              </div>
+
+              {(submission.major || submission.graduation_year || submission.how_heard) && (
+                <p className="text-sm text-muted-foreground">
+                  {[submission.major, submission.graduation_year ? `Class of ${submission.graduation_year}` : null, submission.how_heard ? `Heard via: ${submission.how_heard}` : null]
+                    .filter(Boolean)
+                    .join(' • ')}
+                </p>
+              )}
+              {submission.note && <p className="text-sm text-foreground bg-dark-100 border border-primary/10 rounded-lg p-3">{submission.note}</p>}
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <a href={mailtoFor(submission)} target="_blank" rel="noreferrer" className="portal-button-secondary small">
+                  <Mail className="h-3.5 w-3.5" /> Email them
+                </a>
+                {submission.status !== 'contacted' && (
+                  <button disabled={updatingId === submission.id} onClick={() => void updateStatus(submission.id, 'contacted')} className="portal-button small">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Mark contacted
+                  </button>
+                )}
+                {submission.status !== 'dismissed' && (
+                  <button disabled={updatingId === submission.id} onClick={() => void updateStatus(submission.id, 'dismissed')} className="portal-button-ghost small">
+                    <XCircle className="h-3.5 w-3.5" /> Dismiss
+                  </button>
+                )}
+                {submission.status !== 'new' && (
+                  <button disabled={updatingId === submission.id} onClick={() => void updateStatus(submission.id, 'new')} className="portal-button-ghost small">
+                    Reopen
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

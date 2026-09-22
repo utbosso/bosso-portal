@@ -185,7 +185,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       pathname === '/signup' ||
       pathname?.startsWith('/auth/') ||
       pathname === '/pending-approval' ||
-      pathname === '/verify-email',
+      pathname === '/verify-email' ||
+      pathname === '/join',
     [pathname]
   )
 
@@ -633,6 +634,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               unread: false,
             })
           })
+        }
+
+        // 4. New "join BOSSO" submissions from the public website form - admin only
+        if (isPortalAdmin) {
+          try {
+            const response = await fetch('/api/admin/membership-interest?status=new')
+            if (response.ok) {
+              const { submissions } = await response.json()
+              ;(submissions || []).slice(0, 10).forEach((submission: any) => {
+                allNotifications.push({
+                  id: `membership-interest-${submission.id}`,
+                  type: 'membership_interest',
+                  title: submission.full_name,
+                  message: 'Wants to join BOSSO',
+                  time: new Date(submission.created_at),
+                  href: `/admin?tab=interest`,
+                  icon: Users,
+                  unread: true,
+                })
+              })
+            }
+          } catch (interestError) {
+            console.error('Error fetching membership interest submissions', interestError)
+          }
         }
 
         const visibleNotifications = allNotifications.filter((n) => !dismissedKeys.has(n.id))
