@@ -2594,6 +2594,13 @@ function PointsBreakdownTab() {
 
 // Membership Interest Tab Component - "join BOSSO" submissions from the
 // public website form (src/app/join/page.tsx -> /api/membership-interest)
+//
+// Position codes are stored as a hash (position_codes.code_hash), not the
+// raw value, so it can't be looked up here - it has to be hardcoded and
+// updated whenever the general member code is rotated (each semester, or
+// if Admin > Semester setup shows it's been changed).
+const GENERAL_MEMBER_CODE = 'BOSSO-C26A3FE39AA0292CB1B5'
+
 const INTEREST_FILTERS: Array<{ value: 'new' | 'contacted' | 'dismissed' | 'all'; label: string }> = [
   { value: 'new', label: 'New' },
   { value: 'contacted', label: 'Contacted' },
@@ -2654,7 +2661,7 @@ Thanks for your interest in BOSSO! To join as a general member, sign up for the 
 
 https://bosso-portal.vercel.app/signup
 
-Then enter this position code when prompted: [PASTE GENERAL MEMBER CODE]
+Then enter this position code when prompted: ${GENERAL_MEMBER_CODE}
 
 Let us know if you run into any trouble.
 
