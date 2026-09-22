@@ -110,8 +110,8 @@ export default function JoinPage() {
                   <input id="major" value={form.major} onChange={set('major')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="Finance" />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="eid" className="text-sm font-medium text-foreground">UT EID <span className="text-muted-foreground">(optional)</span></label>
-                  <input id="eid" value={form.eid} onChange={set('eid')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="abc1234" />
+                  <label htmlFor="eid" className="text-sm font-medium text-foreground">UT EID</label>
+                  <input id="eid" required value={form.eid} onChange={set('eid')} className="w-full px-4 py-3 bg-dark-100 border border-primary/20 rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all input-neon" placeholder="abc1234" />
                 </div>
               </div>
 

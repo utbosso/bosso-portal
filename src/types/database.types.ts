@@ -964,7 +964,7 @@ export interface MembershipInterestSubmission {
   full_name: string
   email: string
   phone: string
-  eid: string | null
+  eid: string
   graduation_year: string | null
   major: string | null
   how_heard: string | null

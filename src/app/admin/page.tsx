@@ -2744,7 +2744,7 @@ BOSSO Team`)
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-foreground">{submission.full_name}</p>
-                  <p className="text-sm text-muted-foreground">{submission.email} • {submission.phone}{submission.eid ? ` • EID: ${submission.eid}` : ''}</p>
+                  <p className="text-sm text-muted-foreground">{submission.email} • {submission.phone} • EID: {submission.eid}</p>
                   <p className="text-xs text-muted-foreground mt-1">Submitted {new Date(submission.created_at).toLocaleString()}</p>
                 </div>
                 <span

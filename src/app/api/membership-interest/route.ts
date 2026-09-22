@@ -32,6 +32,7 @@ export async function POST(request: Request) {
   if (fullName.length < 2) return NextResponse.json({ error: 'Enter your full name.' }, { status: 400 })
   if (!EMAIL_RE.test(email)) return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 })
   if (phone.length < 7) return NextResponse.json({ error: 'Enter a valid phone number.' }, { status: 400 })
+  if (eid.length < 2) return NextResponse.json({ error: 'Enter your UT EID.' }, { status: 400 })
 
   const admin = createAdminClient()
 
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     full_name: fullName,
     email,
     phone,
-    eid: eid || null,
+    eid,
     graduation_year: graduationYear || null,
     major: major || null,
     how_heard: howHeard || null,
