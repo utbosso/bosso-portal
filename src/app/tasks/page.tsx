@@ -98,6 +98,38 @@ function dueLabel(dueAt: string | null) {
   return due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+// Once something is submitted, whether it's "late" is fixed at the moment
+// it was turned in - not a function of how much time has passed since,
+// which is what a plain due-date-vs-today comparison would otherwise imply.
+function renderDueBadge(task: TeamTask, submittedAtByTask: Record<string, string>, iconSize: 'sm' | 'md' = 'sm') {
+  const iconClass = iconSize === 'md' ? 'h-4 w-4' : 'h-3.5 w-3.5'
+  const status = getWorkflowStatus(task)
+
+  if (status === 'submitted') {
+    const submittedAt = submittedAtByTask[task.id]
+    if (submittedAt && task.due_at) {
+      const onTime = new Date(submittedAt).getTime() <= new Date(task.due_at).getTime()
+      return onTime ? (
+        <span className="inline-flex items-center gap-1.5 font-medium text-[hsl(var(--success))]">
+          <CheckCircle2 className={iconClass} /> Submitted on time
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 font-medium text-destructive">
+          <AlertTriangle className={iconClass} /> Submitted late
+        </span>
+      )
+    }
+    return <span className="inline-flex items-center gap-1.5">{dueLabel(task.due_at)}</span>
+  }
+
+  const overdue = isPastDue(task) && status !== 'approved'
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${overdue ? 'font-medium text-destructive' : ''}`}>
+      {overdue && <AlertTriangle className={iconClass} />} {dueLabel(task.due_at)}
+    </span>
+  )
+}
+
 function missingReferenceLinksColumn(error: { message?: string } | null | undefined) {
   return Boolean(error?.message && /reference_links/i.test(error.message))
 }
@@ -149,6 +181,11 @@ export default function TasksPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [showPersonalCreate, setShowPersonalCreate] = useState(false)
   const [reviewerGroupIds, setReviewerGroupIds] = useState<Set<string>>(new Set())
+  // When each currently-submitted task actually got submitted, keyed by
+  // task id - used to tell "submitted on time" apart from "submitted late"
+  // instead of judging lateness against today's date once it's no longer
+  // waiting on the assignee at all.
+  const [submittedAtByTask, setSubmittedAtByTask] = useState<Record<string, string>>({})
   const [extendingTask, setExtendingTask] = useState<TeamTask | null>(null)
   const [extendMode, setExtendMode] = useState<'people' | 'role'>('people')
   const [extendAssignees, setExtendAssignees] = useState<string[]>([])
@@ -308,6 +345,26 @@ export default function TasksPage() {
       assignee_status:
         row.assignee_status || (row.status === 'in_progress' ? 'in_progress' : row.status === 'completed' ? 'completed' : 'not_started'),
     })) as TeamTask[]
+
+    const submittedTaskIds = normalized.filter((task) => getWorkflowStatus(task) === 'submitted').map((task) => task.id)
+    if (submittedTaskIds.length > 0) {
+      const { data: historyRows } = await supabase
+        .from('task_status_history')
+        .select('task_id, to_status, created_at')
+        .in('task_id', submittedTaskIds)
+        .eq('to_status', 'completed')
+        .order('created_at', { ascending: false })
+      const nextSubmittedAt: Record<string, string> = {}
+      // assignee_status only ever flips to 'completed' when the assignee
+      // submits (approval doesn't touch it again), so the newest such row
+      // per task is that task's current submission moment.
+      ;(historyRows || []).forEach((row: any) => {
+        if (!nextSubmittedAt[row.task_id]) nextSubmittedAt[row.task_id] = row.created_at
+      })
+      setSubmittedAtByTask(nextSubmittedAt)
+    } else {
+      setSubmittedAtByTask({})
+    }
 
     setTasks(normalized)
     setPersonalTasks((personalResult.data || []) as PersonalTask[])
@@ -1009,7 +1066,7 @@ export default function TasksPage() {
         {loading ? <div className="portal-loading"><Loader2 className="animate-spin" /> Loading action items…</div> : currentList.length === 0 ? <div className="portal-empty compact"><ListChecks className="h-8 w-8" /><h3>Nothing in this view</h3><p>{tab === 'review' ? 'Submitted work will appear here for approval.' : 'You are all caught up.'}</p></div> : tab === 'personal' ? (
           <div className="divide-y divide-border">{filteredPersonal.map((task) => <button key={task.id} onClick={() => void togglePersonal(task)} className="flex w-full items-start gap-3 px-4 py-4 text-left hover:bg-muted/50 sm:gap-4 sm:px-5"><span className="mt-0.5">{task.status === 'completed' ? <CheckCircle2 className="h-5 w-5 text-[hsl(var(--success))]" /> : <Circle className="h-5 w-5 text-muted-foreground" />}</span><span className="min-w-0 flex-1"><span className={`block font-medium ${task.status === 'completed' ? 'text-muted-foreground line-through' : ''}`}>{task.title}</span>{task.description && <span className="mt-1 line-clamp-1 block text-sm text-muted-foreground">{task.description}</span>}<span className="mt-1 block text-xs text-muted-foreground sm:hidden">{dueLabel(task.due_at)}</span></span><span className="hidden text-xs text-muted-foreground sm:block">{dueLabel(task.due_at)}</span></button>)}</div>
         ) : (
-          <div className="divide-y divide-border">{filteredTasks.map((task) => { const status = getWorkflowStatus(task); const overdue = task.due_at && new Date(task.due_at) < new Date() && status !== 'approved'; return <button key={task.id} onClick={() => setSelectedTask(task)} className="group flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/50"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${status === 'approved' ? 'bg-[hsl(var(--success-surface))] text-[hsl(var(--success))]' : status === 'submitted' ? 'bg-[hsl(var(--info-surface))] text-[hsl(var(--info))]' : status === 'in_progress' ? 'bg-[hsl(var(--warning-surface))] text-[hsl(var(--warning))]' : 'bg-muted text-muted-foreground'}`}>{status === 'approved' ? <Check className="h-4 w-4" /> : status === 'submitted' ? <FileCheck2 className="h-4 w-4" /> : status === 'in_progress' ? <Clock3 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="truncate font-medium">{task.title}</span>{task.point_value ? <span className="badge-warning rounded-full px-2 py-0.5 text-[11px] font-medium">{task.point_value} pts</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{workflowLabel(status)}</span><span>{tab === 'mine' ? `From ${task.assigner?.full_name || 'BOSSO'}` : task.assignee?.full_name || 'Member'}</span><span className={overdue ? 'inline-flex items-center gap-1 font-medium text-destructive' : ''}>{overdue && <AlertTriangle className="h-3 w-3 shrink-0" />}{dueLabel(task.due_at)}</span></div></div><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button> })}</div>
+          <div className="divide-y divide-border">{filteredTasks.map((task) => { const status = getWorkflowStatus(task); return <button key={task.id} onClick={() => setSelectedTask(task)} className="group flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/50"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${status === 'approved' ? 'bg-[hsl(var(--success-surface))] text-[hsl(var(--success))]' : status === 'submitted' ? 'bg-[hsl(var(--info-surface))] text-[hsl(var(--info))]' : status === 'in_progress' ? 'bg-[hsl(var(--warning-surface))] text-[hsl(var(--warning))]' : 'bg-muted text-muted-foreground'}`}>{status === 'approved' ? <Check className="h-4 w-4" /> : status === 'submitted' ? <FileCheck2 className="h-4 w-4" /> : status === 'in_progress' ? <Clock3 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="truncate font-medium">{task.title}</span>{task.point_value ? <span className="badge-warning rounded-full px-2 py-0.5 text-[11px] font-medium">{task.point_value} pts</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{workflowLabel(status)}</span><span>{tab === 'mine' ? `From ${task.assigner?.full_name || 'BOSSO'}` : task.assignee?.full_name || 'Member'}</span>{renderDueBadge(task, submittedAtByTask)}</div></div><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button> })}</div>
         )}
       </div>
 
@@ -1018,7 +1075,7 @@ export default function TasksPage() {
           <aside onMouseDown={(event) => event.stopPropagation()} className="absolute inset-y-0 right-0 w-full max-w-2xl overflow-y-auto border-l border-border bg-card shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">Action item</p><p className="mt-1 text-sm text-muted-foreground">{selectedTask.assignee?.full_name}</p></div><button onClick={() => setSelectedTask(null)} className="portal-icon-button"><X className="h-5 w-5" /></button></div>
             <div className="space-y-7 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:space-y-8 sm:p-8">
-              <div><h2 className="break-words text-2xl font-semibold leading-tight sm:text-3xl">{selectedTask.title}</h2>{selectedTask.description && <p className="mt-4 whitespace-pre-wrap leading-7 text-muted-foreground">{selectedTask.description}</p>}<div className="mt-5 flex flex-wrap gap-3 text-sm text-muted-foreground"><span className={`inline-flex items-center gap-2 ${isPastDue(selectedTask) && getWorkflowStatus(selectedTask) !== 'approved' ? 'font-medium text-destructive' : ''}`}>{isPastDue(selectedTask) && getWorkflowStatus(selectedTask) !== 'approved' ? <AlertTriangle className="h-4 w-4" /> : <CalendarDays className="h-4 w-4" />} {dueLabel(selectedTask.due_at)}</span>{selectedTask.point_value ? <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4" /> {selectedTask.point_value} points</span> : null}</div></div>
+              <div><h2 className="break-words text-2xl font-semibold leading-tight sm:text-3xl">{selectedTask.title}</h2>{selectedTask.description && <p className="mt-4 whitespace-pre-wrap leading-7 text-muted-foreground">{selectedTask.description}</p>}<div className="mt-5 flex flex-wrap gap-3 text-sm text-muted-foreground">{renderDueBadge(selectedTask, submittedAtByTask, 'md')}{selectedTask.point_value ? <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4" /> {selectedTask.point_value} points</span> : null}</div></div>
 
               <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div><label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{updateFile ? updateFile.name : 'Attach a file (optional) - JPG, PNG, WebP, or PDF, 10 MB max'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setUpdateFile(event.target.files?.[0] || null)} /></label><p className="mt-2 text-xs text-muted-foreground">Anything typed or attached here is included automatically when you hit Submit for review below - no need to click Add update first.</p></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p><div className="mt-3 flex flex-wrap gap-4">{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}{attachmentLinks[update.id] && <a href={attachmentLinks[update.id].url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><Paperclip className="h-3.5 w-3.5" /> {attachmentLinks[update.id].name}</a>}</div></article>)}</div>}</section>
 
