@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   CalendarDays,
@@ -76,6 +77,10 @@ function workflowLabel(status: WorkflowStatus) {
   return workflow.find((item) => item.value === status)?.label || status
 }
 
+function isPastDue(task: TeamTask) {
+  return Boolean(task.due_at) && new Date(task.due_at as string).getTime() < Date.now()
+}
+
 function dueLabel(dueAt: string | null) {
   if (!dueAt) return 'No due date'
   const due = new Date(dueAt)
@@ -142,6 +147,8 @@ export default function TasksPage() {
   const [extendMode, setExtendMode] = useState<'people' | 'role'>('people')
   const [extendAssignees, setExtendAssignees] = useState<string[]>([])
   const [extendRole, setExtendRole] = useState<UserRole | ''>('')
+  const [editingDueDateTask, setEditingDueDateTask] = useState<TeamTask | null>(null)
+  const [editDueDateValue, setEditDueDateValue] = useState('')
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
@@ -749,6 +756,44 @@ export default function TasksPage() {
     setSaving('')
   }
 
+  const openEditDueDate = (task: TeamTask) => {
+    setEditingDueDateTask(task)
+    if (task.due_at) {
+      const due = new Date(task.due_at)
+      const year = due.getFullYear()
+      const month = `${due.getMonth() + 1}`.padStart(2, '0')
+      const day = `${due.getDate()}`.padStart(2, '0')
+      setEditDueDateValue(`${year}-${month}-${day}`)
+    } else {
+      setEditDueDateValue('')
+    }
+  }
+
+  const submitEditDueDate = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!editingDueDateTask) return
+    setError('')
+    setSaving('edit-due-date')
+
+    const nextDueAt = editDueDateValue ? new Date(`${editDueDateValue}T23:59:00`).toISOString() : null
+    // A deliverable due date belongs to the whole group (everyone who
+    // already checked in got their own task row with the old date copied
+    // onto it) - fixing it on just the one selected person would leave
+    // everyone else on the stale date.
+    const query = editingDueDateTask.group_task_id
+      ? supabase.from('tasks').update({ due_at: nextDueAt }).eq('group_task_id', editingDueDateTask.group_task_id)
+      : supabase.from('tasks').update({ due_at: nextDueAt }).eq('id', editingDueDateTask.id)
+    const { error: updateError } = await query
+    if (updateError) {
+      setError(`Due date could not be saved: ${updateError.message}`)
+    } else {
+      setEditingDueDateTask(null)
+      await loadTasks()
+      if (selectedTask) await loadDetails(selectedTask)
+    }
+    setSaving('')
+  }
+
   const openManageReviewers = (task: TeamTask) => {
     setManagingReviewersTask(task)
     setNewReviewerIds([])
@@ -911,6 +956,10 @@ export default function TasksPage() {
   }
 
   const submitForReview = async (task: TeamTask) => {
+    if (isPastDue(task)) {
+      setError('This item is past its due date and can no longer be submitted.')
+      return
+    }
     setSaving(`status-${task.id}`)
     const hasDraft = Boolean(updateNote.trim() || updateLink.trim() || updateFile)
     if (hasDraft) {
@@ -954,7 +1003,7 @@ export default function TasksPage() {
         {loading ? <div className="portal-loading"><Loader2 className="animate-spin" /> Loading action items…</div> : currentList.length === 0 ? <div className="portal-empty compact"><ListChecks className="h-8 w-8" /><h3>Nothing in this view</h3><p>{tab === 'review' ? 'Submitted work will appear here for approval.' : 'You are all caught up.'}</p></div> : tab === 'personal' ? (
           <div className="divide-y divide-border">{filteredPersonal.map((task) => <button key={task.id} onClick={() => void togglePersonal(task)} className="flex w-full items-start gap-3 px-4 py-4 text-left hover:bg-muted/50 sm:gap-4 sm:px-5"><span className="mt-0.5">{task.status === 'completed' ? <CheckCircle2 className="h-5 w-5 text-[hsl(var(--success))]" /> : <Circle className="h-5 w-5 text-muted-foreground" />}</span><span className="min-w-0 flex-1"><span className={`block font-medium ${task.status === 'completed' ? 'text-muted-foreground line-through' : ''}`}>{task.title}</span>{task.description && <span className="mt-1 line-clamp-1 block text-sm text-muted-foreground">{task.description}</span>}<span className="mt-1 block text-xs text-muted-foreground sm:hidden">{dueLabel(task.due_at)}</span></span><span className="hidden text-xs text-muted-foreground sm:block">{dueLabel(task.due_at)}</span></button>)}</div>
         ) : (
-          <div className="divide-y divide-border">{filteredTasks.map((task) => { const status = getWorkflowStatus(task); const overdue = task.due_at && new Date(task.due_at) < new Date() && status !== 'approved'; return <button key={task.id} onClick={() => setSelectedTask(task)} className="group flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/50"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${status === 'approved' ? 'bg-[hsl(var(--success-surface))] text-[hsl(var(--success))]' : status === 'submitted' ? 'bg-[hsl(var(--info-surface))] text-[hsl(var(--info))]' : status === 'in_progress' ? 'bg-[hsl(var(--warning-surface))] text-[hsl(var(--warning))]' : 'bg-muted text-muted-foreground'}`}>{status === 'approved' ? <Check className="h-4 w-4" /> : status === 'submitted' ? <FileCheck2 className="h-4 w-4" /> : status === 'in_progress' ? <Clock3 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="truncate font-medium">{task.title}</span>{task.point_value ? <span className="badge-warning rounded-full px-2 py-0.5 text-[11px] font-medium">{task.point_value} pts</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{workflowLabel(status)}</span><span>{tab === 'mine' ? `From ${task.assigner?.full_name || 'BOSSO'}` : task.assignee?.full_name || 'Member'}</span><span className={overdue ? 'font-medium text-destructive' : ''}>{dueLabel(task.due_at)}</span></div></div><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button> })}</div>
+          <div className="divide-y divide-border">{filteredTasks.map((task) => { const status = getWorkflowStatus(task); const overdue = task.due_at && new Date(task.due_at) < new Date() && status !== 'approved'; return <button key={task.id} onClick={() => setSelectedTask(task)} className="group flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/50"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${status === 'approved' ? 'bg-[hsl(var(--success-surface))] text-[hsl(var(--success))]' : status === 'submitted' ? 'bg-[hsl(var(--info-surface))] text-[hsl(var(--info))]' : status === 'in_progress' ? 'bg-[hsl(var(--warning-surface))] text-[hsl(var(--warning))]' : 'bg-muted text-muted-foreground'}`}>{status === 'approved' ? <Check className="h-4 w-4" /> : status === 'submitted' ? <FileCheck2 className="h-4 w-4" /> : status === 'in_progress' ? <Clock3 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="truncate font-medium">{task.title}</span>{task.point_value ? <span className="badge-warning rounded-full px-2 py-0.5 text-[11px] font-medium">{task.point_value} pts</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{workflowLabel(status)}</span><span>{tab === 'mine' ? `From ${task.assigner?.full_name || 'BOSSO'}` : task.assignee?.full_name || 'Member'}</span><span className={overdue ? 'inline-flex items-center gap-1 font-medium text-destructive' : ''}>{overdue && <AlertTriangle className="h-3 w-3 shrink-0" />}{dueLabel(task.due_at)}</span></div></div><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button> })}</div>
         )}
       </div>
 
@@ -963,7 +1012,7 @@ export default function TasksPage() {
           <aside onMouseDown={(event) => event.stopPropagation()} className="absolute inset-y-0 right-0 w-full max-w-2xl overflow-y-auto border-l border-border bg-card shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">Action item</p><p className="mt-1 text-sm text-muted-foreground">{selectedTask.assignee?.full_name}</p></div><button onClick={() => setSelectedTask(null)} className="portal-icon-button"><X className="h-5 w-5" /></button></div>
             <div className="space-y-7 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:space-y-8 sm:p-8">
-              <div><h2 className="break-words text-2xl font-semibold leading-tight sm:text-3xl">{selectedTask.title}</h2>{selectedTask.description && <p className="mt-4 whitespace-pre-wrap leading-7 text-muted-foreground">{selectedTask.description}</p>}<div className="mt-5 flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4" /> {dueLabel(selectedTask.due_at)}</span>{selectedTask.point_value ? <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4" /> {selectedTask.point_value} points</span> : null}</div></div>
+              <div><h2 className="break-words text-2xl font-semibold leading-tight sm:text-3xl">{selectedTask.title}</h2>{selectedTask.description && <p className="mt-4 whitespace-pre-wrap leading-7 text-muted-foreground">{selectedTask.description}</p>}<div className="mt-5 flex flex-wrap gap-3 text-sm text-muted-foreground"><span className={`inline-flex items-center gap-2 ${isPastDue(selectedTask) && getWorkflowStatus(selectedTask) !== 'approved' ? 'font-medium text-destructive' : ''}`}>{isPastDue(selectedTask) && getWorkflowStatus(selectedTask) !== 'approved' ? <AlertTriangle className="h-4 w-4" /> : <CalendarDays className="h-4 w-4" />} {dueLabel(selectedTask.due_at)}</span>{selectedTask.point_value ? <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4" /> {selectedTask.point_value} points</span> : null}</div></div>
 
               <section><div className="flex items-center gap-2"><MessageSquarePlus className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Updates</h3></div><form onSubmit={submitUpdate} className="mt-4 rounded-xl border border-border bg-muted/40 p-3 sm:p-4"><textarea value={updateNote} onChange={(event) => setUpdateNote(event.target.value)} rows={3} className="portal-input w-full resize-none" placeholder="Share progress, context, or what is blocking you." required /><div className="mt-3 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={updateLink} onChange={(event) => setUpdateLink(event.target.value)} type="url" className="portal-input w-full pl-9" placeholder="Optional link" /></div><button disabled={saving === `update-${selectedTask.id}`} className="portal-button justify-center"><Send className="h-4 w-4" /> Add update</button></div><label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{updateFile ? updateFile.name : 'Attach a file (optional) - JPG, PNG, WebP, or PDF, 10 MB max'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setUpdateFile(event.target.files?.[0] || null)} /></label><p className="mt-2 text-xs text-muted-foreground">Anything typed or attached here is included automatically when you hit Submit for review below - no need to click Add update first.</p></form>{detailLoading ? <div className="portal-loading min-h-28"><Loader2 className="animate-spin" /></div> : updates.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No updates yet.</p> : <div className="mt-4 space-y-3">{updates.map((update) => <article key={update.id} className="rounded-xl border border-border p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><p className="text-sm font-medium">{update.author?.full_name || 'Member'}</p><p className="text-xs text-muted-foreground">{update.created_at ? new Date(update.created_at).toLocaleString() : ''}</p></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{update.note}</p><div className="mt-3 flex flex-wrap gap-4">{update.link && <a href={update.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}{attachmentLinks[update.id] && <a href={attachmentLinks[update.id].url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary"><Paperclip className="h-3.5 w-3.5" /> {attachmentLinks[update.id].name}</a>}</div></article>)}</div>}</section>
 
@@ -980,9 +1029,9 @@ export default function TasksPage() {
                 </section>
               )}
 
-              <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && <button disabled={saving.includes(selectedTask.id)} onClick={() => void submitForReview(selectedTask)} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>}{canReviewGroup(selectedTask) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
+              <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && (isPastDue(selectedTask) ? <p className="flex items-center gap-2 text-sm font-medium text-destructive"><AlertTriangle className="h-4 w-4" /> Past due - no longer accepting submissions.</p> : <button disabled={saving.includes(selectedTask.id)} onClick={() => void submitForReview(selectedTask)} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>)}{canReviewGroup(selectedTask) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
 
-              {selectedTask.assigned_by === profile?.id && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Manage this action item</h3></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button><button type="button" onClick={() => openManageReviewers(selectedTask)} className="portal-button-secondary small"><FileCheck2 className="h-3.5 w-3.5" /> Manage reviewers</button></div>{groupReviewers.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Reviewers: {groupReviewers.map((r) => r.reviewer?.full_name || 'Member').join(', ')}</p>}</section>}
+              {selectedTask.assigned_by === profile?.id && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Manage this action item</h3></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => openEditDueDate(selectedTask)} className="portal-button-secondary small"><CalendarDays className="h-3.5 w-3.5" /> Edit due date</button><button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button><button type="button" onClick={() => openManageReviewers(selectedTask)} className="portal-button-secondary small"><FileCheck2 className="h-3.5 w-3.5" /> Manage reviewers</button></div>{groupReviewers.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Reviewers: {groupReviewers.map((r) => r.reviewer?.full_name || 'Member').join(', ')}</p>}</section>}
 
               {canReviewGroup(selectedTask) && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 max-h-72 divide-y divide-border overflow-y-auto rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></section>}
 
@@ -1317,6 +1366,33 @@ export default function TasksPage() {
               <button disabled={saving === 'add-reviewers' || newReviewerIds.length === 0} className="portal-button justify-center">
                 Add {newReviewerIds.length || 0}
               </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingDueDateTask && (
+        <div className="portal-modal-backdrop z-[95]" onMouseDown={() => setEditingDueDateTask(null)}>
+          <form onSubmit={submitEditDueDate} onMouseDown={(event) => event.stopPropagation()} className="portal-modal max-w-sm">
+            <div className="portal-form-header">
+              <div>
+                <p className="portal-eyebrow">Only you can change this</p>
+                <h2>Edit due date</h2>
+                {editingDueDateTask.group_task_id && (
+                  <p className="text-sm text-muted-foreground">This updates the due date for everyone assigned to “{editingDueDateTask.title}”, not just this person.</p>
+                )}
+              </div>
+              <button type="button" onClick={() => setEditingDueDateTask(null)} className="portal-icon-button"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5">
+              <label>
+                <span className="portal-label">New due date</span>
+                <input type="date" value={editDueDateValue} onChange={(event) => setEditDueDateValue(event.target.value)} className="portal-input w-full" required />
+              </label>
+            </div>
+            <div className="portal-form-actions">
+              <button type="button" onClick={() => setEditingDueDateTask(null)} className="portal-button-secondary justify-center">Cancel</button>
+              <button disabled={saving === 'edit-due-date'} className="portal-button justify-center">Save</button>
             </div>
           </form>
         </div>
