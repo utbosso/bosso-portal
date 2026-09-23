@@ -85,7 +85,13 @@ function dueLabel(dueAt: string | null) {
   if (!dueAt) return 'No due date'
   const due = new Date(dueAt)
   const today = new Date()
-  const days = Math.ceil((due.getTime() - today.getTime()) / 86400000)
+  // Compare calendar dates, not a raw millisecond delta - due_at is always
+  // end-of-day (11:59pm local) on the chosen date, so a same-day diff of a
+  // few hours would otherwise round to "due today" even hours after it was
+  // actually due, right up until a full 24h had passed.
+  const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate())
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const days = Math.round((dueMidnight.getTime() - todayMidnight.getTime()) / 86400000)
   if (days < 0) return `${Math.abs(days)}d overdue`
   if (days === 0) return 'Due today'
   if (days === 1) return 'Due tomorrow'
