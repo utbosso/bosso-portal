@@ -1,19 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/route-handler'
 import { createAdminClient } from '@/lib/supabase/admin'
-
-export const DEMOGRAPHIC_SCHOOLS = [
-  'McCombs School of Business',
-  'College of Liberal Arts',
-  'College of Education',
-  'College of Natural Sciences',
-  'Undecided',
-  'Moody College of Communication',
-  'Cockrell School of Engineering',
-  'Other Schools',
-] as const
-
-const CLASS_STANDINGS = ['freshman', 'sophomore', 'junior', 'senior'] as const
+import { DEMOGRAPHIC_SCHOOLS, CLASS_STANDINGS } from '@/lib/demographics'
 
 export async function POST(request: Request) {
   const supabase = createClient()

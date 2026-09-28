@@ -2,28 +2,14 @@
 
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { DEMOGRAPHIC_SCHOOLS, CLASS_STANDING_LABELS } from '@/lib/demographics'
 
 // One-time, mandatory survey shown to every fully-approved member until
 // they complete it - deliberately a standalone overlay rather than wired
 // into PortalAccessGate's access-status state machine, since this is a
 // temporary data-collection effort, not a permanent access rule.
-const SCHOOLS = [
-  'McCombs School of Business',
-  'College of Liberal Arts',
-  'College of Education',
-  'College of Natural Sciences',
-  'Undecided',
-  'Moody College of Communication',
-  'Cockrell School of Engineering',
-  'Other Schools',
-]
-
-const CLASS_STANDINGS: Array<{ value: string; label: string }> = [
-  { value: 'freshman', label: 'Freshman' },
-  { value: 'sophomore', label: 'Sophomore' },
-  { value: 'junior', label: 'Junior' },
-  { value: 'senior', label: 'Senior' },
-]
+const SCHOOLS = DEMOGRAPHIC_SCHOOLS
+const CLASS_STANDINGS = Object.entries(CLASS_STANDING_LABELS).map(([value, label]) => ({ value, label }))
 
 export default function DemographicsGate({ onComplete }: { onComplete: () => void }) {
   const [schools, setSchools] = useState<string[]>([])

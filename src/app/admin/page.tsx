@@ -33,6 +33,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import type { Profile, FeedbackSubmission, Application, EventCategory, EventType, UserRole, AcademicTerm, MemberTermMembership, DuesPrice, MembershipInterestSubmission } from '@/types/database.types'
+import { DEMOGRAPHIC_SCHOOLS, CLASS_STANDING_LABELS } from '@/lib/demographics'
 import { EVENT_CATEGORIES, EVENT_TYPES, getEventTypesByCategory } from '@/lib/bosso-points'
 import { buildCategoryTotals, getCategoryFromAdjustmentReason } from '@/lib/points-calculations'
 import type { UserOption } from '@/components/UserSearch'
@@ -2832,23 +2833,7 @@ type DemographicsMember = {
   demographics_completed_at: string | null
 }
 
-const DEMOGRAPHIC_SCHOOL_LIST = [
-  'McCombs School of Business',
-  'College of Liberal Arts',
-  'College of Education',
-  'College of Natural Sciences',
-  'Undecided',
-  'Moody College of Communication',
-  'Cockrell School of Engineering',
-  'Other Schools',
-]
-
-const CLASS_STANDING_LABELS: Record<string, string> = {
-  freshman: 'Freshman',
-  sophomore: 'Sophomore',
-  junior: 'Junior',
-  senior: 'Senior',
-}
+const DEMOGRAPHIC_SCHOOL_LIST: readonly string[] = DEMOGRAPHIC_SCHOOLS
 
 function DemographicsTab() {
   const [members, setMembers] = useState<DemographicsMember[]>([])
