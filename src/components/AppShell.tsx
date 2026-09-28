@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
+import DemographicsGate from '@/components/DemographicsGate'
 import { createClient } from '@/lib/supabase/client'
 import { canAccessRoleScope } from '@/lib/role-scope'
 import {
@@ -165,6 +166,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [demographicsDismissed, setDemographicsDismissed] = useState(false)
   const [unreadCount, setUnreadCount] = useState<number>(0)
   const [taskCount, setTaskCount] = useState<number>(0)
   const [searchQuery, setSearchQuery] = useState('')
@@ -764,8 +766,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const sidebarWidth = sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'
   const mainPaddingClass = sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
 
+  const needsDemographics = Boolean(access?.access_granted && profile && !profile.demographics_completed_at && !demographicsDismissed)
+
   return (
     <div className="min-h-screen bg-background">
+      {needsDemographics && <DemographicsGate onComplete={() => setDemographicsDismissed(true)} />}
       {/* Desktop sidebar (collapsible) */}
       <aside className={`hidden lg:fixed lg:inset-y-0 lg:flex ${sidebarWidth} lg:flex-col`}>
         <div className="flex flex-col flex-grow overflow-y-auto border-r border-border bg-card">

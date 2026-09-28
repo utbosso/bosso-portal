@@ -464,6 +464,12 @@ export interface Profile {
   ut_email?: string | null
   phone_number?: string | null
   work_experiences?: WorkExperience[] | null
+  demographics_schools?: string[] | null
+  demographics_class_standing?: 'freshman' | 'sophomore' | 'junior' | 'senior' | null
+  demographics_major?: string | null
+  demographics_has_minor?: boolean | null
+  demographics_minor?: string | null
+  demographics_completed_at?: string | null
 }
 
 export interface Announcement {

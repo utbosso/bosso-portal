@@ -45,7 +45,7 @@ import {
 
 const supabase = createClient()
 
-type TabType = 'overview' | 'users' | 'points' | 'interest'
+type TabType = 'overview' | 'users' | 'points' | 'interest' | 'demographics'
 
 type UserPointsBreakdown = {
   user_id: string
@@ -83,7 +83,7 @@ export default function AdminDashboard() {
 
   // Get active tab from URL, default to 'overview'
   const tabFromUrl = searchParams.get('tab') as TabType | null
-  const activeTab: TabType = tabFromUrl && ['overview', 'users', 'points', 'interest'].includes(tabFromUrl) ? tabFromUrl : 'overview'
+  const activeTab: TabType = tabFromUrl && ['overview', 'users', 'points', 'interest', 'demographics'].includes(tabFromUrl) ? tabFromUrl : 'overview'
 
   // Ref to track scroll position through re-renders
   const scrollPositionRef = useRef<number>(0)
@@ -446,6 +446,19 @@ export default function AdminDashboard() {
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('demographics')}
+          className={`px-4 py-2 text-sm font-medium transition-all relative ${
+            activeTab === 'demographics'
+              ? 'text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Demographics
+          {activeTab === 'demographics' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
       </div>
 
       {/* Alert for pending users - Only show on Overview tab */}
@@ -659,6 +672,11 @@ export default function AdminDashboard() {
       {/* Membership Interest Tab Content */}
       {activeTab === 'interest' && (
         <MembershipInterestTab />
+      )}
+
+      {/* Demographics Tab Content */}
+      {activeTab === 'demographics' && (
+        <DemographicsTab />
       )}
     </div>
   )
@@ -2791,6 +2809,165 @@ BOSSO Team`)
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Demographics Tab Component - the one-time School/Class-standing/Major/
+// Minor survey every current-term member is gated on (DemographicsGate).
+// Deliberately a read-only view over that same data: stat cards, a
+// breakdown, who's still missing it, and a CSV export - no separate
+// "demographics" data model of its own.
+type DemographicsMember = {
+  id: string
+  full_name: string
+  email: string
+  demographics_schools: string[] | null
+  demographics_class_standing: string | null
+  demographics_major: string | null
+  demographics_has_minor: boolean | null
+  demographics_minor: string | null
+  demographics_completed_at: string | null
+}
+
+const DEMOGRAPHIC_SCHOOL_LIST = [
+  'McCombs School of Business',
+  'College of Liberal Arts',
+  'College of Education',
+  'College of Natural Sciences',
+  'Undecided',
+  'Moody College of Communication',
+  'Cockrell School of Engineering',
+  'Other Schools',
+]
+
+const CLASS_STANDING_LABELS: Record<string, string> = {
+  freshman: 'Freshman',
+  sophomore: 'Sophomore',
+  junior: 'Junior',
+  senior: 'Senior',
+}
+
+function DemographicsTab() {
+  const [members, setMembers] = useState<DemographicsMember[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = async () => {
+    setError('')
+    try {
+      const response = await fetch('/api/admin/demographics')
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not load survey responses.')
+      setMembers(payload.members || [])
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Could not load survey responses.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  const completed = members.filter((m) => m.demographics_completed_at)
+  const notCompleted = members.filter((m) => !m.demographics_completed_at)
+
+  const uniqueMajors = new Set(
+    completed.flatMap((m) => (m.demographics_major || '').split(',').map((part) => part.trim().toLowerCase()).filter(Boolean))
+  )
+
+  const withMinor = completed.filter((m) => m.demographics_has_minor)
+  const minorTally = new Map<string, number>()
+  withMinor.forEach((m) => {
+    const key = (m.demographics_minor || '').trim()
+    if (key) minorTally.set(key, (minorTally.get(key) || 0) + 1)
+  })
+  const topMinor = Array.from(minorTally.entries()).sort((a, b) => b[1] - a[1])[0]
+
+  const schoolCounts = DEMOGRAPHIC_SCHOOL_LIST.map((school) => ({
+    school,
+    count: completed.filter((m) => (m.demographics_schools || []).includes(school)).length,
+  }))
+  const standingCounts = Object.entries(CLASS_STANDING_LABELS).map(([value, label]) => ({
+    label,
+    count: completed.filter((m) => m.demographics_class_standing === value).length,
+  }))
+
+  const exportCsv = () => {
+    const columns: Array<[string, (m: DemographicsMember) => string]> = [
+      ['Name', (m) => m.full_name],
+      ['Email', (m) => m.email],
+      ['Completed', (m) => (m.demographics_completed_at ? 'Yes' : 'No')],
+      ['Schools', (m) => (m.demographics_schools || []).join('; ')],
+      ['Class standing', (m) => CLASS_STANDING_LABELS[m.demographics_class_standing || ''] || ''],
+      ['Major', (m) => m.demographics_major || ''],
+      ['Has minor/certificate', (m) => (m.demographics_has_minor === null ? '' : m.demographics_has_minor ? 'Yes' : 'No')],
+      ['Minor/certificate', (m) => m.demographics_minor || ''],
+    ]
+    const escapeCell = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const rows = [columns.map(([header]) => escapeCell(header)).join(',')]
+    members.forEach((member) => rows.push(columns.map(([, getValue]) => escapeCell(getValue(member))).join(',')))
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `bosso-demographics-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (loading) return <div className="text-center py-12 text-muted-foreground">Loading survey responses...</div>
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-destructive/20 border border-destructive/50 text-destructive px-4 py-3 rounded-lg text-sm">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{completed.length} of {members.length} current members have completed the survey.</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => void load()} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+          <button onClick={exportCsv} disabled={members.length === 0} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-40"><Download className="w-3.5 h-3.5" /> Export CSV</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="card-glow p-5 text-center"><p className="text-3xl font-bold text-primary">{completed.length}</p><p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">Responses</p></div>
+        <div className="card-glow p-5 text-center"><p className="text-3xl font-bold text-primary">{uniqueMajors.size}{uniqueMajors.size > 0 ? '+' : ''}</p><p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">Unique majors</p></div>
+        <div className="card-glow p-5 text-center"><p className="text-3xl font-bold text-primary">{completed.length ? Math.round((withMinor.length / completed.length) * 100) : 0}%</p><p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">Have minor/certificate</p></div>
+        <div className="card-glow p-5 text-center"><p className="text-3xl font-bold text-primary">{completed.length && topMinor ? Math.round((topMinor[1] / completed.length) * 100) : 0}%</p><p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">{topMinor ? topMinor[0] : 'Top minor'}</p></div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="card-glow p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-3">By school / college</h3>
+          <div className="space-y-2">
+            {schoolCounts.map(({ school, count }) => (
+              <div key={school} className="flex items-center justify-between text-sm"><span className="text-muted-foreground">{school}</span><span className="font-medium text-foreground">{count}</span></div>
+            ))}
+          </div>
+        </div>
+        <div className="card-glow p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-3">By class standing</h3>
+          <div className="space-y-2">
+            {standingCounts.map(({ label, count }) => (
+              <div key={label} className="flex items-center justify-between text-sm"><span className="text-muted-foreground">{label}</span><span className="font-medium text-foreground">{count}</span></div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {notCompleted.length > 0 && (
+        <div className="card-glow p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-3">Haven't completed it yet ({notCompleted.length})</h3>
+          <div className="flex flex-wrap gap-2">
+            {notCompleted.map((m) => (
+              <span key={m.id} className="px-2.5 py-1 rounded-md bg-muted text-xs text-muted-foreground">{m.full_name}</span>
+            ))}
+          </div>
         </div>
       )}
     </div>
