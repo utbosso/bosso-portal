@@ -295,3 +295,34 @@ export function tempPasswordEmail(input: { name: string; password: string; login
     signoff: 'Best,\nThe BOSSO Board',
   })
 }
+
+export function storageAlertEmail(input: { level: 'warn' | 'critical' | 'full'; usedBytes: number; capBytes: number }): BuiltEmail {
+  const usedGb = (input.usedBytes / 1024 ** 3).toFixed(2)
+  const capGb = (input.capBytes / 1024 ** 3).toFixed(2)
+  const pct = Math.min(100, Math.round((input.usedBytes / input.capBytes) * 100))
+  const titles = { warn: 'Storage is getting full', critical: 'Storage is almost full', full: 'Storage limit reached' }
+  const kickers = {
+    warn: 'Nothing urgent yet, but worth a look before it becomes one.',
+    critical: 'Time to clear space or upgrade the plan soon.',
+    full: 'New uploads are being blocked until this is freed up.',
+  }
+  return build(`BOSSO Portal: ${titles[input.level]} (${pct}%)`, {
+    ticketLabel: input.level === 'full' ? 'Action needed' : 'Heads up',
+    eyebrow: 'System alert',
+    title: titles[input.level],
+    kicker: kickers[input.level],
+    intro: [
+      `The portal's file storage is at ${usedGb}GB of ${capGb}GB (${pct}%).`,
+      input.level === 'full'
+        ? 'People trying to upload documents, resources, or photos will see a "storage limit reached" message until this is resolved.'
+        : 'Uploads still work for now.',
+    ],
+    stepsTitle: 'What to do',
+    steps: [
+      'Open Supabase Dashboard -> Storage and delete anything no longer needed (old proof photos, duplicate documents)',
+      'Or upgrade the Supabase plan for more storage (Project Settings -> Billing)',
+    ],
+    ctas: [{ label: 'Open Supabase Dashboard', url: 'https://supabase.com/dashboard', primary: true }],
+    signoff: 'BOSSO Portal',
+  })
+}

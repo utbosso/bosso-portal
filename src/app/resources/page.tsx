@@ -20,7 +20,11 @@ import {
   Edit2,
   Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Link as LinkIcon,
+  Loader2,
+  Paperclip,
+  Upload,
 } from 'lucide-react'
 import SectionPageHeader from '@/components/SectionPageHeader'
 import {
@@ -50,11 +54,15 @@ export default function LearningHubPage() {
     description: '',
     category: 'sports_business' as ResourceCategory,
     type: 'article' as ResourceType,
+    source: 'link' as 'link' | 'upload',
     url: '',
+    file: null as File | null,
     tags: '',
     role_scope: null as UserRole | null,
     role_scope_mode: null as RoleScopeMode | null,
   })
+  const [uploading, setUploading] = useState(false)
+  const [openingResourceId, setOpeningResourceId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchResources()
@@ -125,8 +133,29 @@ export default function LearningHubPage() {
     e.preventDefault()
     if (!profile) return
 
+    if (formData.source === 'upload' && !editingResource && !formData.file) {
+      setError('Choose a file to upload, or switch to Link.')
+      return
+    }
+
     setError(null)
     try {
+      let uploadedFile: { storagePath: string; fileName: string; fileSizeBytes: number; mimeType: string } | null = null
+      if (formData.source === 'upload' && formData.file) {
+        setUploading(true)
+        const uploadForm = new FormData()
+        uploadForm.append('target', 'resources')
+        uploadForm.append('file', formData.file)
+        const response = await fetch('/api/storage-uploads', { method: 'POST', body: uploadForm })
+        const result = await response.json().catch(() => ({}))
+        setUploading(false)
+        if (!response.ok) {
+          setError(result.error || 'The file could not be uploaded.')
+          return
+        }
+        uploadedFile = { storagePath: result.storagePath, fileName: result.fileName, fileSizeBytes: result.fileSizeBytes, mimeType: result.mimeType }
+      }
+
       const tagsArray = formData.tags
         .split(',')
         .map(tag => tag.trim())
@@ -137,11 +166,14 @@ export default function LearningHubPage() {
         description: formData.description || null,
         category: formData.category,
         type: formData.type,
-        url: formData.url || null,
+        url: formData.source === 'link' ? formData.url || null : null,
         tags: tagsArray,
         role_scope: formData.role_scope,
         ...(formData.role_scope_mode ? { role_scope_mode: formData.role_scope_mode } : {}),
         created_by: profile.id,
+        ...(uploadedFile
+          ? { storage_path: uploadedFile.storagePath, file_name: uploadedFile.fileName, file_size_bytes: uploadedFile.fileSizeBytes, mime_type: uploadedFile.mimeType }
+          : {}),
       }
 
       if (editingResource) {
@@ -176,12 +208,29 @@ export default function LearningHubPage() {
       description: resource.description || '',
       category: resource.category,
       type: resource.type,
+      source: resource.storage_path ? 'upload' : 'link',
       url: resource.url || '',
+      file: null,
       tags: resource.tags.join(', '),
       role_scope: resource.role_scope,
       role_scope_mode: resource.role_scope_mode ?? null,
     })
     setShowForm(true)
+  }
+
+  const openResourceFile = async (resource: LearningResource) => {
+    if (!resource.storage_path) return
+    setOpeningResourceId(resource.id)
+    const newTab = window.open('', '_blank')
+    const response = await fetch(`/api/storage-uploads/download?target=resources&id=${resource.id}`)
+    const result = await response.json().catch(() => ({}))
+    setOpeningResourceId(null)
+    if (response.ok && result.url && newTab) {
+      newTab.location.href = result.url
+    } else {
+      newTab?.close()
+      setError(result.error || 'The file could not be opened.')
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -207,7 +256,9 @@ export default function LearningHubPage() {
       description: '',
       category: 'sports_business',
       type: 'article',
+      source: 'link',
       url: '',
+      file: null,
       tags: '',
       role_scope: null,
       role_scope_mode: null,
@@ -319,14 +370,25 @@ export default function LearningHubPage() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <section className="portal-form-section">
                 <div className="portal-form-section-heading"><span>1</span><div><h3>Resource</h3><p>Add the link and a short explanation of what members will get from it.</p></div></div>
-                <div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Title</span><input type="text" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="portal-input w-full" required placeholder="Example: Intro to sports analytics" /></label><label><span className="portal-label">URL <span className="font-normal text-muted-foreground">(optional)</span></span><input type="url" value={formData.url} onChange={(e) => setFormData({ ...formData, url: e.target.value })} className="portal-input w-full" placeholder="https://…" /></label></div><label><span className="portal-label">Why it is useful <span className="font-normal text-muted-foreground">(optional)</span></span><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="portal-input w-full resize-none" rows={4} placeholder="What will someone learn, and who is this best for?" /></label></div>
+                <div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Title</span><input type="text" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="portal-input w-full" required placeholder="Example: Intro to sports analytics" /></label><div className="space-y-3">
+                  <div className="flex gap-2"><button type="button" onClick={() => setFormData({ ...formData, source: 'link' })} className={formData.source === 'link' ? 'portal-button-secondary small' : 'portal-button-ghost small'}><LinkIcon className="h-3.5 w-3.5" /> Link</button><button type="button" onClick={() => setFormData({ ...formData, source: 'upload' })} className={formData.source === 'upload' ? 'portal-button-secondary small' : 'portal-button-ghost small'}><Upload className="h-3.5 w-3.5" /> Upload a file</button></div>
+                  {formData.source === 'link' ? (
+                    <label><span className="portal-label">URL <span className="font-normal text-muted-foreground">(optional)</span></span><input type="url" value={formData.url} onChange={(e) => setFormData({ ...formData, url: e.target.value })} className="portal-input w-full" placeholder="https://…" /></label>
+                  ) : (
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary">
+                      <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{formData.file ? formData.file.name : editingResource ? 'Keep current file, or choose a new one - PDF, Word, PowerPoint, Excel, image, or text, 10 MB max' : 'Choose a file - PDF, Word, PowerPoint, Excel, image, or text, 10 MB max'}</span>
+                      <input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(e) => setFormData({ ...formData, file: e.target.files?.[0] || null })} />
+                    </label>
+                  )}
+                </div></div><label><span className="portal-label">Why it is useful <span className="font-normal text-muted-foreground">(optional)</span></span><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="portal-input w-full resize-none" rows={4} placeholder="What will someone learn, and who is this best for?" /></label></div>
               </section>
               <section className="portal-form-section">
                 <div className="portal-form-section-heading"><span>2</span><div><h3>Organize it</h3><p>Category, format, and tags make the library easier to search.</p></div></div>
                 <div className="grid gap-4 sm:grid-cols-2"><label><span className="portal-label">Category</span><select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as ResourceCategory })} className="portal-input w-full" required><option value="sports_business">Sports Business</option><option value="analytics">Analytics</option><option value="consulting">Consulting</option><option value="marketing">Marketing</option><option value="finance">Finance</option><option value="career_development">Career Development</option><option value="technical_skills">Technical Skills</option><option value="other">Other</option></select></label><label><span className="portal-label">Format</span><select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value as ResourceType })} className="portal-input w-full" required><option value="article">Article</option><option value="video">Video</option><option value="course">Course</option><option value="tool">Tool</option><option value="guide">Guide</option><option value="template">Template</option><option value="other">Other</option></select></label><label className="sm:col-span-2"><span className="portal-label">Search tags <span className="font-normal text-muted-foreground">(optional)</span></span><input type="text" value={formData.tags} onChange={(e) => setFormData({ ...formData, tags: e.target.value })} className="portal-input w-full" placeholder="excel, data analysis, beginner" /><span className="mt-1.5 block text-xs text-muted-foreground">Separate tags with commas.</span></label></div>
               </section>
               <section className="portal-form-section"><div className="portal-form-section-heading"><span>3</span><div><h3>Visibility</h3><p>Choose the lowest position level that should see this resource.</p></div></div><label><span className="portal-label">Visible to</span><select value={fromRoleScopePayload(formData.role_scope, formData.role_scope_mode)} onChange={(e) => { const scopePayload = toRoleScopePayload(e.target.value as RoleScopeOption); setFormData({ ...formData, role_scope: scopePayload.roleScope, role_scope_mode: scopePayload.roleScopeMode }) }} className="portal-input w-full"><option value="all">All Members</option><option value="analyst">Analysts & Above</option><option value="analyst_only">Analysts Only</option><option value="project_manager">Project Managers & Above</option><option value="board_member">Board Members Only</option></select></label></section>
-              <div className="portal-form-actions"><button type="button" onClick={handleCancelForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center"><BookOpen className="h-4 w-4" /> {editingResource ? 'Save changes' : 'Share resource'}</button></div>
+              <div className="portal-form-actions"><button type="button" onClick={handleCancelForm} disabled={uploading} className="portal-button-secondary justify-center">Cancel</button><button type="submit" disabled={uploading} className="portal-button justify-center">{uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />} {uploading ? 'Uploading…' : editingResource ? 'Save changes' : 'Share resource'}</button></div>
             </form>
           </div>
         </div>
@@ -430,6 +492,17 @@ export default function LearningHubPage() {
                     View
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                )}
+                {resource.storage_path && (
+                  <button
+                    type="button"
+                    disabled={openingResourceId === resource.id}
+                    onClick={() => void openResourceFile(resource)}
+                    className="text-primary hover:text-accent transition flex items-center gap-1 text-sm font-medium"
+                  >
+                    {openingResourceId === resource.id ? 'Opening…' : 'View'}
+                    {openingResourceId === resource.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Paperclip className="w-3.5 h-3.5" />}
+                  </button>
                 )}
               </div>
             </article>

@@ -561,6 +561,10 @@ export interface DocumentItem {
   name: string
   type: 'folder' | 'file'
   file_url: string | null
+  storage_path?: string | null
+  file_name?: string | null
+  file_size_bytes?: number | null
+  mime_type?: string | null
   parent_id: string | null
   role_scope: UserRole | null
   role_scope_mode?: RoleScopeMode | null
@@ -741,6 +745,10 @@ export interface LearningResource {
   category: ResourceCategory
   type: ResourceType
   url: string | null
+  storage_path?: string | null
+  file_name?: string | null
+  file_size_bytes?: number | null
+  mime_type?: string | null
   tags: string[]
   role_scope: UserRole | null
   role_scope_mode?: RoleScopeMode | null

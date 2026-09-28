@@ -15,10 +15,13 @@ import {
   Folder,
   FolderPlus,
   Link as LinkIcon,
+  Loader2,
+  Paperclip,
   Pencil,
   PlusCircle,
   Search,
   Trash2,
+  Upload,
   Users,
   X,
 } from 'lucide-react'
@@ -42,7 +45,9 @@ const supabase = createClient()
 type DocFormState = {
   name: string
   type: 'folder' | 'file'
+  source: 'link' | 'upload'
   url: string
+  file: File | null
   roleScope: RoleScopeOption | 'selected_people'
   sharedWith: string[]
 }
@@ -57,7 +62,9 @@ type PersonalDocFormState = {
 const emptyForm: DocFormState = {
   name: '',
   type: 'folder',
+  source: 'link',
   url: '',
+  file: null,
   roleScope: 'all',
   sharedWith: [],
 }
@@ -93,6 +100,8 @@ export default function DocumentsPage() {
   const [profiles, setProfiles] = useState<CommunicationMember[]>([])
   const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [documentQuery, setDocumentQuery] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null)
 
   const isBoard = profile?.role === 'board_member'
   const isUserAdmin = user?.email?.trim().toLowerCase() === 'internal@txbosso.com'
@@ -291,7 +300,9 @@ export default function DocumentsPage() {
     setForm({
       name: doc.name,
       type: doc.type,
+      source: doc.storage_path ? 'upload' : 'link',
       url: doc.file_url ?? '',
+      file: null,
       roleScope: doc.is_restricted
         ? 'selected_people'
         : fromRoleScopePayload(doc.role_scope, doc.role_scope_mode),
@@ -312,8 +323,12 @@ export default function DocumentsPage() {
     e.preventDefault()
     if (!profile) return
 
-    if (form.type === 'file' && !form.url.trim()) {
+    if (form.type === 'file' && form.source === 'link' && !form.url.trim()) {
       setError('File link is required for documents.')
+      return
+    }
+    if (form.type === 'file' && form.source === 'upload' && !editingId && !form.file) {
+      setError('Choose a file to upload.')
       return
     }
     if (form.roleScope === 'selected_people' && form.sharedWith.length === 0) {
@@ -323,6 +338,22 @@ export default function DocumentsPage() {
 
     setError(null)
 
+    let uploadedFile: { storagePath: string; fileName: string; fileSizeBytes: number; mimeType: string } | null = null
+    if (form.type === 'file' && form.source === 'upload' && form.file) {
+      setUploading(true)
+      const uploadForm = new FormData()
+      uploadForm.append('target', 'documents')
+      uploadForm.append('file', form.file)
+      const response = await fetch('/api/storage-uploads', { method: 'POST', body: uploadForm })
+      const result = await response.json().catch(() => ({}))
+      setUploading(false)
+      if (!response.ok) {
+        setError(result.error || 'The file could not be uploaded.')
+        return
+      }
+      uploadedFile = { storagePath: result.storagePath, fileName: result.fileName, fileSizeBytes: result.fileSizeBytes, mimeType: result.mimeType }
+    }
+
     const scopePayload = form.roleScope === 'selected_people'
       ? null
       : toRoleScopePayload(form.roleScope)
@@ -330,13 +361,16 @@ export default function DocumentsPage() {
     const payload = {
       name: form.name,
       type: form.type,
-      file_url: form.type === 'file' ? form.url : null,
+      file_url: form.type === 'file' && form.source === 'link' ? form.url : null,
       parent_id: currentFolderId,
       role_scope: scopePayload?.roleScope ?? null,
       ...(scopePayload?.roleScopeMode ? { role_scope_mode: scopePayload.roleScopeMode } : {}),
       is_restricted: form.roleScope === 'selected_people',
       created_by: profile.id,
       ...(schemaReady && access?.term_id && !editingId ? { term_id: access.term_id, archived_at: null } : {}),
+      ...(uploadedFile
+        ? { storage_path: uploadedFile.storagePath, file_name: uploadedFile.fileName, file_size_bytes: uploadedFile.fileSizeBytes, mime_type: uploadedFile.mimeType }
+        : {}),
     }
 
     try {
@@ -382,6 +416,23 @@ export default function DocumentsPage() {
     } catch (err: any) {
       console.error('Error saving document', err)
       setError('Failed to save document. You may not have permission.')
+    }
+  }
+
+  const openDocumentFile = async (doc: DocumentItem) => {
+    if (!doc.storage_path) return
+    setOpeningDocId(doc.id)
+    // Open the tab synchronously on click so popup blockers don't kill it
+    // while the signed URL is being fetched.
+    const newTab = window.open('', '_blank')
+    const response = await fetch(`/api/storage-uploads/download?target=documents&id=${doc.id}`)
+    const result = await response.json().catch(() => ({}))
+    setOpeningDocId(null)
+    if (response.ok && result.url && newTab) {
+      newTab.location.href = result.url
+    } else {
+      newTab?.close()
+      setError(result.error || 'The file could not be opened.')
     }
   }
 
@@ -735,6 +786,17 @@ export default function DocumentsPage() {
                           Open
                         </a>
                       )}
+                      {doc.storage_path && (
+                        <button
+                          type="button"
+                          disabled={openingDocId === doc.id}
+                          onClick={() => void openDocumentFile(doc)}
+                          className="portal-button-secondary small"
+                        >
+                          {openingDocId === doc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                          {openingDocId === doc.id ? 'Opening…' : 'Open'}
+                        </button>
+                      )}
                       {canManageDocument(doc) && (
                         <>
                           <button
@@ -773,8 +835,24 @@ export default function DocumentsPage() {
                     <div className="portal-form-section-heading"><span>1</span><div><h3>Item</h3><p>Name the folder or paste the shared document link.</p></div></div>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label><span className="portal-label">Name</span><input type="text" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required className="portal-input w-full" placeholder={form.type === 'folder' ? 'Example: Fall meeting notes' : 'Example: Member handbook'} /></label>
-                      <label><span className="portal-label">Item type</span><select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as any }))} className="portal-input w-full"><option value="folder">Folder</option><option value="file">Document link</option></select></label>
-                      {form.type === 'file' && <label className="sm:col-span-2"><span className="portal-label">Document link</span><input type="url" value={form.url} onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))} required className="portal-input w-full" placeholder="https://…" /></label>}
+                      <label><span className="portal-label">Item type</span><select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as any }))} className="portal-input w-full"><option value="folder">Folder</option><option value="file">Document</option></select></label>
+                      {form.type === 'file' && (
+                        <div className="sm:col-span-2 space-y-3">
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setForm((prev) => ({ ...prev, source: 'link' }))} className={form.source === 'link' ? 'portal-button-secondary small' : 'portal-button-ghost small'}><LinkIcon className="h-3.5 w-3.5" /> Link</button>
+                            <button type="button" onClick={() => setForm((prev) => ({ ...prev, source: 'upload' }))} className={form.source === 'upload' ? 'portal-button-secondary small' : 'portal-button-ghost small'}><Upload className="h-3.5 w-3.5" /> Upload a file</button>
+                          </div>
+                          {form.source === 'link' ? (
+                            <label><span className="portal-label">Document link</span><input type="url" value={form.url} onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))} required className="portal-input w-full" placeholder="https://…" /></label>
+                          ) : (
+                            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary">
+                              <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{form.file ? form.file.name : editingId ? 'Keep current file, or choose a new one - PDF, Word, PowerPoint, Excel, image, or text, 10 MB max' : 'Choose a file - PDF, Word, PowerPoint, Excel, image, or text, 10 MB max'}</span>
+                              <input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(e) => setForm((prev) => ({ ...prev, file: e.target.files?.[0] || null }))} />
+                            </label>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </section>
                   <section className="portal-form-section">
@@ -782,7 +860,7 @@ export default function DocumentsPage() {
                     <label><span className="portal-label">Primary audience</span><select value={form.roleScope} onChange={(e) => setForm((prev) => ({ ...prev, roleScope: e.target.value as any }))} className="portal-input w-full"><option value="all">All BOSSO members</option><option value="selected_people">Selected people / custom group only</option><option value="general_member">General Members only</option><option value="analyst">Analysts and above</option><option value="analyst_only">Analysts only</option><option value="project_manager">PMs and Board</option><option value="board_member">Board only</option></select></label>
                     <div className="mt-4"><p className="portal-label">{form.roleScope === 'selected_people' ? 'Choose people or a custom group' : 'Add people outside that audience (optional)'}</p><p className="mb-3 text-xs text-muted-foreground">Only approved current-semester members are shown.</p><MemberGroupPicker users={profiles} groups={memberGroups} value={form.sharedWith} onChange={(sharedWith) => setForm((prev) => ({ ...prev, sharedWith }))} placeholder="Search approved current-semester members..." /></div>
                   </section>
-                  <div className="portal-form-actions"><button type="button" onClick={closeOrgDocumentForm} className="portal-button-secondary justify-center">Cancel</button><button type="submit" className="portal-button justify-center">{editingId ? 'Save changes' : `Create ${form.type === 'folder' ? 'folder' : 'document'}`}</button></div>
+                  <div className="portal-form-actions"><button type="button" onClick={closeOrgDocumentForm} disabled={uploading} className="portal-button-secondary justify-center">Cancel</button><button type="submit" disabled={uploading} className="portal-button justify-center">{uploading && <Loader2 className="h-4 w-4 animate-spin" />}{uploading ? 'Uploading…' : editingId ? 'Save changes' : `Create ${form.type === 'folder' ? 'folder' : 'document'}`}</button></div>
                 </form>
               </div>
             </div>
