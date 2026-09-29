@@ -326,3 +326,95 @@ export function storageAlertEmail(input: { level: 'warn' | 'critical' | 'full'; 
     signoff: 'BOSSO Portal',
   })
 }
+
+// Newsletter issues are a digest of several stories rather than one topic,
+// so they get their own layout instead of the single-topic ticket model
+// above - but reuse the same brand constants and helpers so it still reads
+// as part of the same design family.
+export interface NewsletterStory {
+  tag?: string
+  headline: string
+  byline?: string
+  paragraphs: string[]
+  imageUrl?: string
+}
+
+function renderNewsletterHtml(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; unsubscribeUrl: string }) {
+  // A "ticket stub" style rule (line-star-line) between stories, echoing the
+  // star mark in the header so it reads as part of the same design rather
+  // than a generic <hr>.
+  const stub = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0"><tr>
+    <td style="border-top:1px solid #e2cfae;font-size:0;line-height:0">&nbsp;</td>
+    <td width="30" align="center" style="color:${ORANGE};font:14px ${MONO};padding:0 4px">&#9733;</td>
+    <td style="border-top:1px solid #e2cfae;font-size:0;line-height:0">&nbsp;</td>
+  </tr></table>`
+
+  const stories = input.stories
+    .map((story) => {
+      const image = story.imageUrl
+        ? `<img src="${safeUrl(story.imageUrl)}" alt="" width="504" style="display:block;width:100%;max-width:504px;margin:14px 0;border:0">`
+        : ''
+      const tag = story.tag
+        ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 12px"><tr><td style="background:${ORANGE};border-radius:999px;padding:5px 14px;color:#ffffff;font:700 10px ${MONO};letter-spacing:2px;text-transform:uppercase">${esc(story.tag)}</td></tr></table>`
+        : ''
+      return `${stub}
+      <div>
+        ${tag}
+        <h2 style="margin:0 0 6px;color:${BG};font:400 22px/1.15 ${HEAD};text-transform:uppercase">${esc(story.headline)}</h2>
+        ${story.byline ? `<p style="margin:0 0 12px;color:${DEEP};font:700 13px ${MONO}">${esc(story.byline)}</p>` : ''}
+        ${image}
+        ${paragraphs(story.paragraphs)}
+      </div>`
+    })
+    .join('')
+
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"><title>${esc(input.title)}</title></head>
+<body style="margin:0;padding:0;background:${BG}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BG}"><tr><td align="center" style="padding:32px 12px">
+ <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:${PAPER}">
+  <tr><td style="background:${ORANGE};padding:12px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+    <td style="color:#ffffff;font:700 12px ${MONO};letter-spacing:3px;text-transform:uppercase">&#9733; Newsletter</td>
+    <td align="right" style="color:#ffe1c2;font:700 12px ${MONO};letter-spacing:3px;text-transform:uppercase">BOSSO</td></tr></table></td></tr>
+  <tr><td style="padding:28px 28px 8px">
+    <div style="color:#a16207;font:700 11px ${MONO};letter-spacing:3px;text-transform:uppercase">${esc(input.date)}</div>
+    <h1 style="margin:8px 0 10px;color:${BG};font:400 34px/1.05 ${HEAD};text-transform:uppercase">${esc(input.title)}</h1>
+    ${input.lead ? `<p style="margin:0 0 16px;color:${DEEP};font:italic 700 15px/1.5 Georgia,serif">${esc(input.lead)}</p>` : ''}
+  </td></tr>
+  <tr><td style="padding:0 28px 8px">${stories}</td></tr>
+  <tr><td style="padding:22px 28px 26px;text-align:center">
+    <div style="color:#a8a29e;font:11px ${MONO};letter-spacing:2px">BOSSO &middot; UT AUSTIN</div>
+    <p style="margin:10px 0 0;color:#a8a29e;font:11px ${MONO}"><a href="${esc(input.unsubscribeUrl)}" style="color:#a8a29e;text-decoration:underline">Unsubscribe</a></p>
+  </td></tr>
+ </table>
+</td></tr></table>
+</body></html>`
+}
+
+function renderNewsletterText(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; unsubscribeUrl: string }) {
+  const rule = '----------------------------------------'
+  const out: string[] = [`BOSSO NEWSLETTER - ${input.date.toUpperCase()}`, rule, '', input.title.toUpperCase(), '']
+  if (input.lead) out.push(...wrap(input.lead), '')
+  input.stories.forEach((story) => {
+    out.push(rule, '', story.headline.toUpperCase())
+    if (story.byline) out.push(story.byline)
+    out.push('')
+    story.paragraphs.forEach((p) => out.push(...wrap(p), ''))
+  })
+  out.push(rule, '', 'Business of Sports Student Organization @ UT Austin', `Unsubscribe: ${input.unsubscribeUrl}`)
+  return out.join('\n')
+}
+
+export function newsletterIssueEmail(input: {
+  title: string
+  date: string
+  lead?: string
+  stories: NewsletterStory[]
+  unsubscribeUrl: string
+}): BuiltEmail {
+  return {
+    subject: `BOSSO Newsletter: ${input.title}`,
+    html: renderNewsletterHtml(input),
+    text: renderNewsletterText(input),
+  }
+}

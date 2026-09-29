@@ -373,6 +373,9 @@ export default function AdminDashboard() {
           <Link href="/attendance" className="portal-button-secondary">
             <ClipboardCheck className="h-4 w-4" /> Attendance & manual points
           </Link>
+          <Link href="/admin/newsletter" className="portal-button-secondary">
+            <Mail className="h-4 w-4" /> Newsletter
+          </Link>
           <Link href="/admin/semester" className="portal-button">
             <CalendarRange className="h-4 w-4" /> Semester setup
           </Link>

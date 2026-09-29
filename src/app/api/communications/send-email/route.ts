@@ -13,12 +13,14 @@ import {
   announcementEmail,
   duesEmail,
   eventInviteEmail,
+  newsletterIssueEmail,
   tempPasswordEmail,
   type BuiltEmail,
+  type NewsletterStory,
 } from '@/lib/email/templates'
 
 const TIME_ZONE = 'America/Chicago'
-const KINDS = ['event', 'announcement', 'approval', 'dues', 'password'] as const
+const KINDS = ['event', 'announcement', 'approval', 'dues', 'password', 'newsletter'] as const
 type Kind = (typeof KINDS)[number]
 type Mode = 'plan' | 'preview' | 'send'
 
@@ -114,6 +116,48 @@ export async function POST(request: Request) {
           count: recipients.length,
         }
       }
+    } else if (kind === 'newsletter') {
+      if (!isAdmin) return NextResponse.json({ error: 'Only the portal admin can send the newsletter.' }, { status: 403 })
+
+      const title = typeof body?.title === 'string' ? body.title.trim() : ''
+      const date = typeof body?.date === 'string' ? body.date.trim() : ''
+      const lead = typeof body?.lead === 'string' && body.lead.trim() ? body.lead.trim() : undefined
+      const rawStories = Array.isArray(body?.stories) ? body.stories : []
+      const stories: NewsletterStory[] = rawStories
+        .map((story: Record<string, unknown>) => ({
+          tag: typeof story?.tag === 'string' && story.tag.trim() ? story.tag.trim() : undefined,
+          headline: typeof story?.headline === 'string' ? story.headline.trim() : '',
+          byline: typeof story?.byline === 'string' && story.byline.trim() ? story.byline.trim() : undefined,
+          paragraphs:
+            typeof story?.body === 'string'
+              ? story.body.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean)
+              : [],
+          imageUrl: typeof story?.imageUrl === 'string' && story.imageUrl.trim() ? story.imageUrl.trim() : undefined,
+        }))
+        .filter((story: NewsletterStory) => story.headline && story.paragraphs.length > 0)
+
+      if (!title) return NextResponse.json({ error: 'Enter a title for the issue.' }, { status: 400 })
+      if (stories.length === 0) {
+        return NextResponse.json({ error: 'Add at least one story with a headline and body text.' }, { status: 400 })
+      }
+
+      const { data: subscribers } = await admin.from('newsletter_subscribers').select('email').is('unsubscribed_at', null)
+      const recipients = (subscribers || []).map((row) => row.email)
+
+      built = {
+        email: newsletterIssueEmail({
+          title,
+          date: date || new Date().toLocaleDateString('en-US', { dateStyle: 'long', timeZone: TIME_ZONE }),
+          lead,
+          stories,
+          // BCC sends can't carry a per-recipient unsubscribe token, so this
+          // points people to reply directly instead of a broken/generic link.
+          unsubscribeUrl: `mailto:${process.env.GMAIL_SMTP_USER || ''}?subject=${encodeURIComponent('Unsubscribe from BOSSO newsletter')}`,
+        }),
+        recipients: { bcc: recipients },
+        label: `${recipients.length} newsletter subscriber${recipients.length === 1 ? '' : 's'}`,
+        count: recipients.length,
+      }
     } else {
       if (!isAdmin) return NextResponse.json({ error: 'Only the portal admin can send account emails.' }, { status: 403 })
       const userId = typeof body?.userId === 'string' ? body.userId : ''
@@ -147,7 +191,11 @@ export async function POST(request: Request) {
     }
 
     if (built.count === 0) {
-      return NextResponse.json({ error: 'No approved members in the current semester match this audience.' }, { status: 400 })
+      const message =
+        kind === 'newsletter'
+          ? 'There are no active newsletter subscribers to send to yet.'
+          : 'No approved members in the current semester match this audience.'
+      return NextResponse.json({ error: message }, { status: 400 })
     }
 
     if (mode === 'preview') {

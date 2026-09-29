@@ -18,6 +18,7 @@ const PUBLIC_PATHS = [
   '/reset-password',
   '/pending-approval',
   '/join',
+  '/newsletter',
 ]
 
 export default function PortalAccessGate({ children }: { children: React.ReactNode }) {

@@ -3,14 +3,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Loader2, X } from 'lucide-react'
 
+export type NewsletterStoryInput = {
+  tag?: string
+  headline: string
+  byline?: string
+  body: string
+  imageUrl?: string
+}
+
 export type SendEmailRequest = {
-  kind: 'event' | 'announcement' | 'approval' | 'dues' | 'password'
+  kind: 'event' | 'announcement' | 'approval' | 'dues' | 'password' | 'newsletter'
   id?: string
   userId?: string
   role?: string
   semesterPrice?: string | null
   annualPrice?: string | null
   password?: string
+  title?: string
+  date?: string
+  lead?: string
+  stories?: NewsletterStoryInput[]
 }
 
 type Plan = { subject: string; label: string; count: number; previewTo: string | null }
@@ -21,6 +33,7 @@ const KIND_TITLES: Record<SendEmailRequest['kind'], string> = {
   approval: 'Email account approval',
   dues: 'Email dues reminder',
   password: 'Email temporary password',
+  newsletter: 'Email newsletter issue',
 }
 
 export default function SendEmailModal({ request, onClose }: { request: SendEmailRequest | null; onClose: () => void }) {
