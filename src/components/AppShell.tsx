@@ -188,7 +188,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       pathname?.startsWith('/auth/') ||
       pathname === '/pending-approval' ||
       pathname === '/verify-email' ||
-      pathname === '/join',
+      pathname === '/join' ||
+      pathname?.startsWith('/newsletter'),
     [pathname]
   )
 
