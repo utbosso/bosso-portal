@@ -98,6 +98,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 500 })
   }
 
+  // Every new portal member is also a newsletter subscriber by default.
+  // Best-effort: never fail signup over this, and never re-subscribe an
+  // email that previously unsubscribed (ignoreDuplicates leaves existing
+  // rows, including unsubscribed ones, untouched).
+  await admin.from('newsletter_subscribers').upsert({ email }, { onConflict: 'email', ignoreDuplicates: true })
+
   const { data: membership, error: membershipError } = await admin
     .from('member_term_memberships')
     .upsert(
