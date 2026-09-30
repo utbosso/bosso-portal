@@ -114,13 +114,13 @@ export async function POST(request: Request) {
         .eq('user_id', pointRequest.user_id)
         .maybeSingle()
 
-      if (!existingAttendance) {
-        const { data: eventRow } = await admin
-          .from('events')
-          .select('event_category, term_id')
-          .eq('id', pointRequest.event_id)
-          .maybeSingle()
+      const { data: eventRow } = await admin
+        .from('events')
+        .select('event_category, term_id, created_by, deliverable_title, deliverable_description, deliverable_point_value, deliverable_due_at')
+        .eq('id', pointRequest.event_id)
+        .maybeSingle()
 
+      if (!existingAttendance) {
         const { error: attendanceError } = await admin.from('attendance_records').insert({
           event_id: pointRequest.event_id,
           user_id: pointRequest.user_id,
@@ -129,6 +129,40 @@ export async function POST(request: Request) {
           term_id: eventRow?.term_id ?? pointRequest.term_id,
         })
         if (attendanceError) return NextResponse.json({ error: attendanceError.message }, { status: 500 })
+      }
+
+      // The event may have a deliverable configured - normally only
+      // check-in creates that task, so a request-credited member (who
+      // never checked in) would otherwise never get it. Same check-in
+      // logic, guarded so it's a no-op if the task already exists (e.g.
+      // they also have a real check-in, or this request is a resubmission).
+      if (eventRow?.deliverable_point_value && eventRow.deliverable_due_at) {
+        const { data: existingTask } = await admin
+          .from('tasks')
+          .select('id')
+          .eq('group_task_id', pointRequest.event_id)
+          .eq('assigned_to', pointRequest.user_id)
+          .maybeSingle()
+
+        if (!existingTask) {
+          const { error: taskError } = await admin.from('tasks').insert({
+            title: eventRow.deliverable_title?.trim() || 'Event deliverable',
+            description: eventRow.deliverable_description?.trim() || null,
+            status: 'not_started',
+            assignee_status: 'not_started',
+            due_at: eventRow.deliverable_due_at,
+            assigned_to: pointRequest.user_id,
+            assigned_by: eventRow.created_by,
+            point_value: eventRow.deliverable_point_value,
+            points_category: eventRow.event_category,
+            auto_approve: false,
+            points_awarded: false,
+            group_task_id: pointRequest.event_id,
+            assigned_to_role: null,
+            ...(eventRow.term_id ? { term_id: eventRow.term_id } : {}),
+          })
+          if (taskError) console.error('Deliverable task creation failed for approved request', taskError)
+        }
       }
     }
   }
