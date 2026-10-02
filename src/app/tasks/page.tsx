@@ -208,10 +208,15 @@ export default function TasksPage() {
 
   const isPortalAdmin = user?.email?.toLowerCase() === 'internal@txbosso.com'
   const canManage = isPortalAdmin || hasMinimumRole(profile?.role, 'project_manager')
-  // True for the group's real assigner, or someone that assigner explicitly
-  // added as a reviewer (task_group_reviewers) - not every project_manager+.
+  // Board (and the portal admin) see and can act on every task org-wide, as
+  // a standing checkpoint - not scoped to what they personally assigned or
+  // were granted as a reviewer, the way canReviewGroup works for everyone else.
+  const isBoardOverseer = isPortalAdmin || profile?.role === 'board_member'
+  // True for the group's real assigner, someone that assigner explicitly
+  // added as a reviewer (task_group_reviewers), or Board/admin acting as
+  // the org-wide checkpoint.
   const canReviewGroup = (task: TeamTask) =>
-    task.assigned_by === profile?.id || (task.group_task_id ? reviewerGroupIds.has(task.group_task_id) : false)
+    isBoardOverseer || task.assigned_by === profile?.id || (task.group_task_id ? reviewerGroupIds.has(task.group_task_id) : false)
 
   const loadMemberDirectory = useCallback(async () => {
     if (!canManage) {
@@ -286,41 +291,33 @@ export default function TasksPage() {
     let taskResult: any
 
     if (schemaReady && access?.term_id) {
-      taskResult = await (supabase as any)
+      let query = (supabase as any)
         .from('tasks')
         .select(termSelect)
         .eq('term_id', access.term_id)
         .is('archived_at', null)
-        .or(visibilityFilter)
-        .order('due_at', { ascending: true, nullsFirst: false })
-        .limit(500)
+      if (!isBoardOverseer) query = query.or(visibilityFilter)
+      taskResult = await query.order('due_at', { ascending: true, nullsFirst: false }).limit(500)
     } else {
-      taskResult = await supabase
-        .from('tasks')
-        .select(commonSelect)
-        .or(visibilityFilter)
-        .order('due_at', { ascending: true, nullsFirst: false })
-        .limit(500)
+      let query = supabase.from('tasks').select(commonSelect)
+      if (!isBoardOverseer) query = query.or(visibilityFilter)
+      taskResult = await query.order('due_at', { ascending: true, nullsFirst: false }).limit(500)
     }
 
     // Keep the local preview usable before the new migration is applied.
     if (missingReferenceLinksColumn(taskResult.error)) {
       if (schemaReady && access?.term_id) {
-        taskResult = await (supabase as any)
+        let fallbackQuery = (supabase as any)
           .from('tasks')
           .select(baseTermSelect)
           .eq('term_id', access.term_id)
           .is('archived_at', null)
-          .or(visibilityFilter)
-          .order('due_at', { ascending: true, nullsFirst: false })
-          .limit(500)
+        if (!isBoardOverseer) fallbackQuery = fallbackQuery.or(visibilityFilter)
+        taskResult = await fallbackQuery.order('due_at', { ascending: true, nullsFirst: false }).limit(500)
       } else {
-        taskResult = await supabase
-          .from('tasks')
-          .select(baseCommonSelect)
-          .or(visibilityFilter)
-          .order('due_at', { ascending: true, nullsFirst: false })
-          .limit(500)
+        let fallbackQuery = supabase.from('tasks').select(baseCommonSelect)
+        if (!isBoardOverseer) fallbackQuery = fallbackQuery.or(visibilityFilter)
+        taskResult = await fallbackQuery.order('due_at', { ascending: true, nullsFirst: false }).limit(500)
       }
     }
 
@@ -371,7 +368,7 @@ export default function TasksPage() {
     setSelectedTask((current) => (current ? normalized.find((item) => item.id === current.id) || null : null))
     hasLoadedTasksRef.current = true
     setLoading(false)
-  }, [access?.term_id, profile, schemaReady, accessLoading])
+  }, [access?.term_id, profile, schemaReady, accessLoading, isBoardOverseer])
 
   const loadDetails = useCallback(async (task: TeamTask) => {
     setDetailLoading(true)
@@ -529,19 +526,21 @@ export default function TasksPage() {
       // place still checking assigned_by alone, so those tasks were fetched
       // but invisible in every tab.
       review: tasks.filter((task) => canReviewGroup(task) && getWorkflowStatus(task) === 'submitted').length,
-      assigned: tasks.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) !== 'approved').length,
+      // Board/admin see every open task here, not just ones they personally
+      // assigned - a standing checkpoint over the whole org, not a personal filter.
+      assigned: tasks.filter((task) => (isBoardOverseer || task.assigned_by === profile.id) && getWorkflowStatus(task) !== 'approved').length,
       personal: personalTasks.filter((task) => task.status !== 'completed').length,
       completed:
         tasks.filter((task) => getWorkflowStatus(task) === 'approved').length,
     }
-  }, [personalTasks, profile, tasks, reviewerGroupIds])
+  }, [personalTasks, profile, tasks, reviewerGroupIds, isBoardOverseer])
 
   const filteredTasks = useMemo(() => {
     if (!profile || tab === 'personal') return []
     let result = tasks
     if (tab === 'mine') result = result.filter((task) => task.assigned_to === profile.id && getWorkflowStatus(task) !== 'approved')
     if (tab === 'review') result = result.filter((task) => canReviewGroup(task) && getWorkflowStatus(task) === 'submitted')
-    if (tab === 'assigned') result = result.filter((task) => task.assigned_by === profile.id && getWorkflowStatus(task) !== 'approved')
+    if (tab === 'assigned') result = result.filter((task) => (isBoardOverseer || task.assigned_by === profile.id) && getWorkflowStatus(task) !== 'approved')
     if (tab === 'completed') result = result.filter((task) => getWorkflowStatus(task) === 'approved')
     if (query.trim()) {
       const normalizedQuery = query.trim().toLowerCase()
@@ -553,7 +552,7 @@ export default function TasksPage() {
       )
     }
     return result
-  }, [profile, query, tab, tasks, reviewerGroupIds])
+  }, [profile, query, tab, tasks, reviewerGroupIds, isBoardOverseer])
 
   const filteredPersonal = useMemo(() => {
     let result = [...personalTasks]
@@ -1041,7 +1040,7 @@ export default function TasksPage() {
   const tabs: Array<{ value: TaskTab; label: string; count: number }> = [
     { value: 'mine', label: 'My tasks', count: tabCounts.mine },
     { value: 'review', label: 'Needs review', count: tabCounts.review },
-    { value: 'assigned', label: 'Assigned by me', count: tabCounts.assigned },
+    { value: 'assigned', label: isBoardOverseer ? 'All tasks' : 'Assigned by me', count: tabCounts.assigned },
     { value: 'personal', label: 'Personal', count: tabCounts.personal },
     { value: 'completed', label: 'Completed', count: tabCounts.completed },
   ]
@@ -1094,7 +1093,7 @@ export default function TasksPage() {
 
               <section><h3 className="text-sm font-semibold">Workflow</h3><div className="mt-4 grid grid-cols-4 gap-2">{workflow.map((step, index) => { const currentIndex = workflow.findIndex((item) => item.value === getWorkflowStatus(selectedTask)); const reached = index <= currentIndex; return <div key={step.value}><div className={`h-1.5 rounded-full ${reached ? 'bg-primary' : 'bg-muted'}`} /><p className={`mt-2 text-[11px] font-medium ${reached ? 'text-foreground' : 'text-muted-foreground'}`}>{step.label}</p></div> })}</div><div className="mt-5 flex flex-wrap gap-2">{selectedTask.assigned_to === profile?.id && getWorkflowStatus(selectedTask) === 'todo' && <button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button"><ArrowRight className="h-4 w-4" /> Start work</button>}{selectedTask.assigned_to === profile?.id && ['todo', 'in_progress'].includes(getWorkflowStatus(selectedTask)) && (isPastDue(selectedTask) ? <p className="flex items-center gap-2 text-sm font-medium text-destructive"><AlertTriangle className="h-4 w-4" /> Past due - no longer accepting submissions.</p> : <button disabled={saving.includes(selectedTask.id)} onClick={() => void submitForReview(selectedTask)} className="portal-button"><Send className="h-4 w-4" /> Submit for review</button>)}{canReviewGroup(selectedTask) && getWorkflowStatus(selectedTask) === 'submitted' && <><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'approved')} className="portal-button"><ClipboardCheck className="h-4 w-4" /> Approve</button><button disabled={saving.includes(selectedTask.id)} onClick={() => void updateWorkflow(selectedTask, 'in_progress')} className="portal-button-secondary">Return to progress</button></>}</div></section>
 
-              {selectedTask.assigned_by === profile?.id && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Manage this action item</h3></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => openEditDueDate(selectedTask)} className="portal-button-secondary small"><CalendarDays className="h-3.5 w-3.5" /> Edit due date</button><button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button><button type="button" onClick={() => openManageReviewers(selectedTask)} className="portal-button-secondary small"><FileCheck2 className="h-3.5 w-3.5" /> Manage reviewers</button></div>{groupReviewers.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Reviewers: {groupReviewers.map((r) => r.reviewer?.full_name || 'Member').join(', ')}</p>}</section>}
+              {(selectedTask.assigned_by === profile?.id || isBoardOverseer) && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Manage this action item</h3></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => openEditDueDate(selectedTask)} className="portal-button-secondary small"><CalendarDays className="h-3.5 w-3.5" /> Edit due date</button>{selectedTask.assigned_by === profile?.id && <><button type="button" onClick={() => openExtend(selectedTask)} className="portal-button-secondary small"><UsersRound className="h-3.5 w-3.5" /> Extend to more people</button><button type="button" onClick={() => openManageReviewers(selectedTask)} className="portal-button-secondary small"><FileCheck2 className="h-3.5 w-3.5" /> Manage reviewers</button></>}</div>{groupReviewers.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Reviewers: {groupReviewers.map((r) => r.reviewer?.full_name || 'Member').join(', ')}</p>}</section>}
 
               {canReviewGroup(selectedTask) && groupTasks.length > 1 && <section><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Team progress</h3></div><p className="mt-1 text-xs text-muted-foreground">Click a member to review just their submission - updates below always belong to whoever is selected, not the whole group.</p><div className="mt-3 max-h-72 divide-y divide-border overflow-y-auto rounded-xl border border-border">{groupTasks.map((task) => { const isSelected = task.id === selectedTask.id; return <button key={task.id} type="button" onClick={() => setSelectedTask(tasks.find((item) => item.id === task.id) || (task as TeamTask))} className={`flex w-full items-center justify-between gap-4 p-3 text-left text-sm transition-colors ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'}`}><span className={isSelected ? 'font-semibold text-primary' : ''}>{task.assignee?.full_name || 'Member'}</span><span className="text-xs font-medium text-muted-foreground">{workflowLabel(getWorkflowStatus(task))}</span></button> })}</div></section>}
 
