@@ -20,6 +20,7 @@ export default function AdminNewsletterPage() {
   const [lead, setLead] = useState('')
   const [stories, setStories] = useState<NewsletterStoryInput[]>([{ ...emptyStory }])
   const [emailRequest, setEmailRequest] = useState<SendEmailRequest | null>(null)
+  const [issueUrl, setIssueUrl] = useState('')
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
@@ -66,6 +67,7 @@ export default function AdminNewsletterPage() {
         }))
       )
       setImportedFrom(importUrl.trim())
+      setIssueUrl(importUrl.trim())
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'That page could not be imported.')
     } finally {
@@ -73,7 +75,10 @@ export default function AdminNewsletterPage() {
     }
   }
 
-  const canSend = title.trim().length > 0 && stories.some((story) => story.headline.trim() && story.body.trim())
+  const canSend =
+    title.trim().length > 0 &&
+    /^https:\/\/txbosso\.com\//i.test(issueUrl.trim()) &&
+    stories.some((story) => story.headline.trim() && story.body.trim())
 
   const openSend = () => {
     setEmailRequest({
@@ -81,6 +86,7 @@ export default function AdminNewsletterPage() {
       title: title.trim(),
       date: date.trim(),
       lead: lead.trim() || undefined,
+      issueUrl: issueUrl.trim(),
       stories: stories
         .filter((story) => story.headline.trim() && story.body.trim())
         .map((story) => ({
@@ -171,7 +177,20 @@ export default function AdminNewsletterPage() {
               placeholder="September 29, 2026"
             />
           </label>
+          <label>
+            <span className="portal-label">Full issue URL</span>
+            <input
+              type="text"
+              value={issueUrl}
+              onChange={(event) => setIssueUrl(event.target.value)}
+              className="portal-input w-full"
+              placeholder="https://txbosso.com/pages/newsletters/newsletter_issue_5.html"
+            />
+          </label>
         </div>
+        <p className="text-sm text-muted-foreground">
+          The email is a preview only, one paragraph per story, with a &ldquo;Read the Full Issue&rdquo; button linking here.
+        </p>
 
         <label>
           <span className="portal-label">Lead paragraph <span className="font-normal text-muted-foreground">(optional)</span></span>
@@ -239,7 +258,7 @@ export default function AdminNewsletterPage() {
             </label>
 
             <label>
-              <span className="portal-label">Body <span className="font-normal text-muted-foreground">(separate paragraphs with a blank line)</span></span>
+              <span className="portal-label">Body <span className="font-normal text-muted-foreground">(separate paragraphs with a blank line &mdash; only the first paragraph is used in the email teaser)</span></span>
               <textarea
                 value={story.body}
                 onChange={(event) => updateStory(index, 'body', event.target.value)}

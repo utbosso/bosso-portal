@@ -339,7 +339,7 @@ export interface NewsletterStory {
   imageUrl?: string
 }
 
-function renderNewsletterHtml(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; unsubscribeUrl: string }) {
+function renderNewsletterHtml(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; issueUrl: string; unsubscribeUrl: string }) {
   // A "ticket stub" style rule (line-star-line) between stories, echoing the
   // star mark in the header so it reads as part of the same design rather
   // than a generic <hr>.
@@ -349,6 +349,8 @@ function renderNewsletterHtml(input: { title: string; date: string; lead?: strin
     <td style="border-top:1px solid #e2cfae;font-size:0;line-height:0">&nbsp;</td>
   </tr></table>`
 
+  // This is a teaser, not the full issue: one paragraph per story, then a
+  // single CTA at the end sends people to the full issue on the site.
   const stories = input.stories
     .map((story) => {
       const image = story.imageUrl
@@ -363,7 +365,7 @@ function renderNewsletterHtml(input: { title: string; date: string; lead?: strin
         <h2 style="margin:0 0 6px;color:${BG};font:400 22px/1.15 ${HEAD};text-transform:uppercase">${esc(story.headline)}</h2>
         ${story.byline ? `<p style="margin:0 0 12px;color:${DEEP};font:700 13px ${MONO}">${esc(story.byline)}</p>` : ''}
         ${image}
-        ${paragraphs(story.paragraphs)}
+        ${paragraphs(story.paragraphs.slice(0, 1))}
       </div>`
     })
     .join('')
@@ -382,7 +384,10 @@ function renderNewsletterHtml(input: { title: string; date: string; lead?: strin
     ${input.lead ? `<p style="margin:0 0 16px;color:${DEEP};font:italic 700 15px/1.5 Georgia,serif">${esc(input.lead)}</p>` : ''}
   </td></tr>
   <tr><td style="padding:0 28px 8px">${stories}</td></tr>
-  <tr><td style="padding:22px 28px 26px;text-align:center">
+  <tr><td style="padding:8px 28px 28px">
+    <a href="${safeUrl(input.issueUrl)}" style="display:block;background:${BG};color:#ffb066;font:400 16px ${HEAD};letter-spacing:2px;text-transform:uppercase;text-align:center;text-decoration:none;padding:16px">Read the Full Issue &rarr;</a>
+  </td></tr>
+  <tr><td style="padding:0 28px 26px;text-align:center">
     <div style="color:#a8a29e;font:11px ${MONO};letter-spacing:2px">BOSSO &middot; UT AUSTIN</div>
     <p style="margin:10px 0 0;color:#a8a29e;font:11px ${MONO}"><a href="${esc(input.unsubscribeUrl)}" style="color:#a8a29e;text-decoration:underline">Unsubscribe</a></p>
   </td></tr>
@@ -391,7 +396,7 @@ function renderNewsletterHtml(input: { title: string; date: string; lead?: strin
 </body></html>`
 }
 
-function renderNewsletterText(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; unsubscribeUrl: string }) {
+function renderNewsletterText(input: { title: string; date: string; lead?: string; stories: NewsletterStory[]; issueUrl: string; unsubscribeUrl: string }) {
   const rule = '----------------------------------------'
   const out: string[] = [`BOSSO NEWSLETTER - ${input.date.toUpperCase()}`, rule, '', input.title.toUpperCase(), '']
   if (input.lead) out.push(...wrap(input.lead), '')
@@ -399,9 +404,9 @@ function renderNewsletterText(input: { title: string; date: string; lead?: strin
     out.push(rule, '', story.headline.toUpperCase())
     if (story.byline) out.push(story.byline)
     out.push('')
-    story.paragraphs.forEach((p) => out.push(...wrap(p), ''))
+    story.paragraphs.slice(0, 1).forEach((p) => out.push(...wrap(p), ''))
   })
-  out.push(rule, '', 'Business of Sports Student Organization @ UT Austin', `Unsubscribe: ${input.unsubscribeUrl}`)
+  out.push(rule, '', `Read the full issue: ${input.issueUrl}`, '', 'Business of Sports Student Organization @ UT Austin', `Unsubscribe: ${input.unsubscribeUrl}`)
   return out.join('\n')
 }
 
@@ -410,6 +415,7 @@ export function newsletterIssueEmail(input: {
   date: string
   lead?: string
   stories: NewsletterStory[]
+  issueUrl: string
   unsubscribeUrl: string
 }): BuiltEmail {
   return {

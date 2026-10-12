@@ -136,9 +136,14 @@ export async function POST(request: Request) {
         }))
         .filter((story: NewsletterStory) => story.headline && story.paragraphs.length > 0)
 
+      const issueUrl = typeof body?.issueUrl === 'string' ? body.issueUrl.trim() : ''
+
       if (!title) return NextResponse.json({ error: 'Enter a title for the issue.' }, { status: 400 })
       if (stories.length === 0) {
         return NextResponse.json({ error: 'Add at least one story with a headline and body text.' }, { status: 400 })
+      }
+      if (!/^https:\/\/txbosso\.com\//i.test(issueUrl)) {
+        return NextResponse.json({ error: 'Enter the txbosso.com URL for the full issue.' }, { status: 400 })
       }
 
       const { data: subscribers } = await admin.from('newsletter_subscribers').select('email').is('unsubscribed_at', null)
@@ -150,6 +155,7 @@ export async function POST(request: Request) {
           date: date || new Date().toLocaleDateString('en-US', { dateStyle: 'long', timeZone: TIME_ZONE }),
           lead,
           stories,
+          issueUrl,
           // BCC sends can't carry a per-recipient unsubscribe token, so this
           // points people to reply directly instead of a broken/generic link.
           unsubscribeUrl: `mailto:${process.env.GMAIL_SMTP_USER || ''}?subject=${encodeURIComponent('Unsubscribe from BOSSO newsletter')}`,

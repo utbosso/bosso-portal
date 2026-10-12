@@ -23,6 +23,7 @@ export type SendEmailRequest = {
   date?: string
   lead?: string
   stories?: NewsletterStoryInput[]
+  issueUrl?: string
 }
 
 type Plan = { subject: string; label: string; count: number; previewTo: string | null }
