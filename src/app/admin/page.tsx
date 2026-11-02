@@ -1742,6 +1742,169 @@ BOSSO Team`)
   )
 }
 
+// Rounds a bucket width up to a "nice" step (1, 2, 5, 10, 25, 50, 100...)
+// so histogram x-axis labels read as round numbers instead of odd fractions.
+function niceStep(raw: number): number {
+  const steps = [0.5, 1, 2, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000]
+  return steps.find((step) => step >= raw) || Math.ceil(raw / 1000) * 1000
+}
+
+// Histogram of how many members fall into each total-points range this term -
+// one hue (the brand primary), bars grow low-to-high left-to-right, which is
+// the default/safe form for "compare magnitude" per the data-viz method:
+// sequential-by-position needs no categorical color since the x-axis itself
+// already carries the order.
+function PointsDistributionChart({ pointsData }: { pointsData: UserPointsBreakdown[] }) {
+  const [hovered, setHovered] = useState<number | null>(null)
+  const totals = pointsData.map((member) => Number(member.total_points) || 0)
+  const maxTotal = Math.max(0, ...totals)
+
+  if (pointsData.length === 0) return null
+
+  const bucketCount = 8
+  const bucketWidth = maxTotal > 0 ? niceStep(maxTotal / bucketCount) : 1
+  const bucketsNeeded = maxTotal > 0 ? Math.ceil(maxTotal / bucketWidth) : 1
+  const buckets = Array.from({ length: Math.max(1, bucketsNeeded) }, (_, i) => ({
+    min: i * bucketWidth,
+    max: (i + 1) * bucketWidth,
+    count: 0,
+  }))
+  totals.forEach((total) => {
+    const index = Math.min(buckets.length - 1, Math.floor(total / bucketWidth))
+    buckets[Math.max(0, index)].count += 1
+  })
+
+  const maxCount = Math.max(1, ...buckets.map((b) => b.count))
+  const yTicks = 4
+  // Round the axis ceiling up to a clean step so tick labels are whole,
+  // evenly-spaced numbers (0/2/4/6/8) instead of whatever maxCount/4 rounds to.
+  const countStep = Math.max(1, Math.round(niceStep(maxCount / yTicks)))
+  const axisMax = countStep * yTicks
+  const W = 100
+  const H = 46
+  const padLeft = 4
+  const padBottom = 7
+  const padTop = 4
+  const plotW = W - padLeft - 1
+  const plotH = H - padBottom - padTop
+  const gap = 0.6
+  const barW = buckets.length > 0 ? plotW / buckets.length - gap : 0
+
+  const fmt = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1))
+
+  return (
+    <div className="card-glow p-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Points distribution</h3>
+          <p className="text-xs text-muted-foreground">How many members fall in each points range this term</p>
+        </div>
+        <p className="text-xs text-muted-foreground">{pointsData.length} member{pointsData.length === 1 ? '' : 's'}</p>
+      </div>
+      <div className="relative mt-4">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }} preserveAspectRatio="none" role="img" aria-label="Histogram of member point totals">
+          {Array.from({ length: yTicks + 1 }, (_, i) => {
+            const y = padTop + (plotH / yTicks) * i
+            const value = axisMax - countStep * i
+            return (
+              <g key={i}>
+                <line x1={padLeft} x2={W - 1} y1={y} y2={y} stroke="hsl(var(--border))" strokeWidth={0.15} />
+                <text x={padLeft - 0.8} y={y} textAnchor="end" dominantBaseline="middle" fontSize={2.3} fill="hsl(var(--muted-foreground))">
+                  {value}
+                </text>
+              </g>
+            )
+          })}
+          {buckets.map((bucket, i) => {
+            const barH = (bucket.count / axisMax) * plotH
+            const x = padLeft + i * (barW + gap) + gap / 2
+            const y = padTop + (plotH - barH)
+            const isHovered = hovered === i
+            return (
+              <g key={i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} style={{ cursor: bucket.count > 0 ? 'pointer' : 'default' }}>
+                <rect x={x} y={padTop} width={Math.max(barW, 0.1)} height={plotH} fill="transparent" />
+                {bucket.count > 0 && (
+                  <rect
+                    x={x}
+                    y={y}
+                    width={Math.max(barW, 0.1)}
+                    height={Math.max(barH, 0.3)}
+                    rx={0.8}
+                    fill="hsl(var(--primary))"
+                    opacity={isHovered ? 1 : 0.85}
+                  />
+                )}
+                <text x={x + barW / 2} y={H - padBottom + 2.6} textAnchor="middle" fontSize={2.1} fill="hsl(var(--muted-foreground))">
+                  {fmt(bucket.min)}–{fmt(bucket.max)}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+        {hovered !== null && (
+          <div
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-md border border-primary/20 bg-card px-2.5 py-1.5 text-xs shadow-lg"
+            style={{ left: `${((hovered + 0.5) / buckets.length) * 100}%`, top: `${((padTop + (plotH - (buckets[hovered].count / axisMax) * plotH)) / H) * 100 - 2}%` }}
+          >
+            <p className="font-semibold text-foreground">{buckets[hovered].count} member{buckets[hovered].count === 1 ? '' : 's'}</p>
+            <p className="text-muted-foreground">{fmt(buckets[hovered].min)}–{fmt(buckets[hovered].max)} pts</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Ranked horizontal bars, one per category, largest first - the data-viz
+// method's answer for "compare parts with each other": a single hue on one
+// shared baseline compares more exactly than a stacked/segmented bar would,
+// and identity comes from the row label, not color, so no legend is needed.
+function PointsByCategoryChart({ pointsData }: { pointsData: UserPointsBreakdown[] }) {
+  const [hovered, setHovered] = useState<string | null>(null)
+  const categories = [
+    { key: 'membership_points', label: 'Membership' },
+    { key: 'professional_points', label: 'Professional Education' },
+    { key: 'social_points', label: 'Social' },
+    { key: 'philanthropy_points', label: 'Philanthropy' },
+  ] as const
+
+  const totals = categories
+    .map((cat) => ({
+      label: cat.label,
+      value: pointsData.reduce((sum, member) => sum + (Number((member as any)[cat.key]) || 0), 0),
+    }))
+    .sort((a, b) => b.value - a.value)
+
+  const maxValue = Math.max(1, ...totals.map((t) => t.value))
+
+  return (
+    <div className="card-glow p-5">
+      <h3 className="text-sm font-semibold text-foreground">Points by category</h3>
+      <p className="text-xs text-muted-foreground">Total points awarded this term, all members combined</p>
+      <div className="mt-5 space-y-3.5">
+        {totals.map((row) => {
+          const widthPct = (row.value / maxValue) * 100
+          const isHovered = hovered === row.label
+          return (
+            <div key={row.label} onMouseEnter={() => setHovered(row.label)} onMouseLeave={() => setHovered(null)}>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-foreground">{row.label}</span>
+                <span className="font-mono text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>{row.value.toLocaleString()} pts</span>
+              </div>
+              <div className="mt-1.5 h-3.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full transition-[width]"
+                  style={{ width: `${Math.max(widthPct, row.value > 0 ? 1.5 : 0)}%`, background: 'hsl(var(--primary))', opacity: isHovered ? 1 : 0.85 }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // Points Breakdown Tab Component
 function PointsBreakdownTab() {
   const { profile } = useAuth()
@@ -2238,6 +2401,14 @@ function PointsBreakdownTab() {
       {!requirementsPublished && !loading && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Point requirements are still in draft. Totals are current, but no member is marked above or below a minimum yet.
+        </div>
+      )}
+
+      {/* Distribution charts */}
+      {!loading && pointsData.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <PointsDistributionChart pointsData={pointsData} />
+          <PointsByCategoryChart pointsData={pointsData} />
         </div>
       )}
 
