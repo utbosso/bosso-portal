@@ -1,16 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
 import type { Event, EventCategory, EventType, Task } from '@/types/database.types'
-import type { UserOption } from '@/components/UserSearch'
+import UserSearch, { type UserOption } from '@/components/UserSearch'
 import MemberGroupPicker from '@/components/MemberGroupPicker'
 import SectionPageHeader from '@/components/SectionPageHeader'
 import SendEmailModal, { type SendEmailRequest } from '@/components/SendEmailModal'
 import { EVENT_CATEGORIES, getEventTypesByCategory, getDefaultPoints } from '@/lib/bosso-points'
+import { POINT_CATEGORY_OPTIONS } from '@/lib/semester'
 import {
   CalendarDays,
   ChevronLeft,
@@ -28,6 +28,10 @@ import {
   CheckSquare,
   Info,
   BadgeCheck,
+  Camera,
+  Loader2,
+  Send,
+  CheckCircle2,
 } from 'lucide-react'
 import {
   canAccessAudience,
@@ -110,6 +114,16 @@ export default function CalendarPage() {
   const [memberGroups, setMemberGroups] = useState<CommunicationMemberGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [emailRequest, setEmailRequest] = useState<SendEmailRequest | null>(null)
+  const [requestPointsEvent, setRequestPointsEvent] = useState<Event | null>(null)
+  const [requestMemberOptions, setRequestMemberOptions] = useState<UserOption[]>([])
+  const [requestBeneficiaryIds, setRequestBeneficiaryIds] = useState<string[]>([])
+  const [requestedPoints, setRequestedPoints] = useState('')
+  const [requestCategory, setRequestCategory] = useState<EventCategory>('membership')
+  const [requestNote, setRequestNote] = useState('')
+  const [requestProof, setRequestProof] = useState<File | null>(null)
+  const [requestSubmitting, setRequestSubmitting] = useState(false)
+  const [requestError, setRequestError] = useState('')
+  const [requestSubmitted, setRequestSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncNotice, setSyncNotice] = useState<string | null>(null)
 
@@ -303,6 +317,23 @@ export default function CalendarPage() {
 
     void fetchPeopleOptions()
   }, [access?.term_id, canManage])
+
+  // Separate from fetchPeopleOptions above (which is canManage-gated, for
+  // event audience targeting) - any member can request points for
+  // themselves or someone else, so this loads regardless of role.
+  useEffect(() => {
+    if (!user) return
+    const loadRequestMembers = async () => {
+      try {
+        const { members } = await fetchCurrentMemberDirectory()
+        setRequestMemberOptions(members.filter((member) => member.role !== 'admin'))
+      } catch (directoryError) {
+        console.error('Current-semester members could not be loaded for point requests', directoryError)
+        setRequestMemberOptions([])
+      }
+    }
+    void loadRequestMembers()
+  }, [access?.term_id, user])
 
   // Persist form state to sessionStorage
   useEffect(() => {
@@ -852,6 +883,99 @@ export default function CalendarPage() {
 
   const sendCalendarInvites = (eventId: string) => setEmailRequest({ kind: 'event', id: eventId })
 
+  const openRequestPoints = (event: Event) => {
+    setRequestPointsEvent(event)
+    setRequestBeneficiaryIds(user && requestMemberOptions.some((member) => member.id === user.id) ? [user.id] : [])
+    setRequestedPoints(event.point_value ? String(event.point_value) : '')
+    setRequestCategory(event.event_category || 'membership')
+    setRequestNote(`Attended: ${event.title}`)
+    setRequestProof(null)
+    setRequestError('')
+    setRequestSubmitted(false)
+  }
+
+  const closeRequestPoints = () => {
+    setRequestPointsEvent(null)
+    setRequestSubmitted(false)
+  }
+
+  // Mirrors the Points page's own submitRequest (including the
+  // proof-upload step afterward), just scoped to one fixed event instead
+  // of a dropdown - this is opened from a specific event's Calendar card,
+  // so there's nothing to pick. Stays on Calendar instead of navigating
+  // away, and shows a brief confirmation in place rather than redirecting.
+  const submitRequestPoints = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!requestPointsEvent || !user) return
+    const approvedIds = new Set(requestMemberOptions.map((member) => member.id))
+    const beneficiaries = Array.from(new Set(requestBeneficiaryIds)).filter((id) => approvedIds.has(id))
+    if (beneficiaries.length === 0) {
+      setRequestError('Select at least one member approved for the current semester.')
+      return
+    }
+    const points = Number(requestedPoints)
+    if (!Number.isFinite(points) || points <= 0 || points > 1000) {
+      setRequestError('Requested points must be between 0.5 and 1,000.')
+      return
+    }
+    if (requestProof && (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(requestProof.type) || requestProof.size > 10 * 1024 * 1024)) {
+      setRequestError('Proof must be a JPG, PNG, WebP, or PDF no larger than 10 MB.')
+      return
+    }
+
+    setRequestSubmitting(true)
+    setRequestError('')
+    const response = await fetch('/api/points/submit-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        termId: access?.term_id,
+        beneficiaryIds: beneficiaries,
+        eventId: requestPointsEvent.id,
+        requestedPoints: points,
+        category: requestCategory,
+        note: requestNote.trim(),
+      }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result?.pointRequests?.length) {
+      setRequestError(result?.error || 'The request could not be created.')
+      setRequestSubmitting(false)
+      return
+    }
+    const pointRequests = result.pointRequests
+
+    if (requestProof) {
+      const safeName = requestProof.name.replace(/[^a-zA-Z0-9._-]/g, '-')
+      const proofErrors: string[] = []
+      for (const pointRequest of pointRequests) {
+        const storagePath = `${user.id}/${pointRequest.id}/${crypto.randomUUID()}-${safeName}`
+        const { error: uploadError } = await supabase.storage.from('point-request-proof').upload(storagePath, requestProof)
+        if (uploadError) {
+          proofErrors.push(uploadError.message)
+          continue
+        }
+        const { error: attachmentError } = await supabase.from('point_request_attachments').insert({
+          request_id: pointRequest.id,
+          user_id: user.id,
+          storage_path: storagePath,
+          file_name: requestProof.name,
+          mime_type: requestProof.type,
+          file_size_bytes: requestProof.size,
+        })
+        if (attachmentError) proofErrors.push(attachmentError.message)
+      }
+      if (proofErrors.length) {
+        setRequestError(`The request was saved, but the proof upload failed: ${proofErrors[0]}`)
+        setRequestSubmitting(false)
+        return
+      }
+    }
+
+    setRequestSubmitting(false)
+    setRequestSubmitted(true)
+  }
+
   const renderEventDetailCard = (event: Event, showTitle = true) => (
     <article key={event.id} className="overflow-hidden rounded-2xl border border-border bg-card">
       <div className="space-y-4 p-4 sm:p-5">
@@ -900,9 +1024,9 @@ export default function CalendarPage() {
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
         {new Date(event.start_at).getTime() <= Date.now() && (
-          <Link href={`/points?eventId=${event.id}`} className="portal-button-secondary small">
+          <button type="button" onClick={() => openRequestPoints(event)} className="portal-button-secondary small">
             <BadgeCheck className="h-4 w-4" /> Request points
-          </Link>
+          </button>
         )}
         <button
           type="button"
@@ -1803,6 +1927,50 @@ export default function CalendarPage() {
         </div>
       </div>
       <SendEmailModal request={emailRequest} onClose={() => setEmailRequest(null)} />
+
+      {requestPointsEvent && (
+        <div className="portal-modal-backdrop" onMouseDown={closeRequestPoints}>
+          {requestSubmitted ? (
+            <div onMouseDown={(event) => event.stopPropagation()} className="portal-modal text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-primary" />
+              <h2 className="mt-4 text-lg font-semibold">Request sent</h2>
+              <p className="mt-2 text-sm text-muted-foreground">It's in the review queue now. You can keep browsing the calendar.</p>
+              <div className="portal-form-actions"><button type="button" onClick={closeRequestPoints} className="portal-button justify-center">Done</button></div>
+            </div>
+          ) : (
+            <form onSubmit={submitRequestPoints} onMouseDown={(event) => event.stopPropagation()} className="portal-modal">
+              <div className="portal-form-header">
+                <div>
+                  <p className="portal-eyebrow">Member submission</p>
+                  <h2>Request points for {requestPointsEvent.title}</h2>
+                  <p>Submit for yourself or for other approved members who earned the same points.</p>
+                </div>
+                <button type="button" onClick={closeRequestPoints} className="portal-icon-button"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="mt-6">
+                <label className="portal-label">Who earned these points?</label>
+                <UserSearch
+                  users={requestMemberOptions}
+                  value={requestBeneficiaryIds}
+                  onChange={(value) => setRequestBeneficiaryIds(value as string[])}
+                  placeholder="Search approved current-semester members..."
+                  multiple
+                  selectionDisplayLimit={6}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">One review request will be created per selected person, with the same note and proof attached.</p>
+              </div>
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <label><span className="portal-label">Points requested</span><input type="number" min="0.5" max="1000" step="0.5" value={requestedPoints} onChange={(event) => setRequestedPoints(event.target.value)} className="portal-input w-full" required /></label>
+                <label><span className="portal-label">Suggested category</span><select value={requestCategory} onChange={(event) => setRequestCategory(event.target.value as EventCategory)} className="portal-input w-full">{POINT_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+              </div>
+              <label className="mt-5 block"><span className="portal-label">What did they complete?</span><textarea value={requestNote} onChange={(event) => setRequestNote(event.target.value)} minLength={3} maxLength={4000} rows={5} className="portal-input w-full resize-none" placeholder="Include the event, date, contribution, and any context the reviewer needs." required /></label>
+              <label className="mt-5 block rounded-xl border border-dashed border-border p-5 text-center hover:border-primary"><Camera className="mx-auto h-6 w-6 text-muted-foreground" /><span className="mt-2 block text-sm font-medium">{requestProof ? requestProof.name : 'Add a photo or PDF (optional)'}</span><span className="mt-1 block text-xs text-muted-foreground">JPG, PNG, WebP, or PDF · 10 MB max</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => setRequestProof(event.target.files?.[0] || null)} /></label>
+              {requestError && <p className="mt-4 text-sm text-red-700">{requestError}</p>}
+              <div className="portal-form-actions"><button type="button" onClick={closeRequestPoints} className="portal-button-secondary justify-center">Cancel</button><button disabled={requestSubmitting} className="portal-button justify-center">{requestSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Submit request</button></div>
+            </form>
+          )}
+        </div>
+      )}
     </div>
   )
 }
