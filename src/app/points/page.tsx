@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   BadgeCheck,
   Camera,
@@ -62,6 +63,9 @@ type RequestableEvent = {
 export default function PointsPage() {
   const { user, profile, loading: authLoading } = useAuth()
   const { access, schemaReady } = usePortalAccess(user?.id, authLoading)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const appliedEventParamRef = useRef(false)
   const [summary, setSummary] = useState<MemberTermPointSummary | null>(null)
   const [rules, setRules] = useState<TermPointRule[]>([])
   const [rulesPublished, setRulesPublished] = useState(false)
@@ -251,6 +255,25 @@ export default function PointsPage() {
     }
     void loadRequestableEvents()
   }, [activeTermId, schemaReady, profile, user?.id])
+
+  // "Request points" on an event's Calendar card links here as
+  // /points?eventId=... - once requestableEvents has loaded, open the form
+  // pre-filled for that event. Only ever consumed once per page load, so
+  // the form doesn't keep reopening every time requestableEvents refreshes.
+  useEffect(() => {
+    if (appliedEventParamRef.current) return
+    const eventId = searchParams.get('eventId')
+    if (!eventId || requestableEvents.length === 0) return
+    appliedEventParamRef.current = true
+    const match = requestableEvents.find((item) => item.id === eventId)
+    if (match) {
+      setShowRequestForm(true)
+      handleEventSelect(eventId)
+    } else {
+      setError("That event isn't available to request points for - it may be upcoming, archived, or outside your audience.")
+    }
+    router.replace('/points', { scroll: false })
+  }, [requestableEvents, searchParams, router])
 
   useEffect(() => {
     if (!activeTermId || !user || !schemaReady) return

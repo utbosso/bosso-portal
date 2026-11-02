@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { usePortalAccess } from '@/hooks/usePortalAccess'
@@ -26,6 +27,7 @@ import {
   Tag,
   CheckSquare,
   Info,
+  BadgeCheck,
 } from 'lucide-react'
 import {
   canAccessAudience,
@@ -897,6 +899,11 @@ export default function CalendarPage() {
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
+        {new Date(event.start_at).getTime() <= Date.now() && (
+          <Link href={`/points?eventId=${event.id}`} className="portal-button-secondary small">
+            <BadgeCheck className="h-4 w-4" /> Request points
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => addToGoogleCalendar(event)}
