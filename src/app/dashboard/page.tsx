@@ -321,9 +321,9 @@ export default function DashboardPage() {
               <div className="w-12 h-12 rounded-lg bg-primary flex items-center justify-center">
                 <Trophy className="w-6 h-6 text-primary-foreground" />
               </div>
-              <span className="text-xs text-primary font-medium">
-                {requiredPoints > 0 ? `${requiredPoints} required` : 'Requirements being finalized'}
-              </span>
+              {requiredPoints > 0 && (
+                <span className="text-xs text-primary font-medium">{requiredPoints} required</span>
+              )}
             </div>
             <div>
               <p className="text-3xl font-bold text-foreground">{totalPoints}</p>
